@@ -1,0 +1,143 @@
+{
+  "invoices": [
+    {
+      "invoiceNo": "INV-2025-001",
+      "date": "2025-07-15",
+      "customerName": "ABC Trading Sdn Bhd",
+      "status": "Posted",
+      "lineItems": [
+        {
+          "sku": "OIL-PKO-20L",
+          "description": "Palm Kernel Oil 20L Drum",
+          "quantity": 50,
+          "unitPrice": 125.00,
+          "total": 6250.00
+        },
+        {
+          "sku": "OIL-CPO-19L",
+          "description": "Crude Palm Oil 19L Tin",
+          "quantity": 30,
+          "unitPrice": 98.50,
+          "total": 2955.00
+        }
+      ],
+      "subtotal": 9205.00,
+      "tax": 552.30,
+      "grandTotal": 9757.30
+    },
+    {
+      "invoiceNo": "INV-2025-002",
+      "date": "2025-07-18",
+      "customerName": "XYZ Industries Ltd",
+      "status": "Posted",
+      "lineItems": [
+        {
+          "sku": "OIL-CPO-19L",
+          "description": "Crude Palm Oil 19L Tin",
+          "quantity": 100,
+          "unitPrice": 98.50,
+          "total": 9850.00
+        },
+        {
+          "sku": "OIL-RBD-25L",
+          "description": "RBD Palm Oil 25L Jerry Can",
+          "quantity": 20,
+          "unitPrice": 142.00,
+          "total": 2840.00
+        },
+        {
+          "sku": "SOAP-BASE-1KG",
+          "description": "Soap Base Granules 1kg",
+          "quantity": 200,
+          "unitPrice": 8.50,
+          "total": 1700.00
+        }
+      ],
+      "subtotal": 14390.00,
+      "tax": 863.40,
+      "grandTotal": 15253.40
+    },
+    {
+      "invoiceNo": "INV-2025-003",
+      "date": "2025-07-22",
+      "customerName": "ABC Trading Sdn Bhd",
+      "status": "Posted",
+      "lineItems": [
+        {
+          "sku": "OIL-PKO-20L",
+          "description": "Palm Kernel Oil 20L Drum",
+          "quantity": 40,
+          "unitPrice": 125.00,
+          "total": 5000.00
+        },
+        {
+          "sku": "SOAP-BASE-1KG",
+          "description": "Soap Base Granules 1kg",
+          "quantity": 150,
+          "unitPrice": 8.50,
+          "total": 1275.00
+        }
+      ],
+      "subtotal": 6275.00,
+      "tax": 376.50,
+      "grandTotal": 6651.50
+    },
+    {
+      "invoiceNo": "INV-2025-004",
+      "date": "2025-07-28",
+      "customerName": "Maju Jaya Enterprise",
+      "status": "Posted",
+      "lineItems": [
+        {
+          "sku": "OIL-RBD-25L",
+          "description": "RBD Palm Oil 25L Jerry Can",
+          "quantity": 60,
+          "unitPrice": 142.00,
+          "total": 8520.00
+        },
+        {
+          "sku": "OIL-CPO-19L",
+          "description": "Crude Palm Oil 19L Tin",
+          "quantity": 25,
+          "unitPrice": 98.50,
+          "total": 2462.50
+        }
+      ],
+      "subtotal": 10982.50,
+      "tax": 658.95,
+      "grandTotal": 11641.45
+    },
+    {
+      "invoiceNo": "INV-2025-005",
+      "date": "2025-08-01",
+      "customerName": "XYZ Industries Ltd",
+      "status": "Posted",
+      "lineItems": [
+        {
+          "sku": "OIL-PKO-20L",
+          "description": "Palm Kernel Oil 20L Drum",
+          "quantity": 80,
+          "unitPrice": 125.00,
+          "total": 10000.00
+        },
+        {
+          "sku": "OIL-RBD-25L",
+          "description": "RBD Palm Oil 25L Jerry Can",
+          "quantity": 45,
+          "unitPrice": 142.00,
+          "total": 6390.00
+        },
+        {
+          "sku": "SOAP-BASE-1KG",
+          "description": "Soap Base Granules 1kg",
+          "quantity": 300,
+          "unitPrice": 8.50,
+          "total": 2550.00
+        }
+      ],
+      "subtotal": 18940.00,
+      "tax": 1136.40,
+      "grandTotal": 20076.40
+    }
+  ]
+}

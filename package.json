@@ -1,0 +1,17 @@
+{
+  "name": "autocount-pwa-dashboard",
+  "version": "1.0.0",
+  "description": "AutoCount Sales Dashboard - iPhone PWA",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev",
+    "build": "echo 'No build step required - static frontend'"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
