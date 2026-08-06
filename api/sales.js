@@ -103,20 +103,26 @@ function aggregateBySKU(invoices) {
           totalRevenue: 0,
           totalUnits: 0,
           orderCount: 0,
-          totalCost: 0
+          totalCost: 0,
+          customerQuantities: {}
         };
       }
       skuMap[item.sku].totalRevenue = Math.round((skuMap[item.sku].totalRevenue + item.total) * 100) / 100;
       skuMap[item.sku].totalUnits = Math.round((skuMap[item.sku].totalUnits + item.quantity) * 100) / 100;
       skuMap[item.sku].orderCount += 1;
       skuMap[item.sku].totalCost = Math.round((skuMap[item.sku].totalCost + item.unitPrice * item.quantity) * 100) / 100;
+      skuMap[item.sku].customerQuantities[invoice.customerName] =
+        (skuMap[item.sku].customerQuantities[invoice.customerName] || 0) + item.quantity;
     }
   }
 
-  return Object.values(skuMap).map(sku => ({
+  return Object.values(skuMap).map(({ customerQuantities, ...sku }) => ({
     ...sku,
     totalRevenue: Math.round(sku.totalRevenue * 100) / 100,
-    avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0
+    avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0,
+    customers: Object.entries(customerQuantities)
+      .map(([name, quantity]) => ({ name, quantity: Math.round(quantity * 100) / 100 }))
+      .sort((a, b) => b.quantity - a.quantity)
   })).sort((a, b) => b.totalRevenue - a.totalRevenue);
 }
 
@@ -202,3 +208,5 @@ module.exports = async (req, res) => {
     });
   }
 };
+
+module.exports.aggregateBySKU = aggregateBySKU;
