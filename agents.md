@@ -56,3 +56,5 @@ autocount-pwa-dashboard/
 
 └── AGENTS.md
 
+
+## Imported Claude Cowork project instructions

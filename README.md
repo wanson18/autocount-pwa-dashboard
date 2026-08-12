@@ -36,7 +36,7 @@ autocount-pwa-dashboard/
 ├── .env.example           # Template for API credentials
 ├── vercel.json            # Vercel deployment config
 ├── package.json           # Dependencies
-└── AGENTS.md              # Project blueprint
+└── agents.md              # Project blueprint
 ```
 
 ## Setup

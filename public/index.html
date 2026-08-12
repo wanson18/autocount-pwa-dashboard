@@ -45,6 +45,7 @@
     </header>
 
     <div id="lastUpdated" class="text-xs text-slate-500 mt-2 text-right">Last updated: --</div>
+    <div id="errorBanner" class="hidden mt-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs"></div>
 
     <div class="mt-4 bg-slate-800 rounded-xl p-3 border border-slate-700">
       <div class="flex items-center gap-2 mb-2">
@@ -127,6 +128,13 @@
   <script>
     let barChart, doughnutChart, allSKUData = [];
     let currentStartDate = '', currentEndDate = '';
+    let latestRequestId = 0;
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -136,10 +144,16 @@
       });
     }
 
-    function getToday() { return new Date().toISOString().slice(0, 10); }
-    function getYesterday() { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); }
-    function getDaysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
-    function getMonthStart() { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); }
+    function toLocalISODate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    function getToday() { return toLocalISODate(new Date()); }
+    function getYesterday() { const d = new Date(); d.setDate(d.getDate() - 1); return toLocalISODate(d); }
+    function getDaysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toLocalISODate(d); }
+    function getMonthStart() { const d = new Date(); d.setDate(1); return toLocalISODate(d); }
 
     function setActivePreset(id) {
       document.querySelectorAll('.preset-btn').forEach(b => {
@@ -209,7 +223,9 @@
     updateOnlineStatus();
 
     async function fetchData(startDate, endDate) {
+      const requestId = ++latestRequestId;
       const btn = document.getElementById('refreshBtn');
+      const errorBanner = document.getElementById('errorBanner');
       btn.classList.add('animate-spin');
       try {
         const today = getToday();
@@ -217,12 +233,23 @@
         const e = endDate || today;
         const res = await fetch(`/api/sales?startDate=${s}&endDate=${e}`);
         const data = await res.json();
-        if (data.success) renderDashboard(data);
+        if (requestId !== latestRequestId) return;
+        if (data.success) {
+          errorBanner.classList.add('hidden');
+          renderDashboard(data);
+        } else {
+          errorBanner.textContent = data.error || 'Failed to load sales data.';
+          errorBanner.classList.remove('hidden');
+        }
       } catch (e) {
         console.error('Fetch error:', e);
+        if (requestId !== latestRequestId) return;
+        errorBanner.textContent = 'Network error — could not reach the server.';
+        errorBanner.classList.remove('hidden');
       } finally {
-        btn.classList.remove('animate-spin');
-        document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+        if (requestId === latestRequestId) {
+          btn.classList.remove('animate-spin');
+        }
       }
     }
 
@@ -230,7 +257,8 @@
       const dr = data.dateRange;
       if (dr) {
         const label = dr.startDate === dr.endDate ? dr.startDate : `${dr.startDate} to ${dr.endDate}`;
-        document.getElementById('lastUpdated').textContent = `Viewing: ${label} | Updated: ${new Date().toLocaleTimeString()}`;
+        const demoNote = data.dataSource === 'mock' ? ' | Demo data (live API unavailable)' : '';
+        document.getElementById('lastUpdated').textContent = `Viewing: ${label} | Updated: ${new Date().toLocaleTimeString()}${demoNote}`;
       }
 
       document.getElementById('kpiRevenueValue').textContent = 'RM ' + data.kpis.totalRevenue.toLocaleString('en-MY', {minimumFractionDigits: 2});
@@ -286,7 +314,7 @@
           labels: skus.map(s => s.description ? s.description.substring(0, 20) : s.sku),
           datasets: [{
             data: skus.map(s => s.totalUnits),
-            backgroundColor: colors.slice(0, skus.length),
+            backgroundColor: skus.map((_, i) => colors[i % colors.length]),
             borderWidth: 0
           }]
         },
@@ -311,8 +339,8 @@
       tbody.innerHTML = skus.map(s => `
         <tr class="hover:bg-slate-750">
           <td class="px-3 py-2 text-xs">
-            <div class="text-white font-medium">${s.description || s.sku}</div>
-            <div class="text-slate-500 text-[10px] mt-0.5">${s.sku}</div>
+            <div class="text-white font-medium">${escapeHtml(s.description || s.sku)}</div>
+            <div class="text-slate-500 text-[10px] mt-0.5">${escapeHtml(s.sku)}</div>
           </td>
           <td class="px-3 py-2 text-right">${s.totalUnits.toLocaleString()}</td>
           <td class="px-3 py-2 text-right text-emerald-400">RM ${s.totalRevenue.toLocaleString('en-MY', {minimumFractionDigits: 2})}</td>
@@ -329,8 +357,8 @@
       tbody.innerHTML = filtered.map(s => `
         <tr class="hover:bg-slate-750">
           <td class="px-3 py-2 text-xs">
-            <div class="text-white font-medium">${s.description || s.sku}</div>
-            <div class="text-slate-500 text-[10px] mt-0.5">${s.sku}</div>
+            <div class="text-white font-medium">${escapeHtml(s.description || s.sku)}</div>
+            <div class="text-slate-500 text-[10px] mt-0.5">${escapeHtml(s.sku)}</div>
           </td>
           <td class="px-3 py-2 text-right">${s.totalUnits.toLocaleString()}</td>
           <td class="px-3 py-2 text-right text-emerald-400">RM ${s.totalRevenue.toLocaleString('en-MY', {minimumFractionDigits: 2})}</td>

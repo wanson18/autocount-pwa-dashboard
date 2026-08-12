@@ -3,15 +3,21 @@ const path = require('path');
 const axios = require('axios');
 require('dotenv').config();
 
-const cacheStore = {};
+const cacheStore = Object.create(null);
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function getCacheTTL() {
-  const minutes = parseInt(process.env.CACHE_TTL_MINUTES, 10) || 10;
+  const parsed = parseInt(process.env.CACHE_TTL_MINUTES, 10);
+  const minutes = Number.isNaN(parsed) ? 10 : parsed;
   return minutes * 60 * 1000;
 }
 
 function getCacheKey(startDate, endDate) {
   return `${startDate}_${endDate}`;
+}
+
+function isValidDate(value) {
+  return typeof value === 'string' && DATE_RE.test(value);
 }
 
 function isCacheValid(key) {
@@ -43,8 +49,8 @@ async function fetchAllInvoices(startDate, endDate) {
 
   try {
     while (true) {
-      const url = `${baseUrl}/${accountBookId}/invoice/listing?page=${page}&startDate=${startDate}&endDate=${endDate}`;
-      const response = await axios.get(url, { headers, timeout: 15000 });
+      const url = `${baseUrl}/${accountBookId}/invoice/listing`;
+      const response = await axios.get(url, { headers, timeout: 15000, params: { page, startDate, endDate } });
 
       if (response.status === 200 && response.data?.data) {
         allInvoices.push(...response.data.data);
@@ -92,7 +98,7 @@ function loadMockData() {
 }
 
 function aggregateBySKU(invoices) {
-  const skuMap = {};
+  const skuMap = Object.create(null);
 
   for (const invoice of invoices) {
     for (const item of (invoice.lineItems || [])) {
@@ -123,11 +129,11 @@ function aggregateBySKU(invoices) {
 function computeKPIs(invoices) {
   let totalRevenue = 0;
   let totalItems = 0;
-  const customerMap = {};
+  const customerMap = Object.create(null);
 
   for (const invoice of invoices) {
     totalRevenue = Math.round((totalRevenue + invoice.grandTotal) * 100) / 100;
-    for (const item of invoice.lineItems) {
+    for (const item of (invoice.lineItems || [])) {
       totalItems += item.quantity;
     }
     customerMap[invoice.customerName] = (customerMap[invoice.customerName] || 0) + invoice.grandTotal;
@@ -158,12 +164,20 @@ module.exports = async (req, res) => {
     const startDate = req.query.startDate || today;
     const endDate = req.query.endDate || today;
 
+    if (!isValidDate(startDate) || !isValidDate(endDate)) {
+      return res.status(400).json({
+        success: false,
+        error: 'startDate and endDate must be in YYYY-MM-DD format'
+      });
+    }
+
     const cacheKey = getCacheKey(startDate, endDate);
     if (isCacheValid(cacheKey)) {
-      return res.status(200).json(cacheStore[cacheKey].data);
+      return res.status(200).json({ ...cacheStore[cacheKey].data, cached: true });
     }
 
     let invoices;
+    let dataSource = 'live';
     const useMock = process.env.USE_MOCK_DATA === 'true';
 
     if (!useMock) {
@@ -176,6 +190,7 @@ module.exports = async (req, res) => {
     if (!invoices) {
       const mockData = loadMockData();
       invoices = mockData.invoices || mockData;
+      dataSource = 'mock';
     }
 
     const aggregated = aggregateBySKU(invoices);
@@ -184,6 +199,7 @@ module.exports = async (req, res) => {
     const result = {
       success: true,
       cached: false,
+      dataSource,
       timestamp: new Date().toISOString(),
       dateRange: { startDate, endDate },
       kpis,
