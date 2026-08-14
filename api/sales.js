@@ -56,7 +56,7 @@ function isValidDate(value) {
 
 function isCacheValid(key) {
   const entry = cacheStore[key];
-  return entry && (Date.now() - entry.timestamp) < getCacheTTL();
+  return entry && Date.now() - entry.timestamp < getCacheTTL();
 }
 
 function getHeaders() {
@@ -112,7 +112,7 @@ function parseOutstandingAmount(rawValue) {
 }
 
 function normalizeInvoices(rawInvoices) {
-  return rawInvoices.map(inv => {
+  return rawInvoices.map((inv) => {
     const master = inv.master || inv;
     const details = inv.details || [];
 
@@ -122,7 +122,7 @@ function normalizeInvoices(rawInvoices) {
       customerName: master.debtorName || master.customerName || '',
       grandTotal: Math.round(parseFloat(master.finalTotal || master.total || 0) * 100) / 100,
       outstandingAmount: parseOutstandingAmount(master.outstandingAmount),
-      lineItems: details.map(d => ({
+      lineItems: details.map((d) => ({
         sku: d.productCode || d.sku || '',
         description: d.description || '',
         quantity: parseFloat(d.qty || d.quantity || 0),
@@ -143,7 +143,7 @@ function aggregateBySKU(invoices) {
   const skuMap = Object.create(null);
 
   for (const invoice of invoices) {
-    for (const item of (invoice.lineItems || [])) {
+    for (const item of invoice.lineItems || []) {
       if (!skuMap[item.sku]) {
         skuMap[item.sku] = {
           sku: item.sku,
@@ -152,26 +152,29 @@ function aggregateBySKU(invoices) {
           totalUnits: 0,
           orderCount: 0,
           totalCost: 0,
-          customerQuantities: {}
+          customerQuantities: {},
         };
       }
       skuMap[item.sku].totalRevenue = Math.round((skuMap[item.sku].totalRevenue + item.total) * 100) / 100;
       skuMap[item.sku].totalUnits = Math.round((skuMap[item.sku].totalUnits + item.quantity) * 100) / 100;
       skuMap[item.sku].orderCount += 1;
-      skuMap[item.sku].totalCost = Math.round((skuMap[item.sku].totalCost + item.unitPrice * item.quantity) * 100) / 100;
+      skuMap[item.sku].totalCost =
+        Math.round((skuMap[item.sku].totalCost + item.unitPrice * item.quantity) * 100) / 100;
       skuMap[item.sku].customerQuantities[invoice.customerName] =
         (skuMap[item.sku].customerQuantities[invoice.customerName] || 0) + item.quantity;
     }
   }
 
-  return Object.values(skuMap).map(({ customerQuantities, ...sku }) => ({
-    ...sku,
-    totalRevenue: Math.round(sku.totalRevenue * 100) / 100,
-    avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0,
-    customers: Object.entries(customerQuantities)
-      .map(([name, quantity]) => ({ name, quantity: Math.round(quantity * 100) / 100 }))
-      .sort((a, b) => b.quantity - a.quantity)
-  })).sort((a, b) => b.totalRevenue - a.totalRevenue);
+  return Object.values(skuMap)
+    .map(({ customerQuantities, ...sku }) => ({
+      ...sku,
+      totalRevenue: Math.round(sku.totalRevenue * 100) / 100,
+      avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0,
+      customers: Object.entries(customerQuantities)
+        .map(([name, quantity]) => ({ name, quantity: Math.round(quantity * 100) / 100 }))
+        .sort((a, b) => b.quantity - a.quantity),
+    }))
+    .sort((a, b) => b.totalRevenue - a.totalRevenue);
 }
 
 function computeKPIs(invoices) {
@@ -181,7 +184,7 @@ function computeKPIs(invoices) {
 
   for (const invoice of invoices) {
     totalRevenue = Math.round((totalRevenue + invoice.grandTotal) * 100) / 100;
-    for (const item of (invoice.lineItems || [])) {
+    for (const item of invoice.lineItems || []) {
       totalItems += item.quantity;
     }
     customerMap[invoice.customerName] = (customerMap[invoice.customerName] || 0) + invoice.grandTotal;
@@ -194,7 +197,7 @@ function computeKPIs(invoices) {
     totalInvoices: invoices.length,
     totalItemsSold: totalItems,
     avgOrderValue: invoices.length ? Math.round((totalRevenue / invoices.length) * 100) / 100 : 0,
-    topCustomer: topCustomer ? { name: topCustomer[0], revenue: Math.round(topCustomer[1] * 100) / 100 } : null
+    topCustomer: topCustomer ? { name: topCustomer[0], revenue: Math.round(topCustomer[1] * 100) / 100 } : null,
   };
 }
 
@@ -211,7 +214,7 @@ function computePaymentSummary(invoices) {
     partial: { count: 0, outstanding: 0 },
     unpaid: { count: 0, total: 0 },
     unknown: { count: 0, total: 0 },
-    stillUnpaidTotal: 0
+    stillUnpaidTotal: 0,
   };
 
   for (const invoice of invoices) {
@@ -254,7 +257,7 @@ module.exports = async (req, res) => {
     if (!isValidDate(startDate) || !isValidDate(endDate)) {
       return res.status(400).json({
         success: false,
-        error: 'startDate and endDate must be in YYYY-MM-DD format'
+        error: 'startDate and endDate must be in YYYY-MM-DD format',
       });
     }
 
@@ -280,9 +283,9 @@ module.exports = async (req, res) => {
       dataSource = 'mock';
     }
 
-    invoices = invoices.map(invoice => ({
+    invoices = invoices.map((invoice) => ({
       ...invoice,
-      paymentStatus: classifyPaymentStatus(invoice.grandTotal, invoice.outstandingAmount)
+      paymentStatus: classifyPaymentStatus(invoice.grandTotal, invoice.outstandingAmount),
     }));
 
     const aggregated = aggregateBySKU(invoices);
@@ -298,15 +301,15 @@ module.exports = async (req, res) => {
       kpis,
       topSKUs: aggregated.slice(0, 5),
       skuBreakdown: aggregated,
-      invoices: invoices.map(invoice => ({
+      invoices: invoices.map((invoice) => ({
         docNo: invoice.docNo,
         docDate: invoice.docDate,
         customerName: invoice.customerName,
         grandTotal: invoice.grandTotal,
         outstandingAmount: invoice.outstandingAmount,
-        paymentStatus: invoice.paymentStatus
+        paymentStatus: invoice.paymentStatus,
       })),
-      paymentSummary
+      paymentSummary,
     };
 
     cacheStore[cacheKey] = { data: result, timestamp: Date.now() };
@@ -316,7 +319,7 @@ module.exports = async (req, res) => {
     console.error('Sales API error:', error);
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
     });
   }
 };

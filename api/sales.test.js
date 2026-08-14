@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateBySKU, getLocalToday, normalizeInvoices, parseOutstandingAmount, classifyPaymentStatus, computePaymentSummary } = require('./sales.js');
+const {
+  aggregateBySKU,
+  getLocalToday,
+  normalizeInvoices,
+  parseOutstandingAmount,
+  classifyPaymentStatus,
+  computePaymentSummary,
+} = require('./sales.js');
 
 test('aggregateBySKU groups quantity sold per customer, sorted descending', () => {
   const invoices = [
@@ -8,23 +15,23 @@ test('aggregateBySKU groups quantity sold per customer, sorted descending', () =
       customerName: 'ABC Trading Sdn Bhd',
       grandTotal: 6250,
       lineItems: [
-        { sku: 'OIL-PKO-20L', description: 'Palm Kernel Oil 20L Drum', quantity: 50, unitPrice: 125, total: 6250 }
-      ]
+        { sku: 'OIL-PKO-20L', description: 'Palm Kernel Oil 20L Drum', quantity: 50, unitPrice: 125, total: 6250 },
+      ],
     },
     {
       customerName: 'XYZ Industries Ltd',
       grandTotal: 3750,
       lineItems: [
-        { sku: 'OIL-PKO-20L', description: 'Palm Kernel Oil 20L Drum', quantity: 30, unitPrice: 125, total: 3750 }
-      ]
+        { sku: 'OIL-PKO-20L', description: 'Palm Kernel Oil 20L Drum', quantity: 30, unitPrice: 125, total: 3750 },
+      ],
     },
     {
       customerName: 'ABC Trading Sdn Bhd',
       grandTotal: 1250,
       lineItems: [
-        { sku: 'OIL-PKO-20L', description: 'Palm Kernel Oil 20L Drum', quantity: 10, unitPrice: 125, total: 1250 }
-      ]
-    }
+        { sku: 'OIL-PKO-20L', description: 'Palm Kernel Oil 20L Drum', quantity: 10, unitPrice: 125, total: 1250 },
+      ],
+    },
   ];
 
   const [result] = aggregateBySKU(invoices);
@@ -32,7 +39,7 @@ test('aggregateBySKU groups quantity sold per customer, sorted descending', () =
   assert.equal(result.sku, 'OIL-PKO-20L');
   assert.deepEqual(result.customers, [
     { name: 'ABC Trading Sdn Bhd', quantity: 60 },
-    { name: 'XYZ Industries Ltd', quantity: 30 }
+    { name: 'XYZ Industries Ltd', quantity: 30 },
   ]);
 });
 
@@ -101,10 +108,10 @@ test('normalizeInvoices reads outstandingAmount from the raw invoice master reco
         docDate: '2026-08-14',
         debtorName: 'ABC Trading Sdn Bhd',
         finalTotal: '1000.00',
-        outstandingAmount: '250.00'
+        outstandingAmount: '250.00',
       },
-      details: []
-    }
+      details: [],
+    },
   ];
 
   const [result] = normalizeInvoices(rawInvoices);
@@ -120,10 +127,10 @@ test('normalizeInvoices sets outstandingAmount to null when AutoCount does not r
         docNo: 'SI-002',
         docDate: '2026-08-14',
         debtorName: 'XYZ Industries Ltd',
-        finalTotal: '500.00'
+        finalTotal: '500.00',
       },
-      details: []
-    }
+      details: [],
+    },
   ];
 
   const [result] = normalizeInvoices(rawInvoices);
@@ -162,7 +169,7 @@ test('computePaymentSummary tallies counts and totals per bucket', () => {
     { grandTotal: 2000, outstandingAmount: 0, paymentStatus: 'paid' },
     { grandTotal: 500, outstandingAmount: 200, paymentStatus: 'partial' },
     { grandTotal: 800, outstandingAmount: 800, paymentStatus: 'unpaid' },
-    { grandTotal: 300, outstandingAmount: null, paymentStatus: 'unknown' }
+    { grandTotal: 300, outstandingAmount: null, paymentStatus: 'unknown' },
   ];
 
   const summary = computePaymentSummary(invoices);
@@ -172,7 +179,7 @@ test('computePaymentSummary tallies counts and totals per bucket', () => {
     partial: { count: 1, outstanding: 200 },
     unpaid: { count: 1, total: 800 },
     unknown: { count: 1, total: 300 },
-    stillUnpaidTotal: 1000
+    stillUnpaidTotal: 1000,
   });
 });
 
@@ -184,14 +191,12 @@ test('computePaymentSummary returns an all-zero summary for an empty invoice lis
     partial: { count: 0, outstanding: 0 },
     unpaid: { count: 0, total: 0 },
     unknown: { count: 0, total: 0 },
-    stillUnpaidTotal: 0
+    stillUnpaidTotal: 0,
   });
 });
 
 test('computePaymentSummary excludes unknown invoices from stillUnpaidTotal', () => {
-  const invoices = [
-    { grandTotal: 5000, outstandingAmount: null, paymentStatus: 'unknown' }
-  ];
+  const invoices = [{ grandTotal: 5000, outstandingAmount: null, paymentStatus: 'unknown' }];
 
   const summary = computePaymentSummary(invoices);
 

@@ -59,13 +59,13 @@ cp .env.example .env.local
 
 Required variables:
 
-| Variable | Description |
-|----------|-------------|
-| `AUTOCOUNT_API_URL` | `https://accounting-api.autocountcloud.com` |
-| `AUTOCOUNT_API_KEY` | Your AutoCount API key |
-| `AUTOCOUNT_KEY_ID` | Your AutoCount Key ID |
-| `AUTOCOUNT_ACCOUNT_BOOK_ID` | Your account book ID (e.g., `63688`) |
-| `USE_MOCK_DATA` | `false` for live data, `true` for mock |
+| Variable                    | Description                                 |
+| --------------------------- | ------------------------------------------- |
+| `AUTOCOUNT_API_URL`         | `https://accounting-api.autocountcloud.com` |
+| `AUTOCOUNT_API_KEY`         | Your AutoCount API key                      |
+| `AUTOCOUNT_KEY_ID`          | Your AutoCount Key ID                       |
+| `AUTOCOUNT_ACCOUNT_BOOK_ID` | Your account book ID (e.g., `63688`)        |
+| `USE_MOCK_DATA`             | `false` for live data, `true` for mock      |
 
 ### 3. Run Locally
 
@@ -91,10 +91,10 @@ npx vercel env add USE_MOCK_DATA production,preview --value "false"
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sales` | GET | Sales data for today |
-| `/api/sales?startDate=2026-08-01&endDate=2026-08-03` | GET | Sales data for date range |
+| Endpoint                                             | Method | Description               |
+| ---------------------------------------------------- | ------ | ------------------------- |
+| `/api/sales`                                         | GET    | Sales data for today      |
+| `/api/sales?startDate=2026-08-01&endDate=2026-08-03` | GET    | Sales data for date range |
 
 Response:
 
