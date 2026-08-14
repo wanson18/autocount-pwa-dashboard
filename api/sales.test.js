@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateBySKU, getLocalToday, normalizeInvoices, parseOutstandingAmount } = require('./sales.js');
+const { aggregateBySKU, getLocalToday, normalizeInvoices, parseOutstandingAmount, classifyPaymentStatus, computePaymentSummary } = require('./sales.js');
 
 test('aggregateBySKU groups quantity sold per customer, sorted descending', () => {
   const invoices = [
@@ -129,4 +129,72 @@ test('normalizeInvoices sets outstandingAmount to null when AutoCount does not r
   const [result] = normalizeInvoices(rawInvoices);
 
   assert.equal(result.outstandingAmount, null);
+});
+
+test('classifyPaymentStatus returns paid when outstanding is zero', () => {
+  assert.equal(classifyPaymentStatus(1000, 0), 'paid');
+});
+
+test('classifyPaymentStatus returns paid when outstanding is negative (defensive)', () => {
+  assert.equal(classifyPaymentStatus(1000, -0.01), 'paid');
+});
+
+test('classifyPaymentStatus returns partial when outstanding is between 0 and the total', () => {
+  assert.equal(classifyPaymentStatus(1000, 400), 'partial');
+});
+
+test('classifyPaymentStatus returns unpaid when outstanding equals the total', () => {
+  assert.equal(classifyPaymentStatus(1000, 1000), 'unpaid');
+});
+
+test('classifyPaymentStatus returns unpaid when outstanding exceeds the total (defensive)', () => {
+  assert.equal(classifyPaymentStatus(1000, 1200), 'unpaid');
+});
+
+test('classifyPaymentStatus returns unknown when outstanding is null or undefined', () => {
+  assert.equal(classifyPaymentStatus(1000, null), 'unknown');
+  assert.equal(classifyPaymentStatus(1000, undefined), 'unknown');
+});
+
+test('computePaymentSummary tallies counts and totals per bucket', () => {
+  const invoices = [
+    { grandTotal: 1000, outstandingAmount: 0, paymentStatus: 'paid' },
+    { grandTotal: 2000, outstandingAmount: 0, paymentStatus: 'paid' },
+    { grandTotal: 500, outstandingAmount: 200, paymentStatus: 'partial' },
+    { grandTotal: 800, outstandingAmount: 800, paymentStatus: 'unpaid' },
+    { grandTotal: 300, outstandingAmount: null, paymentStatus: 'unknown' }
+  ];
+
+  const summary = computePaymentSummary(invoices);
+
+  assert.deepEqual(summary, {
+    paid: { count: 2, total: 3000 },
+    partial: { count: 1, outstanding: 200 },
+    unpaid: { count: 1, total: 800 },
+    unknown: { count: 1, total: 300 },
+    stillUnpaidTotal: 1000
+  });
+});
+
+test('computePaymentSummary returns an all-zero summary for an empty invoice list', () => {
+  const summary = computePaymentSummary([]);
+
+  assert.deepEqual(summary, {
+    paid: { count: 0, total: 0 },
+    partial: { count: 0, outstanding: 0 },
+    unpaid: { count: 0, total: 0 },
+    unknown: { count: 0, total: 0 },
+    stillUnpaidTotal: 0
+  });
+});
+
+test('computePaymentSummary excludes unknown invoices from stillUnpaidTotal', () => {
+  const invoices = [
+    { grandTotal: 5000, outstandingAmount: null, paymentStatus: 'unknown' }
+  ];
+
+  const summary = computePaymentSummary(invoices);
+
+  assert.equal(summary.stillUnpaidTotal, 0);
+  assert.equal(summary.unknown.total, 5000);
 });

@@ -198,6 +198,45 @@ function computeKPIs(invoices) {
   };
 }
 
+function classifyPaymentStatus(grandTotal, outstandingAmount) {
+  if (outstandingAmount === null || outstandingAmount === undefined) return 'unknown';
+  if (outstandingAmount <= 0) return 'paid';
+  if (outstandingAmount >= grandTotal) return 'unpaid';
+  return 'partial';
+}
+
+function computePaymentSummary(invoices) {
+  const summary = {
+    paid: { count: 0, total: 0 },
+    partial: { count: 0, outstanding: 0 },
+    unpaid: { count: 0, total: 0 },
+    unknown: { count: 0, total: 0 },
+    stillUnpaidTotal: 0
+  };
+
+  for (const invoice of invoices) {
+    const { grandTotal, outstandingAmount, paymentStatus } = invoice;
+
+    if (paymentStatus === 'paid') {
+      summary.paid.count += 1;
+      summary.paid.total = Math.round((summary.paid.total + grandTotal) * 100) / 100;
+    } else if (paymentStatus === 'partial') {
+      summary.partial.count += 1;
+      summary.partial.outstanding = Math.round((summary.partial.outstanding + outstandingAmount) * 100) / 100;
+      summary.stillUnpaidTotal = Math.round((summary.stillUnpaidTotal + outstandingAmount) * 100) / 100;
+    } else if (paymentStatus === 'unpaid') {
+      summary.unpaid.count += 1;
+      summary.unpaid.total = Math.round((summary.unpaid.total + grandTotal) * 100) / 100;
+      summary.stillUnpaidTotal = Math.round((summary.stillUnpaidTotal + grandTotal) * 100) / 100;
+    } else {
+      summary.unknown.count += 1;
+      summary.unknown.total = Math.round((summary.unknown.total + grandTotal) * 100) / 100;
+    }
+  }
+
+  return summary;
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -271,3 +310,5 @@ module.exports.aggregateBySKU = aggregateBySKU;
 module.exports.getLocalToday = getLocalToday;
 module.exports.normalizeInvoices = normalizeInvoices;
 module.exports.parseOutstandingAmount = parseOutstandingAmount;
+module.exports.classifyPaymentStatus = classifyPaymentStatus;
+module.exports.computePaymentSummary = computePaymentSummary;
