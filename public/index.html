@@ -16,6 +16,8 @@
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
       }
+
+      /* --- Loading skeleton --- */
       .skeleton {
         background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
         background-size: 200% 100%;
@@ -29,6 +31,8 @@
           background-position: 200% 0;
         }
       }
+
+      /* --- Online/offline indicator --- */
       .status-dot {
         width: 8px;
         height: 8px;
@@ -40,16 +44,68 @@
       .status-offline {
         background-color: #ef4444;
       }
-      .card-glow {
+
+      /* --- Repeated component styles (avoids duplicating long class lists) --- */
+      .panel {
+        background-color: #1e293b; /* slate-800 */
+        border: 1px solid #334155; /* slate-700 */
+        border-radius: 0.75rem;
+      }
+      .kpi-card {
+        padding: 1rem;
         box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+      }
+      .kpi-label {
+        font-size: 0.75rem;
+        color: #94a3b8; /* slate-400 */
+      }
+      .kpi-value {
+        margin-top: 0.25rem;
+        font-size: 1.25rem;
+        font-weight: 700;
+      }
+
+      .preset-btn {
+        font-size: 0.75rem;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.5rem;
+        font-weight: 500;
+        background-color: #334155; /* slate-700 */
+        color: #cbd5e1; /* slate-300 */
+        transition: background-color 0.15s ease;
+      }
+      .preset-btn:hover {
+        background-color: #475569; /* slate-600 */
+      }
+      .preset-btn.active {
+        background-color: #2563eb; /* blue-600 */
+        color: #ffffff;
+      }
+
+      .field {
+        padding: 0.375rem 0.5rem;
+        font-size: 0.75rem;
+        color: #ffffff;
+        background-color: #0f172a; /* slate-900 */
+        border: 1px solid #475569; /* slate-600 */
+        border-radius: 0.5rem;
+      }
+      .field:focus {
+        outline: none;
+        border-color: #3b82f6; /* blue-500 */
       }
       input[type='date']::-webkit-calendar-picker-indicator {
         filter: invert(0.7);
+      }
+
+      .sku-row:hover {
+        background-color: #334155; /* slate-700 */
       }
     </style>
   </head>
   <body class="bg-slate-900 text-white min-h-screen">
     <div class="max-w-md mx-auto px-4 pb-8">
+      <!-- ===== Header ===== -->
       <header class="py-4 flex items-center justify-between border-b border-slate-700">
         <div class="flex items-center gap-2">
           <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -69,7 +125,8 @@
           </div>
           <button
             id="refreshBtn"
-            onclick="fetchData(currentStartDate, currentEndDate)"
+            type="button"
+            aria-label="Refresh data"
             class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,7 +143,8 @@
 
       <div id="lastUpdated" class="text-xs text-slate-500 mt-2 text-right">Last updated: --</div>
 
-      <div class="mt-4 bg-slate-800 rounded-xl p-3 border border-slate-700">
+      <!-- ===== Date range picker ===== -->
+      <div class="panel mt-4 p-3">
         <div class="flex items-center gap-2 mb-2">
           <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -99,56 +157,19 @@
           <span class="text-xs font-semibold text-slate-300">Date Range</span>
         </div>
         <div class="flex gap-1.5 mb-2">
-          <button
-            onclick="setPreset('today')"
-            id="btnToday"
-            class="preset-btn active text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium transition"
-          >
-            Today
-          </button>
-          <button
-            onclick="setPreset('yesterday')"
-            id="btnYesterday"
-            class="preset-btn text-xs px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition"
-          >
-            Yesterday
-          </button>
-          <button
-            onclick="setPreset('7days')"
-            id="btn7days"
-            class="preset-btn text-xs px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition"
-          >
-            7 Days
-          </button>
-          <button
-            onclick="setPreset('30days')"
-            id="btn30days"
-            class="preset-btn text-xs px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition"
-          >
-            30 Days
-          </button>
-          <button
-            onclick="setPreset('month')"
-            id="btnMonth"
-            class="preset-btn text-xs px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition"
-          >
-            This Month
-          </button>
+          <button type="button" id="btnToday" class="preset-btn active" data-preset="today">Today</button>
+          <button type="button" id="btnYesterday" class="preset-btn" data-preset="yesterday">Yesterday</button>
+          <button type="button" id="btn7days" class="preset-btn" data-preset="7days">7 Days</button>
+          <button type="button" id="btn30days" class="preset-btn" data-preset="30days">30 Days</button>
+          <button type="button" id="btnMonth" class="preset-btn" data-preset="month">This Month</button>
         </div>
         <div class="flex items-center gap-2">
-          <input
-            type="date"
-            id="startDate"
-            class="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-600 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
-          />
+          <input type="date" id="startDate" class="field flex-1" aria-label="Start date" />
           <span class="text-slate-500 text-xs">to</span>
-          <input
-            type="date"
-            id="endDate"
-            class="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-600 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
-          />
+          <input type="date" id="endDate" class="field flex-1" aria-label="End date" />
           <button
-            onclick="applyCustomDate()"
+            type="button"
+            id="applyDateBtn"
             class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition"
           >
             Go
@@ -156,49 +177,52 @@
         </div>
       </div>
 
+      <!-- ===== KPI cards ===== -->
       <section id="kpiGrid" class="grid grid-cols-2 gap-3 mt-4">
-        <div id="kpiRevenue" class="card-glow bg-slate-800 rounded-xl p-4 border border-slate-700">
-          <div class="text-slate-400 text-xs">Total Revenue</div>
-          <div id="kpiRevenueValue" class="text-xl font-bold text-emerald-400 mt-1">--</div>
+        <div id="kpiRevenue" class="panel kpi-card">
+          <div class="kpi-label">Total Revenue</div>
+          <div id="kpiRevenueValue" class="kpi-value text-emerald-400">--</div>
         </div>
-        <div id="kpiInvoices" class="card-glow bg-slate-800 rounded-xl p-4 border border-slate-700">
-          <div class="text-slate-400 text-xs">Invoices</div>
-          <div id="kpiInvoicesValue" class="text-xl font-bold text-blue-400 mt-1">--</div>
+        <div id="kpiInvoices" class="panel kpi-card">
+          <div class="kpi-label">Invoices</div>
+          <div id="kpiInvoicesValue" class="kpi-value text-blue-400">--</div>
         </div>
-        <div id="kpiUnits" class="card-glow bg-slate-800 rounded-xl p-4 border border-slate-700">
-          <div class="text-slate-400 text-xs">Units Sold</div>
-          <div id="kpiUnitsValue" class="text-xl font-bold text-purple-400 mt-1">--</div>
+        <div id="kpiUnits" class="panel kpi-card">
+          <div class="kpi-label">Units Sold</div>
+          <div id="kpiUnitsValue" class="kpi-value text-purple-400">--</div>
         </div>
-        <div id="kpiCustomer" class="card-glow bg-slate-800 rounded-xl p-4 border border-slate-700">
-          <div class="text-slate-400 text-xs">Top Customer</div>
-          <div id="kpiCustomerValue" class="text-sm font-bold text-amber-400 mt-1 truncate">--</div>
+        <div id="kpiCustomer" class="panel kpi-card">
+          <div class="kpi-label">Top Customer</div>
+          <div id="kpiCustomerValue" class="kpi-value text-sm text-amber-400 truncate">--</div>
         </div>
       </section>
 
+      <!-- ===== Charts ===== -->
       <section class="mt-6">
         <h2 class="text-sm font-semibold text-slate-300 mb-2">Top 5 Products by Revenue</h2>
-        <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+        <div class="panel p-4">
           <canvas id="barChart" height="160"></canvas>
         </div>
       </section>
 
       <section class="mt-6">
         <h2 class="text-sm font-semibold text-slate-300 mb-2">Units by SKU</h2>
-        <div class="bg-slate-800 rounded-xl p-4 border border-slate-700 flex justify-center">
+        <div class="panel p-4 flex justify-center">
           <canvas id="doughnutChart" height="200" width="200"></canvas>
         </div>
       </section>
 
+      <!-- ===== Product breakdown table ===== -->
       <section class="mt-6">
         <h2 class="text-sm font-semibold text-slate-300 mb-2">Product Breakdown</h2>
         <input
           id="searchInput"
           type="text"
           placeholder="Search product name or SKU..."
+          aria-label="Search products"
           class="w-full px-3 py-2 mb-3 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-blue-500"
-          oninput="filterTable()"
         />
-        <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <div class="panel overflow-hidden">
           <div id="tableSkeleton" class="p-4 space-y-2">
             <div class="skeleton h-4 rounded w-full"></div>
             <div class="skeleton h-4 rounded w-3/4"></div>
@@ -219,172 +243,207 @@
     </div>
 
     <script>
-      let barChart,
-        doughnutChart,
-        allSKUData = [];
-      let currentStartDate = '',
-        currentEndDate = '';
+      /* =========================================================================
+         AutoCount Sales Dashboard — frontend
+         Sections: config · state · utils · presets · network · rendering · init
+         ========================================================================= */
 
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker
-            .register('/sw.js')
-            .then((reg) => console.log('SW registered'))
-            .catch((err) => console.warn('SW registration skipped:', err));
-        });
+      /* ----------------------------- Config ---------------------------------- */
+
+      const CHART_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+      const AXIS_COLOR = '#94a3b8';
+      const GRID_COLOR = '#334155';
+      const BAR_LABEL_MAX = 25;
+      const DOUGHNUT_LABEL_MAX = 20;
+
+      /* ------------------------------ State ---------------------------------- */
+
+      let barChart = null;
+      let doughnutChart = null;
+      let allSKUData = [];
+      let currentStartDate = '';
+      let currentEndDate = '';
+
+      /* ------------------------------ Utils ---------------------------------- */
+
+      const $ = (id) => document.getElementById(id);
+
+      /** Format a Date as YYYY-MM-DD in the *local* timezone. toISOString() is
+       *  UTC-based and shifts the date by a day for UTC+8 users before 08:00. */
+      function toISODate(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
       }
 
-      function getToday() {
-        return new Date().toISOString().slice(0, 10);
+      function todayISO() {
+        return toISODate(new Date());
       }
-      function getYesterday() {
-        const d = new Date();
-        d.setDate(d.getDate() - 1);
-        return d.toISOString().slice(0, 10);
-      }
-      function getDaysAgo(n) {
+
+      function daysAgoISO(n) {
         const d = new Date();
         d.setDate(d.getDate() - n);
-        return d.toISOString().slice(0, 10);
-      }
-      function getMonthStart() {
-        const d = new Date();
-        d.setDate(1);
-        return d.toISOString().slice(0, 10);
+        return toISODate(d);
       }
 
-      function setActivePreset(id) {
-        document.querySelectorAll('.preset-btn').forEach((b) => {
-          b.classList.remove('active', 'bg-blue-600', 'text-white');
-          b.classList.add('bg-slate-700', 'text-slate-300');
-        });
-        const btn = document.getElementById(id);
-        if (btn) {
-          btn.classList.add('active', 'bg-blue-600', 'text-white');
-          btn.classList.remove('bg-slate-700', 'text-slate-300');
-        }
+      function monthStartISO() {
+        const d = new Date();
+        d.setDate(1);
+        return toISODate(d);
+      }
+
+      function formatMYR(value) {
+        return `RM ${Number(value || 0).toLocaleString('en-MY', { minimumFractionDigits: 2 })}`;
+      }
+
+      function formatNumber(value) {
+        return Number(value || 0).toLocaleString();
+      }
+
+      function formatTime(date = new Date()) {
+        return date.toLocaleTimeString();
+      }
+
+      const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+      function escapeHtml(str) {
+        return String(str ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+      }
+
+      /** Display label for a SKU, truncated for chart axes. */
+      function skuLabel(sku, maxLength) {
+        const text = sku.description || sku.sku || '';
+        return maxLength && text.length > maxLength ? text.slice(0, maxLength) : text;
+      }
+
+      /* --------------------------- Date presets ------------------------------ */
+
+      const PRESETS = {
+        today: { buttonId: 'btnToday', range: () => [todayISO(), todayISO()] },
+        yesterday: { buttonId: 'btnYesterday', range: () => [daysAgoISO(1), daysAgoISO(1)] },
+        '7days': { buttonId: 'btn7days', range: () => [daysAgoISO(6), todayISO()] },
+        '30days': { buttonId: 'btn30days', range: () => [daysAgoISO(29), todayISO()] },
+        month: { buttonId: 'btnMonth', range: () => [monthStartISO(), todayISO()] },
+      };
+
+      function setActivePreset(buttonId) {
+        document.querySelectorAll('.preset-btn').forEach((btn) => btn.classList.remove('active'));
+        const active = buttonId ? $(buttonId) : null;
+        if (active) active.classList.add('active');
       }
 
       function setPreset(preset) {
-        const today = getToday();
-        let start, end, btnId;
+        const { buttonId, range } = PRESETS[preset] || PRESETS.today;
+        const [start, end] = range();
 
-        switch (preset) {
-          case 'today':
-            start = end = today;
-            btnId = 'btnToday';
-            break;
-          case 'yesterday':
-            start = end = getYesterday();
-            btnId = 'btnYesterday';
-            break;
-          case '7days':
-            start = getDaysAgo(6);
-            end = today;
-            btnId = 'btn7days';
-            break;
-          case '30days':
-            start = getDaysAgo(29);
-            end = today;
-            btnId = 'btn30days';
-            break;
-          case 'month':
-            start = getMonthStart();
-            end = today;
-            btnId = 'btnMonth';
-            break;
-          default:
-            start = end = today;
-            btnId = 'btnToday';
-        }
-
-        setActivePreset(btnId);
-        document.getElementById('startDate').value = start;
-        document.getElementById('endDate').value = end;
+        setActivePreset(buttonId);
+        $('startDate').value = start;
+        $('endDate').value = end;
         currentStartDate = start;
         currentEndDate = end;
         fetchData(start, end);
       }
 
       function applyCustomDate() {
-        const start = document.getElementById('startDate').value;
-        const end = document.getElementById('endDate').value;
+        const start = $('startDate').value;
+        const end = $('endDate').value;
         if (!start || !end) return;
+
         setActivePreset('');
         currentStartDate = start;
         currentEndDate = end;
         fetchData(start, end);
       }
 
+      /* ------------------------- Connectivity status ------------------------- */
+
       function updateOnlineStatus() {
-        const dot = document.getElementById('statusDot');
-        const text = document.getElementById('statusText');
-        if (navigator.onLine) {
-          dot.classList.remove('status-offline');
-          dot.classList.add('status-online');
-          text.textContent = 'Online';
-        } else {
-          dot.classList.remove('status-online');
-          dot.classList.add('status-offline');
-          text.textContent = 'Offline';
-        }
+        const dot = $('statusDot');
+        const online = navigator.onLine;
+        dot.classList.toggle('status-online', online);
+        dot.classList.toggle('status-offline', !online);
+        $('statusText').textContent = online ? 'Online' : 'Offline';
       }
 
-      window.addEventListener('online', updateOnlineStatus);
-      window.addEventListener('offline', updateOnlineStatus);
-      updateOnlineStatus();
+      /* ------------------------------ Network -------------------------------- */
 
       async function fetchData(startDate, endDate) {
-        const btn = document.getElementById('refreshBtn');
+        const btn = $('refreshBtn');
+        const start = startDate || todayISO();
+        const end = endDate || todayISO();
+
         btn.classList.add('animate-spin');
         try {
-          const today = getToday();
-          const s = startDate || today;
-          const e = endDate || today;
-          const res = await fetch(`/api/sales?startDate=${s}&endDate=${e}`);
+          const res = await fetch(`/api/sales?startDate=${start}&endDate=${end}`);
+          if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+
           const data = await res.json();
-          if (data.success) renderDashboard(data);
-        } catch (e) {
-          console.error('Fetch error:', e);
+          if (!data.success) throw new Error(data.error || 'Request was not successful');
+
+          renderDashboard(data);
+        } catch (error) {
+          console.error('Fetch error:', error);
+          $('lastUpdated').textContent = `Update failed at ${formatTime()} — showing last known data`;
         } finally {
           btn.classList.remove('animate-spin');
-          document.getElementById('lastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
         }
       }
 
+      /* ----------------------------- Rendering ------------------------------- */
+
       function renderDashboard(data) {
-        const dr = data.dateRange;
-        if (dr) {
-          const label = dr.startDate === dr.endDate ? dr.startDate : `${dr.startDate} to ${dr.endDate}`;
-          document.getElementById('lastUpdated').textContent =
-            `Viewing: ${label} | Updated: ${new Date().toLocaleTimeString()}`;
+        const breakdown = data.skuBreakdown || [];
+
+        renderTimestamp(data.dateRange);
+        renderKPIs(data.kpis || {});
+        renderTable(breakdown);
+
+        // Charts depend on the Chart.js CDN — never let a chart failure
+        // take down the KPIs and table, which are the critical numbers.
+        try {
+          renderBarChart(data.topSKUs || []);
+          renderDoughnutChart(breakdown);
+        } catch (error) {
+          console.error('Chart render error:', error);
         }
+      }
 
-        document.getElementById('kpiRevenueValue').textContent =
-          'RM ' + data.kpis.totalRevenue.toLocaleString('en-MY', { minimumFractionDigits: 2 });
-        document.getElementById('kpiInvoicesValue').textContent = data.kpis.totalInvoices;
-        document.getElementById('kpiUnitsValue').textContent = data.kpis.totalItemsSold.toLocaleString();
-        document.getElementById('kpiCustomerValue').textContent = data.kpis.topCustomer
-          ? data.kpis.topCustomer.name
-          : '--';
+      function renderTimestamp(dateRange) {
+        if (!dateRange) {
+          $('lastUpdated').textContent = `Last updated: ${formatTime()}`;
+          return;
+        }
+        const { startDate, endDate } = dateRange;
+        const label = startDate === endDate ? startDate : `${startDate} to ${endDate}`;
+        $('lastUpdated').textContent = `Viewing: ${label} | Updated: ${formatTime()}`;
+      }
 
-        renderBarChart(data.topSKUs);
-        renderDoughnutChart(data.skuBreakdown);
-        renderTable(data.skuBreakdown);
+      function renderKPIs(kpis) {
+        $('kpiRevenueValue').textContent = formatMYR(kpis.totalRevenue);
+        $('kpiInvoicesValue').textContent = formatNumber(kpis.totalInvoices);
+        $('kpiUnitsValue').textContent = formatNumber(kpis.totalItemsSold);
+        $('kpiCustomerValue').textContent = kpis.topCustomer ? kpis.topCustomer.name : '--';
+      }
+
+      /** Shared tooltip title: always show the untruncated product name. */
+      function tooltipTitle(skus) {
+        return (items) => {
+          const sku = skus[items[0].dataIndex];
+          return sku ? sku.description || sku.sku : '';
+        };
       }
 
       function renderBarChart(skus) {
-        const ctx = document.getElementById('barChart').getContext('2d');
         if (barChart) barChart.destroy();
-        barChart = new Chart(ctx, {
+
+        barChart = new Chart($('barChart').getContext('2d'), {
           type: 'bar',
           data: {
-            labels: skus.map((s) => (s.description ? s.description.substring(0, 25) : s.sku)),
+            labels: skus.map((s) => skuLabel(s, BAR_LABEL_MAX)),
             datasets: [
               {
                 label: 'Revenue (RM)',
                 data: skus.map((s) => s.totalRevenue),
-                backgroundColor: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'],
+                backgroundColor: skus.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
                 borderRadius: 6,
               },
             ],
@@ -395,31 +454,33 @@
               legend: { display: false },
               tooltip: {
                 callbacks: {
-                  title: (items) => skus[items[0].dataIndex].description || skus[items[0].dataIndex].sku,
-                  label: (item) => `RM ${item.raw.toLocaleString('en-MY', { minimumFractionDigits: 2 })}`,
+                  title: tooltipTitle(skus),
+                  label: (item) => formatMYR(item.raw),
                 },
               },
             },
             scales: {
-              y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-              x: { ticks: { color: '#94a3b8', font: { size: 10 }, maxRotation: 45 }, grid: { display: false } },
+              y: { ticks: { color: AXIS_COLOR }, grid: { color: GRID_COLOR } },
+              x: {
+                ticks: { color: AXIS_COLOR, font: { size: 10 }, maxRotation: 45 },
+                grid: { display: false },
+              },
             },
           },
         });
       }
 
       function renderDoughnutChart(skus) {
-        const ctx = document.getElementById('doughnutChart').getContext('2d');
         if (doughnutChart) doughnutChart.destroy();
-        const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
-        doughnutChart = new Chart(ctx, {
+
+        doughnutChart = new Chart($('doughnutChart').getContext('2d'), {
           type: 'doughnut',
           data: {
-            labels: skus.map((s) => (s.description ? s.description.substring(0, 20) : s.sku)),
+            labels: skus.map((s) => skuLabel(s, DOUGHNUT_LABEL_MAX)),
             datasets: [
               {
                 data: skus.map((s) => s.totalUnits),
-                backgroundColor: colors.slice(0, skus.length),
+                backgroundColor: skus.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
                 borderWidth: 0,
               },
             ],
@@ -427,30 +488,16 @@
           options: {
             responsive: false,
             plugins: {
-              legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 } } },
+              legend: { position: 'bottom', labels: { color: AXIS_COLOR, font: { size: 10 } } },
               tooltip: {
                 callbacks: {
-                  title: (items) => skus[items[0].dataIndex].description || skus[items[0].dataIndex].sku,
-                  label: (item) => `${item.raw.toLocaleString()} units`,
+                  title: tooltipTitle(skus),
+                  label: (item) => `${formatNumber(item.raw)} units`,
                 },
               },
             },
           },
         });
-      }
-
-      function escapeHtml(str) {
-        return String(str ?? '').replace(
-          /[&<>"']/g,
-          (c) =>
-            ({
-              '&': '&amp;',
-              '<': '&lt;',
-              '>': '&gt;',
-              '"': '&quot;',
-              "'": '&#39;',
-            })[c],
-        );
       }
 
       function buildCustomerList(customers) {
@@ -462,9 +509,8 @@
             (c) => `
         <div class="flex justify-between px-2 py-1 text-xs">
           <span class="text-slate-300">${escapeHtml(c.name)}</span>
-          <span class="text-slate-400">${c.quantity.toLocaleString()}</span>
-        </div>
-      `,
+          <span class="text-slate-400">${formatNumber(c.quantity)}</span>
+        </div>`,
           )
           .join('');
       }
@@ -473,7 +519,7 @@
         return skus
           .map(
             (s, i) => `
-        <tr class="hover:bg-slate-750 cursor-pointer" onclick="toggleRow(${i})">
+        <tr class="sku-row cursor-pointer" data-row="${i}">
           <td class="px-3 py-2 text-xs">
             <div class="flex items-center gap-1.5">
               <svg id="chevron-${i}" class="w-3 h-3 text-slate-500 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -485,40 +531,73 @@
               </div>
             </div>
           </td>
-          <td class="px-3 py-2 text-right">${s.totalUnits.toLocaleString()}</td>
-          <td class="px-3 py-2 text-right text-emerald-400">RM ${s.totalRevenue.toLocaleString('en-MY', { minimumFractionDigits: 2 })}</td>
+          <td class="px-3 py-2 text-right">${formatNumber(s.totalUnits)}</td>
+          <td class="px-3 py-2 text-right text-emerald-400">${formatMYR(s.totalRevenue)}</td>
         </tr>
         <tr id="detail-${i}" class="hidden bg-slate-900/50">
-          <td colspan="3" class="px-3 pb-2 pt-1">
-            ${buildCustomerList(s.customers)}
-          </td>
-        </tr>
-      `,
+          <td colspan="3" class="px-3 pb-2 pt-1">${buildCustomerList(s.customers)}</td>
+        </tr>`,
           )
           .join('');
       }
 
       function toggleRow(i) {
-        document.getElementById(`detail-${i}`).classList.toggle('hidden');
-        document.getElementById(`chevron-${i}`).classList.toggle('rotate-90');
+        const detail = $(`detail-${i}`);
+        const chevron = $(`chevron-${i}`);
+        if (detail) detail.classList.toggle('hidden');
+        if (chevron) chevron.classList.toggle('rotate-90');
       }
 
       function renderTable(skus) {
         allSKUData = skus;
-        document.getElementById('skuTableBody').innerHTML = buildTableRows(skus);
-        document.getElementById('tableSkeleton').classList.add('hidden');
-        document.getElementById('skuTable').classList.remove('hidden');
+        $('skuTableBody').innerHTML = buildTableRows(skus);
+        $('tableSkeleton').classList.add('hidden');
+        $('skuTable').classList.remove('hidden');
       }
 
       function filterTable() {
-        const query = document.getElementById('searchInput').value.toLowerCase();
+        const query = $('searchInput').value.toLowerCase();
         const filtered = allSKUData.filter(
-          (s) => (s.description || '').toLowerCase().includes(query) || s.sku.toLowerCase().includes(query),
+          (s) => (s.description || '').toLowerCase().includes(query) || (s.sku || '').toLowerCase().includes(query),
         );
-        document.getElementById('skuTableBody').innerHTML = buildTableRows(filtered);
+        $('skuTableBody').innerHTML = buildTableRows(filtered);
       }
 
-      window.addEventListener('load', () => setPreset('today'));
+      /* ------------------------------- Init ---------------------------------- */
+
+      function registerServiceWorker() {
+        if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker
+          .register('/sw.js')
+          .then(() => console.log('SW registered'))
+          .catch((err) => console.warn('SW registration skipped:', err));
+      }
+
+      function bindEvents() {
+        $('refreshBtn').addEventListener('click', () => fetchData(currentStartDate, currentEndDate));
+        $('applyDateBtn').addEventListener('click', applyCustomDate);
+        $('searchInput').addEventListener('input', filterTable);
+
+        document
+          .querySelectorAll('.preset-btn')
+          .forEach((btn) => btn.addEventListener('click', () => setPreset(btn.dataset.preset)));
+
+        // Delegated so rebuilt rows stay clickable without re-binding.
+        $('skuTableBody').addEventListener('click', (event) => {
+          const row = event.target.closest('tr[data-row]');
+          if (row) toggleRow(row.dataset.row);
+        });
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+      }
+
+      window.addEventListener('load', () => {
+        registerServiceWorker();
+        bindEvents();
+        updateOnlineStatus();
+        setPreset('today');
+      });
     </script>
   </body>
 </html>

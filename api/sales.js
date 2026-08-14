@@ -6,6 +6,40 @@ require('dotenv').config();
 const cacheStore = Object.create(null);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Serverless runtimes (Vercel) run with TZ=UTC, so `new Date()` local time is
+// NOT the business's local time. The reporting timezone must be explicit,
+// otherwise "today" rolls over 8 hours late for a UTC+8 business.
+const DEFAULT_TIMEZONE = 'Asia/Kuala_Lumpur';
+
+function getReportingTimeZone() {
+  return process.env.REPORT_TIMEZONE || DEFAULT_TIMEZONE;
+}
+
+/**
+ * Current date as YYYY-MM-DD in the reporting timezone.
+ * Replaces `new Date().toISOString().slice(0, 10)`, which returns the UTC date.
+ */
+function getLocalToday(timeZone = getReportingTimeZone(), now = new Date()) {
+  try {
+    // en-CA formats as YYYY-MM-DD, and formatToParts avoids locale surprises.
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now);
+
+    const get = (type) => parts.find((p) => p.type === type)?.value;
+    const [year, month, day] = [get('year'), get('month'), get('day')];
+
+    if (year && month && day) return `${year}-${month}-${day}`;
+  } catch (error) {
+    console.warn(`Invalid REPORT_TIMEZONE "${timeZone}", falling back to UTC:`, error.message);
+  }
+
+  return now.toISOString().slice(0, 10);
+}
+
 function getCacheTTL() {
   const parsed = parseInt(process.env.CACHE_TTL_MINUTES, 10);
   const minutes = Number.isNaN(parsed) ? 10 : parsed;
@@ -166,7 +200,7 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalToday();
     const startDate = req.query.startDate || today;
     const endDate = req.query.endDate || today;
 
@@ -226,3 +260,4 @@ module.exports = async (req, res) => {
 };
 
 module.exports.aggregateBySKU = aggregateBySKU;
+module.exports.getLocalToday = getLocalToday;
