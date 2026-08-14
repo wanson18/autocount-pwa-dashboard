@@ -110,7 +110,17 @@ Response:
     "topCustomer": { "name": "Customer A", "revenue": 12000 }
   },
   "topSKUs": [...],
-  "skuBreakdown": [...]
+  "skuBreakdown": [...],
+  "invoices": [
+    { "docNo": "SI-00123", "docDate": "2026-08-03", "customerName": "Customer A", "grandTotal": 12000, "outstandingAmount": 0, "paymentStatus": "paid" }
+  ],
+  "paymentSummary": {
+    "paid": { "count": 20, "total": 28000 },
+    "partial": { "count": 3, "outstanding": 4200 },
+    "unpaid": { "count": 6, "total": 8573.3 },
+    "unknown": { "count": 0, "total": 0 },
+    "stillUnpaidTotal": 12773.3
+  }
 }
 ```
 

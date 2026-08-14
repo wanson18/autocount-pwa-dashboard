@@ -1,8 +1,8 @@
 {
   "invoices": [
     {
-      "invoiceNo": "INV-2025-001",
-      "date": "2025-07-15",
+      "docNo": "INV-2025-001",
+      "docDate": "2025-07-15",
       "customerName": "ABC Trading Sdn Bhd",
       "status": "Posted",
       "lineItems": [
@@ -23,11 +23,12 @@
       ],
       "subtotal": 9205.00,
       "tax": 552.30,
-      "grandTotal": 9757.30
+      "grandTotal": 9757.30,
+      "outstandingAmount": 0
     },
     {
-      "invoiceNo": "INV-2025-002",
-      "date": "2025-07-18",
+      "docNo": "INV-2025-002",
+      "docDate": "2025-07-18",
       "customerName": "XYZ Industries Ltd",
       "status": "Posted",
       "lineItems": [
@@ -55,11 +56,12 @@
       ],
       "subtotal": 14390.00,
       "tax": 863.40,
-      "grandTotal": 15253.40
+      "grandTotal": 15253.40,
+      "outstandingAmount": 5000
     },
     {
-      "invoiceNo": "INV-2025-003",
-      "date": "2025-07-22",
+      "docNo": "INV-2025-003",
+      "docDate": "2025-07-22",
       "customerName": "ABC Trading Sdn Bhd",
       "status": "Posted",
       "lineItems": [
@@ -80,11 +82,12 @@
       ],
       "subtotal": 6275.00,
       "tax": 376.50,
-      "grandTotal": 6651.50
+      "grandTotal": 6651.50,
+      "outstandingAmount": 6651.50
     },
     {
-      "invoiceNo": "INV-2025-004",
-      "date": "2025-07-28",
+      "docNo": "INV-2025-004",
+      "docDate": "2025-07-28",
       "customerName": "Maju Jaya Enterprise",
       "status": "Posted",
       "lineItems": [
@@ -105,11 +108,12 @@
       ],
       "subtotal": 10982.50,
       "tax": 658.95,
-      "grandTotal": 11641.45
+      "grandTotal": 11641.45,
+      "outstandingAmount": 0
     },
     {
-      "invoiceNo": "INV-2025-005",
-      "date": "2025-08-01",
+      "docNo": "INV-2025-005",
+      "docDate": "2025-08-01",
       "customerName": "XYZ Industries Ltd",
       "status": "Posted",
       "lineItems": [

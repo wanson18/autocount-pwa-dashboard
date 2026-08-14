@@ -280,8 +280,14 @@ module.exports = async (req, res) => {
       dataSource = 'mock';
     }
 
+    invoices = invoices.map(invoice => ({
+      ...invoice,
+      paymentStatus: classifyPaymentStatus(invoice.grandTotal, invoice.outstandingAmount)
+    }));
+
     const aggregated = aggregateBySKU(invoices);
     const kpis = computeKPIs(invoices);
+    const paymentSummary = computePaymentSummary(invoices);
 
     const result = {
       success: true,
@@ -291,7 +297,16 @@ module.exports = async (req, res) => {
       dateRange: { startDate, endDate },
       kpis,
       topSKUs: aggregated.slice(0, 5),
-      skuBreakdown: aggregated
+      skuBreakdown: aggregated,
+      invoices: invoices.map(invoice => ({
+        docNo: invoice.docNo,
+        docDate: invoice.docDate,
+        customerName: invoice.customerName,
+        grandTotal: invoice.grandTotal,
+        outstandingAmount: invoice.outstandingAmount,
+        paymentStatus: invoice.paymentStatus
+      })),
+      paymentSummary
     };
 
     cacheStore[cacheKey] = { data: result, timestamp: Date.now() };
