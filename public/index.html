@@ -143,6 +143,55 @@
 
       <div id="lastUpdated" class="text-xs text-slate-500 mt-2 text-right">Last updated: --</div>
 
+      <!-- ===== Today's Payments ===== -->
+      <section class="panel mt-4 p-3">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14l-3-2-3 2-3-2-3 2-3-2-3 2V5a2 2 0 012-2z"
+            />
+          </svg>
+          <span class="text-xs font-semibold text-slate-300">Today's Payments</span>
+        </div>
+
+        <div id="paymentSkeleton" class="space-y-2">
+          <div class="skeleton h-4 rounded w-full"></div>
+          <div class="skeleton h-4 rounded w-3/4"></div>
+        </div>
+
+        <div id="paymentContent" class="hidden">
+          <div class="grid grid-cols-3 gap-2 mb-3">
+            <div class="bg-slate-900 rounded-lg p-2 text-center">
+              <div class="text-[10px] text-slate-400">Paid</div>
+              <div id="paymentPaidCount" class="text-sm font-bold text-emerald-400">--</div>
+              <div id="paymentPaidTotal" class="text-[10px] text-slate-400">--</div>
+            </div>
+            <div class="bg-slate-900 rounded-lg p-2 text-center">
+              <div class="text-[10px] text-slate-400">Partial</div>
+              <div id="paymentPartialCount" class="text-sm font-bold text-amber-400">--</div>
+              <div id="paymentPartialTotal" class="text-[10px] text-slate-400">--</div>
+            </div>
+            <div class="bg-slate-900 rounded-lg p-2 text-center">
+              <div class="text-[10px] text-slate-400">Unpaid</div>
+              <div id="paymentUnpaidCount" class="text-sm font-bold text-red-400">--</div>
+              <div id="paymentUnpaidTotal" class="text-[10px] text-slate-400">--</div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between px-1 py-2 border-t border-slate-700">
+            <span class="text-xs text-slate-300">Still unpaid today</span>
+            <span id="stillUnpaidTotal" class="text-base font-bold text-red-400">--</span>
+          </div>
+
+          <div id="paymentUnknownWarning" class="hidden text-[10px] text-amber-400 px-1 pb-2"></div>
+
+          <div id="paymentInvoiceList" class="divide-y divide-slate-700"></div>
+        </div>
+      </section>
+
       <!-- ===== Date range picker ===== -->
       <div class="panel mt-4 p-3">
         <div class="flex items-center gap-2 mb-2">
@@ -563,6 +612,86 @@
         $('skuTableBody').innerHTML = buildTableRows(filtered);
       }
 
+      /* ------------------------- Today's Payments ----------------------------- */
+
+      const PAYMENT_STATUS_META = {
+        paid: { label: 'Paid', badgeClass: 'bg-emerald-500/20 text-emerald-400' },
+        partial: { label: 'Partial', badgeClass: 'bg-amber-500/20 text-amber-400' },
+        unpaid: { label: 'Unpaid', badgeClass: 'bg-red-500/20 text-red-400' },
+        unknown: { label: 'Unknown', badgeClass: 'bg-slate-500/20 text-slate-400' },
+      };
+
+      const EMPTY_PAYMENT_SUMMARY = {
+        paid: { count: 0, total: 0 },
+        partial: { count: 0, outstanding: 0 },
+        unpaid: { count: 0, total: 0 },
+        unknown: { count: 0, total: 0 },
+        stillUnpaidTotal: 0,
+      };
+
+      async function fetchTodayPayments() {
+        try {
+          const res = await fetch('/api/sales');
+          if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+
+          const data = await res.json();
+          if (!data.success) throw new Error(data.error || 'Request was not successful');
+
+          renderTodayPayments(data.invoices || [], data.paymentSummary);
+        } catch (error) {
+          console.error('Today payments fetch error:', error);
+        }
+      }
+
+      function sortByOutstandingDesc(invoices) {
+        return [...invoices].sort((a, b) => (b.outstandingAmount || 0) - (a.outstandingAmount || 0));
+      }
+
+      function buildPaymentRow(invoice) {
+        const meta = PAYMENT_STATUS_META[invoice.paymentStatus] || PAYMENT_STATUS_META.unknown;
+        return `
+        <div class="flex items-center justify-between px-1 py-1.5 text-xs">
+          <div class="min-w-0">
+            <div class="text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</div>
+            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.docNo)}</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
+            <span class="${meta.badgeClass} px-1.5 py-0.5 rounded text-[10px] font-medium">${meta.label}</span>
+          </div>
+        </div>`;
+      }
+
+      function renderTodayPayments(invoices, summary) {
+        $('paymentSkeleton').classList.add('hidden');
+        $('paymentContent').classList.remove('hidden');
+
+        const safeSummary = summary || EMPTY_PAYMENT_SUMMARY;
+
+        $('paymentPaidCount').textContent = formatNumber(safeSummary.paid.count);
+        $('paymentPaidTotal').textContent = formatMYR(safeSummary.paid.total);
+        $('paymentPartialCount').textContent = formatNumber(safeSummary.partial.count);
+        $('paymentPartialTotal').textContent = formatMYR(safeSummary.partial.outstanding);
+        $('paymentUnpaidCount').textContent = formatNumber(safeSummary.unpaid.count);
+        $('paymentUnpaidTotal').textContent = formatMYR(safeSummary.unpaid.total);
+        $('stillUnpaidTotal').textContent = formatMYR(safeSummary.stillUnpaidTotal);
+
+        const warningEl = $('paymentUnknownWarning');
+        if (safeSummary.unknown.count > 0) {
+          warningEl.textContent = `${safeSummary.unknown.count} invoice(s) with unrecognized payment data — check manually`;
+          warningEl.classList.remove('hidden');
+        } else {
+          warningEl.classList.add('hidden');
+        }
+
+        const listEl = $('paymentInvoiceList');
+        if (invoices.length === 0) {
+          listEl.innerHTML = '<div class="text-slate-500 text-xs px-1 py-2">No invoices yet today</div>';
+          return;
+        }
+        listEl.innerHTML = sortByOutstandingDesc(invoices).map(buildPaymentRow).join('');
+      }
+
       /* ------------------------------- Init ---------------------------------- */
 
       function registerServiceWorker() {
@@ -574,7 +703,10 @@
       }
 
       function bindEvents() {
-        $('refreshBtn').addEventListener('click', () => fetchData(currentStartDate, currentEndDate));
+        $('refreshBtn').addEventListener('click', () => {
+          fetchData(currentStartDate, currentEndDate);
+          fetchTodayPayments();
+        });
         $('applyDateBtn').addEventListener('click', applyCustomDate);
         $('searchInput').addEventListener('input', filterTable);
 
@@ -597,6 +729,7 @@
         bindEvents();
         updateOnlineStatus();
         setPreset('today');
+        fetchTodayPayments();
       });
     </script>
   </body>
