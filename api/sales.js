@@ -104,6 +104,13 @@ async function fetchAllInvoices(startDate, endDate) {
   }
 }
 
+function parseOutstandingAmount(rawValue) {
+  if (rawValue === undefined || rawValue === null) return null;
+  const parsed = parseFloat(rawValue);
+  if (Number.isNaN(parsed)) return null;
+  return Math.round(parsed * 100) / 100;
+}
+
 function normalizeInvoices(rawInvoices) {
   return rawInvoices.map(inv => {
     const master = inv.master || inv;
@@ -114,6 +121,7 @@ function normalizeInvoices(rawInvoices) {
       docDate: master.docDate || '',
       customerName: master.debtorName || master.customerName || '',
       grandTotal: Math.round(parseFloat(master.finalTotal || master.total || 0) * 100) / 100,
+      outstandingAmount: parseOutstandingAmount(master.outstandingAmount),
       lineItems: details.map(d => ({
         sku: d.productCode || d.sku || '',
         description: d.description || '',
@@ -261,3 +269,5 @@ module.exports = async (req, res) => {
 
 module.exports.aggregateBySKU = aggregateBySKU;
 module.exports.getLocalToday = getLocalToday;
+module.exports.normalizeInvoices = normalizeInvoices;
+module.exports.parseOutstandingAmount = parseOutstandingAmount;

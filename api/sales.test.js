@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateBySKU, getLocalToday } = require('./sales.js');
+const { aggregateBySKU, getLocalToday, normalizeInvoices, parseOutstandingAmount } = require('./sales.js');
 
 test('aggregateBySKU groups quantity sold per customer, sorted descending', () => {
   const invoices = [
@@ -78,4 +78,55 @@ test('getLocalToday falls back to the UTC date when the timezone is invalid', ()
   const now = new Date('2026-08-12T16:30:00Z');
 
   assert.equal(getLocalToday('Not/AZone', now), '2026-08-12');
+});
+
+test('parseOutstandingAmount parses a numeric string and rounds to 2 decimals', () => {
+  assert.equal(parseOutstandingAmount('1234.5678'), 1234.57);
+});
+
+test('parseOutstandingAmount returns null when the value is missing', () => {
+  assert.equal(parseOutstandingAmount(undefined), null);
+  assert.equal(parseOutstandingAmount(null), null);
+});
+
+test('parseOutstandingAmount returns null for a non-numeric value', () => {
+  assert.equal(parseOutstandingAmount('not-a-number'), null);
+});
+
+test('normalizeInvoices reads outstandingAmount from the raw invoice master record', () => {
+  const rawInvoices = [
+    {
+      master: {
+        docNo: 'SI-001',
+        docDate: '2026-08-14',
+        debtorName: 'ABC Trading Sdn Bhd',
+        finalTotal: '1000.00',
+        outstandingAmount: '250.00'
+      },
+      details: []
+    }
+  ];
+
+  const [result] = normalizeInvoices(rawInvoices);
+
+  assert.equal(result.grandTotal, 1000);
+  assert.equal(result.outstandingAmount, 250);
+});
+
+test('normalizeInvoices sets outstandingAmount to null when AutoCount does not return the field', () => {
+  const rawInvoices = [
+    {
+      master: {
+        docNo: 'SI-002',
+        docDate: '2026-08-14',
+        debtorName: 'XYZ Industries Ltd',
+        finalTotal: '500.00'
+      },
+      details: []
+    }
+  ];
+
+  const [result] = normalizeInvoices(rawInvoices);
+
+  assert.equal(result.outstandingAmount, null);
 });
