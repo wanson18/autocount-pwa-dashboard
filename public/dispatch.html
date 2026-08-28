@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="Delivery dispatch board for Wanson operations clerks" />
+    <title>Delivery Dispatch — AutoCount Sales Dashboard</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="stylesheet" href="/dispatch.css" />
+  </head>
+  <body>
+    <div class="dispatch-app" id="dispatchApp">
+      <header class="page-header" aria-labelledby="pageTitle">
+        <div class="brand-lockup">
+          <a class="back-link" href="/" aria-label="Back to Sales Dashboard">←</a>
+          <div>
+            <p class="eyebrow">Operations</p>
+            <h1 id="pageTitle">Delivery Dispatch</h1>
+          </div>
+        </div>
+        <div class="header-meta" aria-label="Dispatch status">
+          <span class="online-indicator" aria-hidden="true"></span>
+          <span>Fixture preview</span>
+          <time id="updatedAt" datetime="2026-08-28">28 Aug 2026</time>
+        </div>
+      </header>
+
+      <p class="intro-copy">Plan one physical trip across both company invoice queues. Accounting ownership stays visible on every stop.</p>
+
+      <nav class="tab-list" aria-label="Dispatch sections" role="tablist">
+        <button class="tab-button is-active" id="boardTab" type="button" role="tab" aria-selected="true" aria-controls="boardView" data-tab="board">Board</button>
+        <button class="tab-button" id="tripsTab" type="button" role="tab" aria-selected="false" aria-controls="tripsView" data-tab="trips">Trips</button>
+        <button class="tab-button" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" data-tab="reports">Reports</button>
+        <button class="tab-button" id="resourcesTab" type="button" role="tab" aria-selected="false" aria-controls="resourcesView" data-tab="resources">Resources</button>
+      </nav>
+
+      <div class="status-row" aria-live="polite" aria-atomic="true">
+        <span class="status-icon" aria-hidden="true">i</span>
+        <span id="statusMessage">Assignment controls are shown for review and will be enabled in Task 6.</span>
+      </div>
+
+      <main>
+        <section class="view" id="boardView" role="tabpanel" aria-labelledby="boardTab">
+          <div class="toolbar panel">
+            <div>
+              <p class="eyebrow">Invoice date</p>
+              <h2>Friday, 28 August 2026</h2>
+            </div>
+            <div class="toolbar-fields">
+              <label class="field-group" for="companyFilter">
+                <span>Company view</span>
+                <select id="companyFilter" class="field-control">
+                  <option value="all">Combined · both companies</option>
+                  <option value="enterprise">Enterprise only</option>
+                  <option value="sdn_bhd">Sdn Bhd only</option>
+                </select>
+              </label>
+              <button class="secondary-button" type="button" id="refreshBoard">Refresh fixture</button>
+            </div>
+          </div>
+
+          <div class="board-grid" aria-label="Dispatch board">
+            <section class="queue-panel panel" aria-labelledby="unassignedTitle">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Ready to place</p>
+                  <h2 id="unassignedTitle">Unassigned invoices <span class="count-pill" id="unassignedCount">0</span></h2>
+                </div>
+                <span class="queue-key" aria-label="Combined company queue">ALL</span>
+              </div>
+              <p class="section-help">Drag on desktop, or select an invoice and trip on mobile. Assignment is not active in this preview.</p>
+              <div class="invoice-list" id="unassignedList" aria-live="polite"></div>
+            </section>
+
+            <section class="trips-panel" aria-labelledby="tripsTitle">
+              <div class="section-heading trips-heading">
+                <div>
+                  <p class="eyebrow">Physical loading plan</p>
+                  <h2 id="tripsTitle">Today’s trips</h2>
+                </div>
+                <button class="primary-button" type="button" disabled aria-describedby="assignmentExplanation">+ New trip <span class="button-note">Task 6</span></button>
+              </div>
+              <p class="section-help" id="assignmentExplanation">Assignment and trip creation stay disabled until the operational API work in Task 6.</p>
+              <div class="trip-list" id="tripList"></div>
+            </section>
+          </div>
+
+          <aside class="selection-panel panel" id="selectionPanel" aria-labelledby="selectionTitle">
+            <div>
+              <p class="eyebrow">Clerk focus</p>
+              <h2 id="selectionTitle">Select an invoice or trip</h2>
+            </div>
+            <p id="selectionSummary">Selected details will appear here without changing the fixture.</p>
+          </aside>
+        </section>
+
+        <section class="view panel placeholder-view" id="tripsView" role="tabpanel" aria-labelledby="tripsTab" hidden>
+          <p class="eyebrow">Trips</p>
+          <h2>Trip overview</h2>
+          <p>Trip history and status controls will be connected after the dispatch API is available.</p>
+        </section>
+
+        <section class="view panel placeholder-view" id="reportsView" role="tabpanel" aria-labelledby="reportsTab" hidden>
+          <p class="eyebrow">Reports</p>
+          <h2>Delivery reports</h2>
+          <p>Period filters and export will use persisted assignment snapshots in a later task.</p>
+        </section>
+
+        <section class="view panel placeholder-view" id="resourcesView" role="tabpanel" aria-labelledby="resourcesTab" hidden>
+          <p class="eyebrow">Resources</p>
+          <h2>Drivers and lorries</h2>
+          <p>Resource maintenance will be connected after clerk sign-in and the resource API are available.</p>
+        </section>
+      </main>
+
+      <footer class="page-footer">
+        <span>Dispatch preview · no records are changed</span>
+        <span class="future-action">Print Items area reserved for Task 7</span>
+      </footer>
+    </div>
+    <script type="module" src="/dispatch.js"></script>
+  </body>
+</html>
