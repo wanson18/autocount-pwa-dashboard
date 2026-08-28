@@ -8,7 +8,10 @@ const COMPANY_KEYS = ['enterprise', 'sdn_bhd'];
 function isValidDate(value) {
   if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
-  return date.toISOString().slice(0, 10) === value;
+  return !Number.isNaN(date.getTime())
+    && date.getUTCFullYear() === Number(value.slice(0, 4))
+    && date.getUTCMonth() + 1 === Number(value.slice(5, 7))
+    && date.getUTCDate() === Number(value.slice(8, 10));
 }
 
 function requestError(res, message) {
@@ -40,7 +43,14 @@ function createDispatchInvoicesHandler({ adapter, configs } = {}) {
           const invoices = await resolvedAdapter.listInvoices(resolvedConfigs[key], startDate, endDate);
           return [key, { status: 'ok', invoiceCount: invoices.length }, invoices];
         } catch (error) {
-          return [key, { status: 'unavailable', errorCode: 'source_unavailable' }, []];
+          const integrityError = error && ['duplicate_doc_key', 'invalid_source_data'].includes(error.code);
+          return [
+            key,
+            integrityError
+              ? { status: 'invalid', errorCode: error.code }
+              : { status: 'unavailable', errorCode: 'source_unavailable' },
+            [],
+          ];
         }
       }));
 

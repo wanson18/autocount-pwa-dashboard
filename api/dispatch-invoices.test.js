@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { loadCompanyConfigs, publicCompany } = require('../lib/autocount/company-config');
+const { AutoCountClient } = require('../lib/autocount/client');
 const { InvoiceAdapter, DuplicateInvoiceError } = require('../lib/dispatch/invoice-adapter');
 const { createDispatchInvoicesHandler } = require('./dispatch-invoices');
 
@@ -185,6 +186,71 @@ test('adapter marks a non-cancelled invoice without authoritative UOM as blocked
   assert.equal(invoice.items[0].uom, null);
 });
 
+test('adapter rejects invoices without an authoritative boolean cancellation state', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  for (const cancellationState of [undefined, null, 'false']) {
+    const row = structuredClone(enterpriseFixture.data[0]);
+    if (cancellationState === undefined) delete row.master.cancelled;
+    else row.master.cancelled = cancellationState;
+    const client = fakeClient({
+      enterprise: [{ data: [row], totalCount: 1 }],
+      sdn_bhd: [{ data: [], totalCount: 0 }],
+    });
+
+    await assert.rejects(
+      () => new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28'),
+      (error) => error.code === 'invalid_source_data',
+    );
+  }
+});
+
+test('adapter reports an incomplete source when a page ends before totalCount', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const client = fakeClient({
+    enterprise: [
+      { data: [enterpriseFixture.data[0]], totalCount: 2 },
+      { data: [], totalCount: 2 },
+    ],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+
+  await assert.rejects(
+    () => new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28'),
+    (error) => error.code === 'invalid_source_data',
+  );
+});
+
+test('adapter rejects an invoice with an invalid calendar date as source data', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const row = structuredClone(enterpriseFixture.data[0]);
+  row.master.docDate = '2026-13-01';
+  const client = fakeClient({
+    enterprise: [{ data: [row], totalCount: 1 }],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+
+  await assert.rejects(
+    () => new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28'),
+    (error) => error.code === 'invalid_source_data',
+  );
+});
+
+test('adapter keeps a mismatched product-master identity blocked', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const row = structuredClone(enterpriseFixture.data[0]);
+  delete row.details[0].unit;
+  const client = fakeClient({
+    enterprise: [{ data: [row], totalCount: 1 }],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+  client.getProduct = async () => ({ product: { productCode: 'DIFFERENT-ITEM', unit: 'CTN' } });
+
+  const [invoice] = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+  assert.equal(invoice.items[0].uom, null);
+  assert.equal(invoice.eligibility, 'blocked_missing_uom');
+});
+
 test('adapter enriches missing detail UOM from the documented product master', async () => {
   const configs = loadCompanyConfigs(ENV);
   const client = fakeClient({
@@ -218,6 +284,19 @@ test('endpoint validates ISO dates before contacting AutoCount', async () => {
   assert.equal(called, false);
 });
 
+test('endpoint returns invalid_request for an invalid calendar month', async () => {
+  const handler = createDispatchInvoicesHandler({
+    adapter: { listInvoices: async () => [] },
+    configs: loadCompanyConfigs(ENV),
+  });
+  const res = responseRecorder();
+
+  await handler({ method: 'GET', query: { startDate: '2026-13-01', endDate: '2026-08-28', company: 'enterprise' } }, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error.code, 'invalid_request');
+});
+
 test('all endpoint returns mixed company invoices and source health', async () => {
   const configs = loadCompanyConfigs(ENV);
   const adapter = {
@@ -240,6 +319,27 @@ test('all endpoint returns mixed company invoices and source health', async () =
   assert.equal(JSON.stringify(res.body).includes('enterprise-book-fixture'), false);
 });
 
+test('endpoint preserves integrity error health separately from source outage health', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const adapter = {
+    async listInvoices(company) {
+      const error = new Error('internal test detail');
+      error.code = company.companyKey === 'enterprise' ? 'duplicate_doc_key' : 'invalid_source_data';
+      throw error;
+    },
+  };
+  const handler = createDispatchInvoicesHandler({ adapter, configs });
+  const res = responseRecorder();
+
+  await handler({ method: 'GET', query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'all' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.sources, {
+    enterprise: { status: 'invalid', errorCode: 'duplicate_doc_key' },
+    sdn_bhd: { status: 'invalid', errorCode: 'invalid_source_data' },
+  });
+});
+
 test('single-company endpoint does not fetch the other company', async () => {
   const configs = loadCompanyConfigs(ENV);
   const seen = [];
@@ -259,4 +359,32 @@ test('single-company endpoint does not fetch the other company', async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(seen, ['sdn_bhd']);
   assert.deepEqual(res.body.sources, { sdn_bhd: { status: 'ok', invoiceCount: 0 } });
+});
+
+test('AutoCount client preserves a decimal quantity lexeme at the HTTP boundary', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const http = {
+    async get() {
+      return {
+        status: 200,
+        data: String.raw`{"data":[{"master":{"docKey":"wire-doc-001","docNo":"WIRE-001","docDate":"2026-08-28","cancelled":false},"details":[{"productCode":"OIL-5KG","qty":0.100000000000000005,"unit":"CTN"}]}],"totalCount":1}`,
+      };
+    },
+  };
+  const client = new AutoCountClient({ baseUrl: 'https://example.invalid', http });
+
+  const payload = await client.listInvoicePage(configs.enterprise, { page: 1, startDate: '2026-08-28', endDate: '2026-08-28' });
+
+  assert.equal(payload.data[0].details[0].qty, '0.100000000000000005');
+});
+
+test('env example keeps legacy Sales variables alongside dispatch variables', () => {
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
+
+  assert.match(envExample, /^AUTOCOUNT_API_URL=/m);
+  assert.match(envExample, /^AUTOCOUNT_API_KEY=/m);
+  assert.match(envExample, /^AUTOCOUNT_KEY_ID=/m);
+  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_ID=/m);
+  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE=/m);
+  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD=/m);
 });
