@@ -6,6 +6,7 @@
     "dev": "vercel dev",
     "start": "vercel dev",
     "build": "echo 'No build step required - static frontend'",
+    "test:dispatch": "node --test api/dispatch-invoices.test.js",
     "test": "node --test api/*.test.js",
     "format:check": "prettier --check ."
   },
