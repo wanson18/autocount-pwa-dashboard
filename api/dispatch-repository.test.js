@@ -1,27 +1,55 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
+const { Pool } = require('pg');
 
 const { createTestDatabase } = require('../test/helpers/postgres');
 
 const LEGACY_MIGRATIONS_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'migration-upgrade-5fe2aa9');
+const HARDENING_MIGRATION_PATH = path.join(__dirname, '..', 'db', 'migrations', '002_delivery_dispatch_hardening.sql');
 
 let database;
 let repository;
 let pool;
 let resourceSequence = 0;
 
-test.before(async () => {
+async function initializePrimaryDatabase() {
   database = await createTestDatabase();
   pool = database.pool;
   const { migrate } = require('../scripts/migrate');
   await migrate({ pool, skipAdvisoryLock: database.embedded });
   const { createRepository } = require('../lib/dispatch/repository');
   repository = createRepository(pool);
+}
+
+test.before(async () => {
+  if (!process.env.TEST_DATABASE_URL) await initializePrimaryDatabase();
+});
+
+test.beforeEach(async () => {
+  if (process.env.TEST_DATABASE_URL) await initializePrimaryDatabase();
+});
+
+test.afterEach(async () => {
+  if (process.env.TEST_DATABASE_URL && database) {
+    const currentDatabase = database;
+    database = null;
+    pool = null;
+    repository = null;
+    await currentDatabase.close();
+  }
 });
 
 test.after(async () => {
-  await database.close();
+  if (database) await database.close();
+});
+
+test('embedded test database remains independent from provider schema isolation', {
+  skip: Boolean(process.env.TEST_DATABASE_URL),
+}, () => {
+  assert.equal(database.embedded, true);
+  assert.equal(database.schema, null);
 });
 
 async function seedResources() {
@@ -71,7 +99,7 @@ test('migration creates the six dispatch tables and is idempotent', async () => 
   const tables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
-    WHERE table_schema = 'public'
+    WHERE table_schema = current_schema()
       AND table_name IN (
         'dispatch_drivers', 'dispatch_vehicles', 'delivery_trips',
         'delivery_assignments', 'delivery_assignment_items', 'delivery_events',
@@ -254,9 +282,17 @@ test('migration blocks contaminated exact 001 data before hardening', async () =
     const hardeningConstraint = await legacyDatabase.pool.query(`
       SELECT count(*)::int AS count
       FROM pg_constraint
-      WHERE conname = 'delivery_assignment_items_positive_finite_quantity_check'
+      WHERE conrelid = 'delivery_assignment_items'::regclass
+        AND conname = 'delivery_assignment_items_positive_finite_quantity_check'
     `);
     assert.equal(hardeningConstraint.rows[0].count, 0);
+    const historicalQuantities = await legacyDatabase.pool.query(`
+      SELECT quantity::text AS quantity
+      FROM delivery_assignment_items
+      WHERE assignment_id = $1
+      ORDER BY line_no
+    `, [assignment.rows[0].id]);
+    assert.deepEqual(historicalQuantities.rows.map((row) => row.quantity), ['NaN', 'Infinity']);
   } finally {
     await legacyDatabase.close();
   }
@@ -301,8 +337,16 @@ async function createContaminatedLegacyDatabase() {
 test('legacy quantity preflight reports safe affected-row findings', async () => {
   const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
   try {
-    const { findLegacyQuantityContamination } = require('../scripts/migrate-preflight');
-    const findings = await findLegacyQuantityContamination({ pool: legacyDatabase.pool });
+    const {
+      getLegacyQuantitySummary,
+      iterateLegacyQuantityContamination,
+    } = require('../scripts/migrate-preflight');
+    const summary = await getLegacyQuantitySummary({ pool: legacyDatabase.pool });
+    const records = [];
+    for await (const batch of iterateLegacyQuantityContamination({ pool: legacyDatabase.pool })) {
+      records.push(...batch);
+    }
+    const findings = { ...summary, records };
     assert.deepEqual(findings, {
       condition: 'non_finite_delivery_assignment_item_quantities',
       count: 2,
@@ -374,6 +418,26 @@ test('explicit audited remediation archives originals and permits hardening', as
       },
     ]);
 
+    await assert.rejects(
+      () => legacyDatabase.pool.query(`
+        UPDATE delivery_assignment_item_quantity_remediations
+        SET replacement_quantity = 99
+        WHERE original_item_id = $1
+      `, [items[0].id]),
+      /append.only|immutable/i,
+    );
+    await assert.rejects(
+      () => legacyDatabase.pool.query(`
+        DELETE FROM delivery_assignment_item_quantity_remediations
+        WHERE original_item_id = $1
+      `, [items[0].id]),
+      /append.only|immutable/i,
+    );
+    await assert.rejects(
+      () => legacyDatabase.pool.query('TRUNCATE TABLE delivery_assignment_item_quantity_remediations'),
+      /append.only|immutable/i,
+    );
+
     const activeRows = await legacyDatabase.pool.query(`
       SELECT id, quantity::text AS quantity
       FROM delivery_assignment_items
@@ -403,6 +467,265 @@ test('explicit audited remediation archives originals and permits hardening', as
     ]);
   } finally {
     await legacyDatabase.close();
+  }
+});
+
+test('remediation request IDs are single-use and preserve audit history on retry', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  try {
+    const { remediateLegacyQuantities } = require('../scripts/remediate-legacy-quantities');
+    const requestId = 'legacy-remediation-single-use';
+    await remediateLegacyQuantities({
+      pool: legacyDatabase.pool,
+      replacements: { [items[0].id]: '2.5', [items[1].id]: '3.75' },
+      approvedBy: 'dispatch-operator',
+      requestId,
+      confirm: true,
+    });
+
+    const thirdItem = await legacyDatabase.pool.query(`
+      INSERT INTO delivery_assignment_items
+        (assignment_id, line_no, item_code, description, uom, quantity)
+      VALUES ($1, 3, 'OIL-RETRY', 'Retry NaN', 'CTN', 'NaN'::numeric)
+      RETURNING id
+    `, [assignmentId]);
+
+    await assert.rejects(
+      () => remediateLegacyQuantities({
+        pool: legacyDatabase.pool,
+        replacements: { [thirdItem.rows[0].id]: '4.5' },
+        approvedBy: 'dispatch-operator',
+        requestId,
+        confirm: true,
+      }),
+      /REQUEST_ID_ALREADY_USED/,
+    );
+
+    const auditCount = await legacyDatabase.pool.query(
+      'SELECT count(*)::int AS count FROM delivery_assignment_item_quantity_remediations',
+    );
+    assert.equal(auditCount.rows[0].count, 2);
+    const retryRow = await legacyDatabase.pool.query(`
+      SELECT quantity::text AS quantity
+      FROM delivery_assignment_items
+      WHERE id = $1
+    `, [thirdItem.rows[0].id]);
+    assert.deepEqual(retryRow.rows, [{ quantity: 'NaN' }]);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+test('remediation accepts only positive finite replacement quantities and rolls back invalid attempts', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  try {
+    const { remediateLegacyQuantities } = require('../scripts/remediate-legacy-quantities');
+    for (const [index, invalidQuantity] of ['0', '-1', 'NaN', 'Infinity', '-Infinity'].entries()) {
+      await assert.rejects(
+        () => remediateLegacyQuantities({
+          pool: legacyDatabase.pool,
+          replacements: { [items[0].id]: invalidQuantity, [items[1].id]: '3.75' },
+          approvedBy: 'dispatch-operator',
+          requestId: `legacy-remediation-invalid-${index}`,
+          confirm: true,
+        }),
+        /INVALID_REPLACEMENT/,
+      );
+    }
+
+    const activeRows = await legacyDatabase.pool.query(`
+      SELECT id, quantity::text AS quantity
+      FROM delivery_assignment_items
+      WHERE assignment_id = $1
+      ORDER BY id
+    `, [assignmentId]);
+    assert.deepEqual(activeRows.rows.map((row) => row.quantity), ['NaN', 'Infinity']);
+    const auditTable = await legacyDatabase.pool.query(
+      "SELECT to_regclass('delivery_assignment_item_quantity_remediations') AS table_name",
+    );
+    assert.equal(auditTable.rows[0].table_name, null);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+test('preflight emits complete deterministic keyset batches as NDJSON without an unbounded result object', async () => {
+  const { legacyDatabase } = await createContaminatedLegacyDatabase();
+  try {
+    const {
+      getLegacyQuantitySummary,
+      iterateLegacyQuantityContamination,
+      writeLegacyQuantityPreflight,
+    } = require('../scripts/migrate-preflight');
+    const summary = await getLegacyQuantitySummary({ pool: legacyDatabase.pool });
+    assert.deepEqual(summary, {
+      condition: 'non_finite_delivery_assignment_item_quantities',
+      count: 2,
+    });
+    assert.equal('records' in summary, false);
+
+    const batches = [];
+    for await (const batch of iterateLegacyQuantityContamination({
+      pool: legacyDatabase.pool,
+      batchSize: 1,
+    })) {
+      batches.push(batch);
+    }
+    assert.deepEqual(batches.map((batch) => batch.length), [1, 1]);
+    assert.deepEqual(
+      batches.flat().map((record) => record.quantityClass),
+      ['NaN', 'Infinity'],
+    );
+
+    const output = [];
+    await writeLegacyQuantityPreflight({
+      pool: legacyDatabase.pool,
+      batchSize: 1,
+      write: (line) => output.push(line),
+    });
+    const lines = output.join('').trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(lines[0], { type: 'summary', ...summary });
+    assert.deepEqual(lines.slice(1, -1).map((line) => line.type), ['record', 'record']);
+    assert.deepEqual(lines.at(-1), { type: 'complete', count: 2 });
+    assert.deepEqual(lines.slice(1, -1).map(({ type, ...record }) => record), batches.flat());
+    assert.equal(output.join('').includes('invoice_header'), false);
+    assert.equal(output.join('').includes('customer'), false);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+test('preflight keyset pagination covers the complete bigint ID range', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  try {
+    await legacyDatabase.pool.query(`
+      INSERT INTO delivery_assignment_items
+        (id, assignment_id, line_no, item_code, description, uom, quantity)
+      VALUES (-1, $1, 3, 'OIL-NEGATIVE-ID', 'Negative ID NaN', 'CTN', 'NaN'::numeric)
+    `, [assignmentId]);
+    const { getLegacyQuantitySummary, iterateLegacyQuantityContamination } = require('../scripts/migrate-preflight');
+    const summary = await getLegacyQuantitySummary({ pool: legacyDatabase.pool });
+    const records = [];
+    for await (const batch of iterateLegacyQuantityContamination({ pool: legacyDatabase.pool, batchSize: 2 })) {
+      records.push(...batch);
+    }
+    assert.equal(summary.count, 3);
+    assert.deepEqual(records.map((record) => record.itemId), [-1, items[0].id, items[1].id]);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+test('remediation rescans the complete scope inside its transaction and rolls back when it grows after preflight', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  let injected = false;
+  const racingPool = {
+    query: (...args) => legacyDatabase.pool.query(...args),
+    connect: async () => {
+      if (!injected) {
+        injected = true;
+        await legacyDatabase.pool.query(`
+          INSERT INTO delivery_assignment_items
+            (assignment_id, line_no, item_code, description, uom, quantity)
+          VALUES ($1, 3, 'OIL-RACE', 'Race NaN', 'CTN', 'NaN'::numeric)
+        `, [assignmentId]);
+      }
+      return legacyDatabase.pool.connect();
+    },
+  };
+
+  try {
+    const { remediateLegacyQuantities } = require('../scripts/remediate-legacy-quantities');
+    await assert.rejects(
+      () => remediateLegacyQuantities({
+        pool: racingPool,
+        replacements: { [items[0].id]: '2.5', [items[1].id]: '3.75' },
+        approvedBy: 'dispatch-operator',
+        requestId: 'legacy-remediation-race',
+        confirm: true,
+      }),
+      /REPLACEMENT_SET_MISMATCH/,
+    );
+
+    const activeRows = await legacyDatabase.pool.query(`
+      SELECT id, quantity::text AS quantity
+      FROM delivery_assignment_items
+      WHERE assignment_id = $1
+      ORDER BY id
+    `, [assignmentId]);
+    assert.deepEqual(activeRows.rows.map((row) => row.quantity), ['NaN', 'Infinity', 'NaN']);
+    const auditTable = await legacyDatabase.pool.query(
+      "SELECT to_regclass('delivery_assignment_item_quantity_remediations') AS table_name",
+    );
+    assert.equal(auditTable.rows[0].table_name, null);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+test('hardening locks assignment then item tables in a DML-blocking mode before contamination scan', () => {
+  const sql = fs.readFileSync(HARDENING_MIGRATION_PATH, 'utf8');
+  const lock = 'LOCK TABLE delivery_assignments, delivery_assignment_items IN SHARE ROW EXCLUSIVE MODE;';
+  assert.equal(sql.indexOf(lock), 0);
+  assert.ok(sql.indexOf('delivery_assignments') < sql.indexOf('delivery_assignment_items'));
+  assert.ok(sql.indexOf(lock) < sql.indexOf('SELECT count(*)'));
+});
+
+test('finite quantity classification is version-neutral and does not cast special values as numeric literals', () => {
+  const migration = fs.readFileSync(HARDENING_MIGRATION_PATH, 'utf8');
+  const preflight = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'migrate-preflight.js'), 'utf8');
+  const remediation = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'remediate-legacy-quantities.js'), 'utf8');
+  for (const source of [migration, preflight, remediation]) {
+    assert.doesNotMatch(source, /'(?:NaN|Infinity|-Infinity)'::numeric/);
+    assert.match(source, /quantity::text/);
+  }
+});
+
+test('TEST_DATABASE_URL fixtures use unique temporary schemas and clean them up', {
+  skip: !process.env.TEST_DATABASE_URL,
+}, async () => {
+  const first = await createTestDatabase();
+  const second = await createTestDatabase();
+  const firstSchema = first.schema;
+  const secondSchema = second.schema;
+  try {
+    assert.ok(firstSchema);
+    assert.ok(secondSchema);
+    assert.notEqual(firstSchema, secondSchema);
+    assert.equal((await first.pool.query('SELECT current_schema()')).rows[0].current_schema, firstSchema);
+    assert.equal((await second.pool.query('SELECT current_schema()')).rows[0].current_schema, secondSchema);
+
+    const { migrate } = require('../scripts/migrate');
+    await migrate({ pool: first.pool });
+    const firstTables = await first.pool.query(`
+      SELECT count(*)::int AS count
+      FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name = 'schema_migrations'
+    `);
+    const secondTables = await second.pool.query(`
+      SELECT count(*)::int AS count
+      FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name = 'schema_migrations'
+    `);
+    assert.equal(firstTables.rows[0].count, 1);
+    assert.equal(secondTables.rows[0].count, 0);
+  } finally {
+    await first.close();
+    await second.close();
+  }
+
+  const cleanupPool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
+  try {
+    const remaining = await cleanupPool.query(`
+      SELECT count(*)::int AS count
+      FROM information_schema.schemata
+      WHERE schema_name IN ($1, $2)
+    `, [firstSchema, secondSchema]);
+    assert.equal(remaining.rows[0].count, 0);
+  } finally {
+    await cleanupPool.end();
   }
 });
 

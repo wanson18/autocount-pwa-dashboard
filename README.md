@@ -94,12 +94,26 @@ The hardening migration refuses to add the finite-quantity constraint when an
 existing `001_delivery_dispatch.sql` database contains `NaN`, `Infinity`, or
 `-Infinity` item quantities. It aborts before the hardening DDL, leaves `002`
 unapplied, and reports only a count plus bounded item and assignment IDs.
+The migration first takes `SHARE ROW EXCLUSIVE` locks on
+`delivery_assignments` and `delivery_assignment_items` in that order. This
+blocks legacy inserts/updates for the scan and subsequent DDL while matching
+the repository's assignment-then-item write order.
+
+Finite classification uses `quantity::text` sentinels rather than
+version-specific special-value numeric casts, so the migration and preflight
+do not require a hidden PostgreSQL version assumption.
 
 Run the read-only structured preflight first:
 
 ```powershell
 npm run migrate:preflight
 ```
+
+Preflight output is NDJSON: one summary line, one bounded record line per
+affected item, and one completion line. Records are fetched with deterministic
+`id` keyset batches (100 by default, at most 1,000), so the output can be
+turned into an exact replacement map without loading the affected dataset into
+one in-memory result object.
 
 Do not correct these rows by editing or deleting them ad hoc. If a correction
 is authorized, prepare a JSON replacement map keyed by the reported item IDs,
@@ -115,16 +129,23 @@ node scripts/remediate-legacy-quantities.js `
 
 The replacement map must cover exactly the contaminated IDs and contain
 operator-supplied positive finite decimal values. The remediation transaction
-first appends every original item quantity and identifying field to
-`delivery_assignment_item_quantity_remediations`, together with approval and
-request metadata, and makes that audit table append-only. It then replaces the
-active row with the supplied value while retaining its item ID. Migration does
-not invoke this path, and omitting `--confirm` cannot change data. Review the
-preflight findings, replacement values, and audit rows before running
-`npm run migrate` again.
+acquires the migration advisory lock and the same assignment-then-item table
+locks, rescans the complete contaminated set, and compares the replacement map
+inside that transaction. Every original item quantity and identifying field is
+then appended to `delivery_assignment_item_quantity_remediations`, together
+with approval and request metadata, and makes that audit table append-only. It
+then replaces the active row with the supplied value while retaining its item
+ID. A new contamination or replacement-set mismatch rolls the whole operation
+back; request IDs are single-use and audit history cannot be overwritten or
+truncated. Migration does not invoke this path, and omitting `--confirm` cannot
+change data. Review the preflight findings, replacement values, and audit rows
+before running `npm run migrate` again.
 
 Repository tests execute the actual migration SQL and transaction behavior
-against in-memory WASM PostgreSQL when no test URL is configured:
+against in-memory WASM PostgreSQL when no test URL is configured. When
+`TEST_DATABASE_URL` is configured, each test fixture receives a unique
+temporary schema, sets it as its connection `search_path`, and drops it with
+`CASCADE` during cleanup:
 
 ```powershell
 npm run test:repository
@@ -132,8 +153,9 @@ npm run test:repository
 
 To run the same file against a temporary real Postgres database, set
 `TEST_DATABASE_URL` for that command. The embedded engine cannot prove
-Postgres advisory-lock behavior or Vercel pool attachment; those require the
-real preview gate.
+provider-specific advisory-lock/table-lock contention, pooled `pg`
+network/TLS behavior, or Vercel pool attachment; those require the separate
+real-Postgres run.
 
 ## Deploy to Vercel
 

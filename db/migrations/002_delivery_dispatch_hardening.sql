@@ -1,3 +1,5 @@
+LOCK TABLE delivery_assignments, delivery_assignment_items IN SHARE ROW EXCLUSIVE MODE;
+
 DO $$
 DECLARE
   contaminated_count BIGINT;
@@ -7,7 +9,7 @@ BEGIN
   SELECT count(*)
   INTO contaminated_count
   FROM delivery_assignment_items
-  WHERE quantity IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric);
+  WHERE quantity::text IN ('NaN', 'Infinity', '-Infinity');
 
   IF contaminated_count > 0 THEN
     SELECT coalesce(string_agg(id::text, ',' ORDER BY id), '')
@@ -15,7 +17,7 @@ BEGIN
     FROM (
       SELECT id
       FROM delivery_assignment_items
-      WHERE quantity IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+      WHERE quantity::text IN ('NaN', 'Infinity', '-Infinity')
       ORDER BY id
       LIMIT 20
     ) AS contaminated_items;
@@ -25,7 +27,7 @@ BEGIN
     FROM (
       SELECT DISTINCT assignment_id
       FROM delivery_assignment_items
-      WHERE quantity IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+      WHERE quantity::text IN ('NaN', 'Infinity', '-Infinity')
       ORDER BY assignment_id
       LIMIT 20
     ) AS contaminated_assignments;
@@ -55,9 +57,7 @@ BEGIN
       ADD CONSTRAINT delivery_assignment_items_positive_finite_quantity_check
       CHECK (
         quantity > 0
-        AND quantity <> 'NaN'::numeric
-        AND quantity <> 'Infinity'::numeric
-        AND quantity <> '-Infinity'::numeric
+        AND quantity::text NOT IN ('NaN', 'Infinity', '-Infinity')
       );
   END IF;
 END;
