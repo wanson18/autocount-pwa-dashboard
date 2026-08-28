@@ -8,6 +8,7 @@ const {
   createProviderTestDatabases,
   createTestDatabase,
 } = require('../test/helpers/postgres');
+const { createRepository } = require('../lib/dispatch/repository');
 
 const LEGACY_MIGRATIONS_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'migration-upgrade-5fe2aa9');
 const HARDENING_MIGRATION_PATH = path.join(__dirname, '..', 'db', 'migrations', '002_delivery_dispatch_hardening.sql');
@@ -98,7 +99,7 @@ function invoiceSnapshot(invoiceId, companyKey = 'enterprise') {
   };
 }
 
-test('migration creates the six dispatch tables and is idempotent', async () => {
+test('migration creates the dispatch tables and is idempotent', async () => {
   const tables = await pool.query(`
     SELECT table_name
     FROM information_schema.tables
@@ -106,7 +107,8 @@ test('migration creates the six dispatch tables and is idempotent', async () => 
       AND table_name IN (
         'dispatch_drivers', 'dispatch_vehicles', 'delivery_trips',
         'delivery_assignments', 'delivery_assignment_items', 'delivery_events',
-        'schema_migrations'
+        'dispatch_login_throttle_buckets', 'dispatch_login_throttle_meta',
+        'dispatch_resource_idempotency', 'schema_migrations'
       )
     ORDER BY table_name
   `);
@@ -116,6 +118,9 @@ test('migration creates the six dispatch tables and is idempotent', async () => 
     'delivery_events',
     'delivery_trips',
     'dispatch_drivers',
+    'dispatch_login_throttle_buckets',
+    'dispatch_login_throttle_meta',
+    'dispatch_resource_idempotency',
     'dispatch_vehicles',
     'schema_migrations',
   ]);
@@ -124,6 +129,8 @@ test('migration creates the six dispatch tables and is idempotent', async () => 
   assert.deepEqual(before.rows.map((row) => row.filename), [
     '001_delivery_dispatch.sql',
     '002_delivery_dispatch_hardening.sql',
+    '003_dispatch_login_throttling.sql',
+    '004_dispatch_resource_idempotency.sql',
   ]);
 
   const { migrate } = require('../scripts/migrate');
@@ -152,7 +159,12 @@ test('migration upgrades the exact 5fe2aa9 schema with hardening exactly once', 
     );
     assert.deepEqual(
       upgradedApplied.rows.map((row) => row.filename),
-      ['001_delivery_dispatch.sql', '002_delivery_dispatch_hardening.sql'],
+      [
+        '001_delivery_dispatch.sql',
+        '002_delivery_dispatch_hardening.sql',
+        '003_dispatch_login_throttling.sql',
+        '004_dispatch_resource_idempotency.sql',
+      ],
       'an existing 001 database must receive the additive hardening migration',
     );
 
@@ -467,6 +479,8 @@ test('explicit audited remediation archives originals and permits hardening', as
     assert.deepEqual(applied.rows.map((row) => row.filename), [
       '001_delivery_dispatch.sql',
       '002_delivery_dispatch_hardening.sql',
+      '003_dispatch_login_throttling.sql',
+      '004_dispatch_resource_idempotency.sql',
     ]);
   } finally {
     await legacyDatabase.close();
@@ -1106,6 +1120,110 @@ test('assignment transaction rolls back assignment, prior items, and events afte
   );
   assert.equal(assignmentRows.rows[0].count, 0);
   assert.equal(itemRows.rows[0].count, 0);
+  assert.equal(eventRows.rows[0].count, 0);
+});
+
+test('idempotent driver mutations replay one durable resource and event for the same actor and request', async () => {
+  const requestId = 'repository-idempotent-driver-001';
+  const first = await repository.createDriver({
+    name: 'Repository Idempotent Driver',
+    licenseNo: 'D-REPOSITORY-IDEMPOTENT-001',
+    actor: 'clerk-aiman',
+    requestId,
+  });
+  const second = await repository.createDriver({
+    name: 'Repository Idempotent Driver',
+    licenseNo: 'D-REPOSITORY-IDEMPOTENT-001',
+    actor: 'clerk-aiman',
+    requestId,
+  });
+  assert.deepEqual(second, first);
+
+  const events = (await repository.listEvents()).filter((event) => event.requestId === requestId);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].actor, 'clerk-aiman');
+
+  await assert.rejects(
+    () => repository.createDriver({
+      name: 'Conflicting Repository Driver',
+      licenseNo: 'D-REPOSITORY-IDEMPOTENT-002',
+      actor: 'clerk-aiman',
+      requestId,
+    }),
+    (error) => error.code === 'idempotency_conflict',
+  );
+});
+
+test('idempotent resource update records no event for a no-op and derives active transitions from persisted state', async () => {
+  const driver = await repository.createDriver({
+    name: 'State Aware Driver',
+    licenseNo: 'D-STATE-AWARE-001',
+    actor: 'clerk-aiman',
+    requestId: 'repository-state-create-001',
+  });
+  const before = await repository.listEvents();
+
+  const noOp = await repository.updateDriver(driver.id, {
+    active: true,
+    actor: 'clerk-aiman',
+    requestId: 'repository-state-noop-001',
+  });
+  assert.deepEqual(noOp, driver);
+  assert.equal((await repository.listEvents()).length, before.length);
+
+  const deactivated = await repository.updateDriver(driver.id, {
+    active: false,
+    actor: 'clerk-aiman',
+    requestId: 'repository-state-deactivate-001',
+  });
+  const reactivated = await repository.updateDriver(driver.id, {
+    active: true,
+    actor: 'clerk-aiman',
+    requestId: 'repository-state-reactivate-001',
+  });
+  assert.equal(deactivated.active, false);
+  assert.equal(reactivated.active, true);
+
+  const transitions = (await repository.listEvents()).filter((event) => (
+    event.payload.driverId === driver.id
+    && ['driver_deactivated', 'driver_reactivated'].includes(event.eventType)
+  ));
+  assert.deepEqual(transitions.map((event) => event.eventType), ['driver_deactivated', 'driver_reactivated']);
+  assert.equal(transitions[0].payload.before.active, true);
+  assert.equal(transitions[0].payload.after.active, false);
+  assert.equal(transitions[1].payload.before.active, false);
+  assert.equal(transitions[1].payload.after.active, true);
+});
+
+test('resource mutation rolls back the row, idempotency record, and audit event together', async () => {
+  const failingRepository = createRepository(pool);
+  failingRepository._appendEvent = async () => {
+    const error = new Error('audit insert failed');
+    error.code = 'audit_write_failed';
+    throw error;
+  };
+
+  await assert.rejects(
+    () => failingRepository.createDriver({
+      name: 'Rolled Back Resource',
+      licenseNo: 'D-RESOURCE-ROLLBACK-001',
+      actor: 'clerk-aiman',
+      requestId: 'repository-resource-rollback-001',
+    }),
+    (error) => error.code === 'audit_write_failed',
+  );
+
+  const resourceRows = await pool.query(
+    "SELECT count(*)::int AS count FROM dispatch_drivers WHERE license_no = 'D-RESOURCE-ROLLBACK-001'",
+  );
+  const idempotencyRows = await pool.query(
+    "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'repository-resource-rollback-001'",
+  );
+  const eventRows = await pool.query(
+    "SELECT count(*)::int AS count FROM delivery_events WHERE request_id = 'repository-resource-rollback-001'",
+  );
+  assert.equal(resourceRows.rows[0].count, 0);
+  assert.equal(idempotencyRows.rows[0].count, 0);
   assert.equal(eventRows.rows[0].count, 0);
 });
 

@@ -14,10 +14,11 @@ const {
 
 const RESOURCE_TYPES = new Set(['driver', 'lorry']);
 const ACTIVE_FILTERS = new Set(['true', 'false', 'all']);
-const DRIVER_CREATE_KEYS = ['type', 'name', 'licenseNo', 'phone', 'active'];
-const LORRY_CREATE_KEYS = ['type', 'registrationNo', 'description', 'active'];
-const DRIVER_PATCH_KEYS = ['type', 'id', 'name', 'licenseNo', 'phone', 'active'];
-const LORRY_PATCH_KEYS = ['type', 'id', 'registrationNo', 'description', 'active'];
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+const DRIVER_CREATE_KEYS = ['type', 'name', 'licenseNo', 'phone', 'active', 'request_id'];
+const LORRY_CREATE_KEYS = ['type', 'registrationNo', 'description', 'active', 'request_id'];
+const DRIVER_PATCH_KEYS = ['type', 'id', 'name', 'licenseNo', 'phone', 'active', 'request_id'];
+const LORRY_PATCH_KEYS = ['type', 'id', 'registrationNo', 'description', 'active', 'request_id'];
 
 function textField(value, { required = false, max = 160 } = {}) {
   if (value === null && !required) return null;
@@ -42,6 +43,11 @@ function idField(value) {
   throw new DispatchHttpError(400, 'invalid_request');
 }
 
+function requestIdField(value) {
+  if (typeof value === 'string' && REQUEST_ID_PATTERN.test(value)) return value;
+  throw new DispatchHttpError(400, 'invalid_request');
+}
+
 function normalizeCreateBody(body) {
   assertPlainObject(body);
   if (!RESOURCE_TYPES.has(body.type)) throw new DispatchHttpError(400, 'invalid_request');
@@ -53,11 +59,12 @@ function normalizeCreateBody(body) {
       phone: body.phone === undefined ? null : textField(body.phone, { max: 64 }),
       active: body.active === undefined ? true : booleanField(body.active),
     };
-    return { type: body.type, values: result };
+    return { type: body.type, requestId: requestIdField(body.request_id), values: result };
   }
   assertAllowedKeys(body, LORRY_CREATE_KEYS);
   return {
     type: body.type,
+    requestId: requestIdField(body.request_id),
     values: {
       registrationNo: textField(body.registrationNo, { required: true, max: 64 }),
       description: body.description === undefined ? null : textField(body.description, { max: 160 }),
@@ -84,7 +91,12 @@ function normalizePatchBody(body) {
   }
   if (body.active !== undefined) values.active = booleanField(body.active);
   if (!Object.keys(values).length) throw new DispatchHttpError(400, 'invalid_request');
-  return { type: body.type, id: idField(body.id), values };
+  return {
+    type: body.type,
+    id: idField(body.id),
+    requestId: requestIdField(body.request_id),
+    values,
+  };
 }
 
 function activeFilter(req) {
@@ -138,7 +150,11 @@ function createDispatchResourcesHandler({ repository, getSession, env = process.
       if (req?.method === 'POST') {
         const body = await parseJsonBody(req);
         const normalized = normalizeCreateBody(body);
-        const values = { ...normalized.values, actor: session.clerkId };
+        const values = {
+          ...normalized.values,
+          actor: session.clerkId,
+          requestId: normalized.requestId,
+        };
         const resource = normalized.type === 'driver'
           ? await resolvedRepository.createDriver(values)
           : await resolvedRepository.createVehicle(values);
@@ -151,7 +167,11 @@ function createDispatchResourcesHandler({ repository, getSession, env = process.
       if (req?.method === 'PATCH') {
         const body = await parseJsonBody(req);
         const normalized = normalizePatchBody(body);
-        const values = { ...normalized.values, actor: session.clerkId };
+        const values = {
+          ...normalized.values,
+          actor: session.clerkId,
+          requestId: normalized.requestId,
+        };
         const resource = normalized.type === 'driver'
           ? await resolvedRepository.updateDriver(normalized.id, values)
           : await resolvedRepository.updateVehicle(normalized.id, values);

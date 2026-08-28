@@ -14,6 +14,14 @@
       "destination": "/api/dispatch-invoices.js"
     },
     {
+      "source": "/api/dispatch",
+      "destination": "/api/dispatch-unknown.js"
+    },
+    {
+      "source": "/api/dispatch/(.*)",
+      "destination": "/api/dispatch-unknown.js"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/sales.js"
     }

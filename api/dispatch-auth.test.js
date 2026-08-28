@@ -16,7 +16,7 @@ const auth = optionalRequire('../lib/dispatch/auth');
 const sessionApi = optionalRequire('./dispatch-session');
 const invoicesApi = require('./dispatch-invoices');
 
-const SECRET = 'dispatch-test-secret-with-at-least-32-bytes';
+const SECRET = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64url');
 const NOW = new Date('2026-08-28T00:00:00.000Z');
 
 function responseRecorder() {
@@ -77,6 +77,16 @@ function jsonRequest(method, body, contentType = 'application/json') {
   };
 }
 
+function allowingThrottleStore() {
+  return {
+    async check() {
+      return { allowed: true, retryAfterSeconds: 0 };
+    },
+    async recordFailure() {},
+    async recordSuccess() {},
+  };
+}
+
 test('DISPATCH_USERS_JSON parsing validates private hashes and exposes only public clerk metadata', () => {
   const implementation = requireAuth();
   const raw = JSON.stringify([
@@ -103,6 +113,44 @@ test('DISPATCH_USERS_JSON parsing validates private hashes and exposes only publ
     ])),
     (error) => error.code === 'invalid_dispatch_config',
   );
+});
+
+test('session secret requires canonical base64url encoding of exactly 32 bytes', () => {
+  const implementation = requireAuth();
+  assert.doesNotThrow(() => implementation.parseSessionSecret(SECRET));
+  for (const invalidSecret of [
+    'a'.repeat(32),
+    `${SECRET}=`,
+    SECRET.slice(0, -1),
+    `${SECRET}0`,
+  ]) {
+    assert.throws(
+      () => implementation.parseSessionSecret(invalidSecret),
+      (error) => error.code === 'invalid_dispatch_config',
+    );
+  }
+});
+
+test('scrypt parser rejects unknown parameters, duplicate parameters, and out-of-bound encodings', () => {
+  const implementation = requireAuth();
+  const validSalt = Buffer.alloc(16, 3).toString('base64url');
+  const validKey = Buffer.alloc(64, 4).toString('base64url');
+  const withParameters = (parameters, salt = validSalt, key = validKey) => (
+    `scrypt$${parameters}$ignored$ignored$${salt}$${key}`
+  );
+
+  for (const malformed of [
+    withParameters('ln=14,r=8,p=1,unknown=2'),
+    withParameters('ln=14,r=8,r=8'),
+    `scrypt$16384$8$1$${Buffer.alloc(7).toString('base64url')}$${validKey}`,
+    `scrypt$16384$8$1$${validSalt}$${Buffer.alloc(129).toString('base64url')}`,
+    `scrypt$016384$8$1$${validSalt}$${validKey}`,
+  ]) {
+    assert.throws(
+      () => implementation.parseScryptHash(malformed),
+      (error) => error.code === 'invalid_dispatch_config',
+    );
+  }
 });
 
 test('scrypt PIN verification accepts the right PIN, rejects the wrong PIN, and fails closed for malformed hashes', async () => {
@@ -151,6 +199,11 @@ test('login signs an eight-hour cookie and session verification rejects tamperin
   const token = cookiePair.split('=')[1];
   const tampered = `${cookiePair.slice(0, cookiePair.indexOf(token))}${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`;
   assert.equal(implementation.verifySessionCookie(tampered, { env, now: NOW }), null);
+  assert.equal(implementation.verifySessionCookie(`${cookiePair}; ${cookiePair}`, { env, now: NOW }), null);
+  assert.equal(implementation.verifySessionCookie(`${cookiePair}=${''}`, { env, now: NOW }), null);
+  assert.deepEqual(implementation.verifySessionCookie(`${cookiePair};`, { env, now: NOW }), login.session);
+  const nonCanonicalSignature = `${cookiePair.split('=').slice(0, 1).join('=')}=${token.split('.')[0]}.${token.split('.')[1]}=`;
+  assert.equal(implementation.verifySessionCookie(nonCanonicalSignature, { env, now: NOW }), null);
   assert.equal(
     implementation.verifySessionCookie(cookiePair, {
       env,
@@ -179,7 +232,7 @@ test('invalid auth configuration fails closed without returning the secret or ha
 test('session POST returns a generic failure for either an unknown clerk or a wrong PIN', async () => {
   const api = requireSessionApi();
   const env = await makeEnv();
-  const handler = api.createDispatchSessionHandler({ env });
+  const handler = api.createDispatchSessionHandler({ env, throttleStore: allowingThrottleStore() });
 
   for (const credentials of [
     { clerkId: 'not-a-clerk', pin: '2468' },
@@ -201,7 +254,7 @@ test('session POST returns a generic failure for either an unknown clerk or a wr
 test('session GET reports the public session and DELETE clears the same cookie scope', async () => {
   const api = requireSessionApi();
   const env = await makeEnv();
-  const handler = api.createDispatchSessionHandler({ env, now: NOW });
+  const handler = api.createDispatchSessionHandler({ env, now: NOW, throttleStore: allowingThrottleStore() });
   const loginRes = responseRecorder();
 
   await handler(jsonRequest('POST', { clerkId: 'clerk-aiman', pin: '2468' }), loginRes);
@@ -230,7 +283,7 @@ test('session GET reports the public session and DELETE clears the same cookie s
 test('session endpoint rejects unsupported methods, non-JSON bodies, extra fields, and oversized bodies safely', async () => {
   const api = requireSessionApi();
   const env = await makeEnv();
-  const handler = api.createDispatchSessionHandler({ env });
+  const handler = api.createDispatchSessionHandler({ env, throttleStore: allowingThrottleStore() });
 
   const methodRes = responseRecorder();
   await handler({ method: 'PATCH', headers: {} }, methodRes);
@@ -256,6 +309,59 @@ test('session endpoint rejects unsupported methods, non-JSON bodies, extra field
   }, oversizedRes);
   assert.equal(oversizedRes.statusCode, 413);
   assert.equal(oversizedRes.body.error.code, 'payload_too_large');
+});
+
+test('session POST fails closed before PIN verification when the durable throttle store is unavailable', async () => {
+  const api = requireSessionApi();
+  const implementation = requireAuth();
+  const env = await makeEnv();
+  let verifyCalls = 0;
+  const unavailable = {
+    async check() {
+      const error = new Error('provider detail must not escape');
+      error.code = 'dispatch_auth_store_unavailable';
+      throw error;
+    },
+  };
+  const handler = api.createDispatchSessionHandler({
+    auth: implementation,
+    env,
+    throttleStore: unavailable,
+    verifyPin: async () => {
+      verifyCalls += 1;
+      return false;
+    },
+  });
+  const res = responseRecorder();
+
+  await handler(jsonRequest('POST', { clerkId: 'clerk-aiman', pin: '9999' }), res);
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.error.code, 'authentication_unavailable');
+  assert.equal(verifyCalls, 0);
+  assert.equal(JSON.stringify(res.body).includes('provider detail'), false);
+});
+
+test('blocked login uses a generic 429 envelope and Retry-After without exposing bucket inputs', async () => {
+  const api = requireSessionApi();
+  const env = await makeEnv();
+  const handler = api.createDispatchSessionHandler({
+    env,
+    throttleStore: {
+      async check() { return { allowed: false, retryAfterSeconds: 17 }; },
+    },
+  });
+  const res = responseRecorder();
+
+  await handler(jsonRequest('POST', { clerkId: 'clerk-aiman', pin: '2468' }), res);
+
+  assert.equal(res.statusCode, 429);
+  assert.equal(res.headers['Retry-After'], '17');
+  assert.deepEqual(res.body.error, {
+    code: 'too_many_requests',
+    message: 'Too many sign-in attempts. Try again later.',
+  });
+  assert.equal(JSON.stringify(res.body).includes('clerk-aiman'), false);
 });
 
 test('dispatch invoice reads require a session before contacting the source', async () => {
@@ -290,7 +396,12 @@ test('deployment configuration keeps dispatch credentials server-side and dispat
       { source: '/api/dispatch/session', destination: '/api/dispatch-session.js' },
       { source: '/api/dispatch/resources', destination: '/api/dispatch-resources.js' },
       { source: '/api/dispatch/invoices', destination: '/api/dispatch-invoices.js' },
+      { source: '/api/dispatch/(.*)', destination: '/api/dispatch-unknown.js' },
     ],
+  );
+  assert.deepEqual(
+    vercel.rewrites.find((rewrite) => rewrite.source === '/api/dispatch'),
+    { source: '/api/dispatch', destination: '/api/dispatch-unknown.js' },
   );
   const dispatchHeaders = vercel.headers.filter((entry) => entry.source.includes('dispatch'));
   assert.ok(dispatchHeaders.some((entry) => entry.headers.some((header) => (

@@ -1,5 +1,15 @@
-const CACHE_NAME = 'sales-dashboard-v4';
-const STATIC_ASSETS = ['/', '/index.html', '/today-invoices.html', '/manifest.json', '/icons/icon-192.png'];
+const CACHE_NAME = 'sales-dashboard-v5';
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/today-invoices.html',
+  '/dispatch.html',
+  '/dispatch.css',
+  '/dispatch.js',
+  '/dispatch-state.mjs',
+  '/manifest.json',
+  '/icons/icon-192.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

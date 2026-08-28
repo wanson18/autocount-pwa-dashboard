@@ -23,6 +23,7 @@ import {
 import {
   createDispatchApp,
   renderInvoiceCard,
+  renderResources,
   renderTripCard,
   resolveDispatchClickTarget,
 } from '../public/dispatch.js';
@@ -277,7 +278,7 @@ class FakeElement {
   }
 }
 
-function createFakeDispatchDocument() {
+function createFakeDispatchDocument({ protectedShell = false } = {}) {
   const tabs = ['board', 'trips', 'reports', 'resources'].map((tabName, index) => new FakeElement({
     id: `${tabName}Tab`,
     role: 'tab',
@@ -301,6 +302,17 @@ function createFakeDispatchDocument() {
     ['statusMessage', new FakeElement()],
     ...panels.map((panel) => [panel.id, panel]),
   ]);
+  if (protectedShell) {
+    for (const id of [
+      'loginView', 'authenticatedView', 'dispatchLoginForm', 'loginMessage', 'loginSubmit',
+      'clerkId', 'clerkPin', 'logoutButton', 'resourceStatus', 'driverList', 'lorryList',
+      'resourceForm', 'resourceType', 'resourceSubmit', 'showInactiveResources',
+      'driverResourceFields', 'lorryResourceFields',
+    ]) {
+      elements.set(id, new FakeElement({ id }));
+    }
+    elements.get('showInactiveResources').checked = false;
+  }
   const root = elements.get('dispatchApp');
   root.querySelector = (selector) => {
     if (selector.startsWith('#')) return elements.get(selector.slice(1)) || null;
@@ -317,6 +329,7 @@ function createFakeDispatchDocument() {
     panels,
     companyFilter: elements.get('companyFilter'),
     queueKey: elements.get('queueKey'),
+    elements,
     documentRef: { querySelector: (selector) => selector === '#dispatchApp' ? root : null },
   };
 }
@@ -527,7 +540,89 @@ test('dispatch client mutation transports send only server-owned resource fields
   await resourceTransport.updateResource({ type: 'driver', id: 7, active: false });
 
   assert.deepEqual(JSON.parse(calls[0].options.body), { clerkId: 'clerk-1', pin: '2468' });
-  assert.deepEqual(JSON.parse(calls[1].options.body), { type: 'driver', id: 7, active: false });
+  const updateBody = JSON.parse(calls[1].options.body);
+  assert.deepEqual(
+    { type: updateBody.type, id: updateBody.id, active: updateBody.active },
+    { type: 'driver', id: 7, active: false },
+  );
+  assert.match(updateBody.request_id, /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/);
   assert.equal(JSON.stringify(calls).includes('assigned_by'), false);
   assert.equal(JSON.stringify(calls).includes('actor_id'), false);
+});
+
+test('protected-resource 401 clears resource and actor state and returns the UI to login', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  const session = { clerkId: 'clerk-1', role: 'clerk' };
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: { loadBoard: async () => ({ invoices, trips }) },
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session }),
+      logout: async () => ({ authenticated: false }),
+    },
+    resourcesTransport: {
+      async loadResources() {
+        const error = new Error('expired');
+        error.code = 'unauthorized';
+        throw error;
+      },
+      async createResource() { return null; },
+      async updateResource() { return null; },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  renderResources(fake.root, {
+    drivers: [{ id: 1, name: 'Sensitive Driver', licenseNo: 'D-1', active: true }],
+    lorries: [{ id: 2, registrationNo: 'WXY-1', description: 'Sensitive Lorry', active: true }],
+  });
+
+  await assert.rejects(() => app.loadResources(), (error) => error.code === 'unauthorized');
+
+  assert.equal(app.getSession(), null);
+  assert.equal(fake.elements.get('loginView').hidden, false);
+  assert.equal(fake.elements.get('authenticatedView').hidden, true);
+  assert.equal(fake.elements.get('driverList').innerHTML, '');
+  assert.equal(fake.elements.get('lorryList').innerHTML, '');
+  assert.match(fake.elements.get('loginMessage').textContent, /session has expired/i);
+});
+
+test('logout keeps the authenticated view and reports an actionable retry when DELETE fails', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: { loadBoard: async () => ({ invoices, trips }) },
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session: { clerkId: 'clerk-1', role: 'clerk' } }),
+      async logout() {
+        const error = new Error('network down');
+        error.code = 'network_error';
+        throw error;
+      },
+    },
+    resourcesTransport: {
+      loadResources: async () => ({ drivers: [], lorries: [] }),
+      createResource: async () => null,
+      updateResource: async () => null,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await assert.rejects(() => app.logout(), (error) => error.code === 'network_error');
+
+  assert.notEqual(app.getSession(), null);
+  assert.equal(fake.elements.get('loginView').hidden, true);
+  assert.equal(fake.elements.get('authenticatedView').hidden, false);
+  assert.doesNotMatch(fake.elements.get('loginMessage').textContent, /signed out/i);
+  assert.match(fake.elements.get('statusMessage').textContent, /sign-out could not be completed.*try again/i);
+});
+
+test('resource action buttons have contextual accessible labels', () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  renderResources(fake.root, {
+    drivers: [{ id: 1, name: 'Aiman Driver', licenseNo: 'D-1001', active: true }],
+    lorries: [{ id: 2, registrationNo: 'WXY 1001', description: '10-ton lorry', active: false }],
+  });
+
+  assert.match(fake.elements.get('driverList').innerHTML, /aria-label="Deactivate driver Aiman Driver"/);
+  assert.match(fake.elements.get('lorryList').innerHTML, /aria-label="Reactivate lorry WXY 1001"/);
 });

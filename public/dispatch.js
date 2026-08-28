@@ -18,6 +18,7 @@ const COMPANY_BADGES = {
   enterprise: 'Enterprise',
   sdn_bhd: 'Sdn Bhd',
 };
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
 const $ = (root, selector) => root.querySelector(selector);
 
@@ -25,6 +26,42 @@ const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
+}
+
+function createRequestId() {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  if (typeof randomUUID === 'function') {
+    const value = randomUUID.call(globalThis.crypto);
+    if (REQUEST_ID_PATTERN.test(value)) return value;
+  }
+  const getRandomValues = globalThis.crypto?.getRandomValues;
+  if (typeof getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    getRandomValues.call(globalThis.crypto, bytes);
+    return `dispatch-${[...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+  return `dispatch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function mutationBody(resource) {
+  if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+    throw new Error('a resource payload is required');
+  }
+  const {
+    actor,
+    actor_id,
+    assigned_by,
+    request_id: suppliedRequestId,
+    ...serverOwnedFields
+  } = resource;
+  void actor;
+  void actor_id;
+  void assigned_by;
+  const request_id = suppliedRequestId === undefined ? createRequestId() : suppliedRequestId;
+  if (typeof request_id !== 'string' || !REQUEST_ID_PATTERN.test(request_id)) {
+    throw new Error('a valid request_id is required');
+  }
+  return { ...serverOwnedFields, request_id };
 }
 
 function companyKeyOf(invoice) {
@@ -225,11 +262,11 @@ export function createResourceTransport({ fetchImpl = globalThis.fetch } = {}) {
       return parseApiResponse(response, 'Resources could not be loaded.');
     },
     async createResource(resource) {
-      const response = await fetchImpl('/api/dispatch/resources', createJsonRequest('POST', resource));
+      const response = await fetchImpl('/api/dispatch/resources', createJsonRequest('POST', mutationBody(resource)));
       return parseApiResponse(response, 'The resource could not be added.');
     },
     async updateResource(resource) {
-      const response = await fetchImpl('/api/dispatch/resources', createJsonRequest('PATCH', resource));
+      const response = await fetchImpl('/api/dispatch/resources', createJsonRequest('PATCH', mutationBody(resource)));
       return parseApiResponse(response, 'The resource could not be updated.');
     },
   };
@@ -244,6 +281,7 @@ function renderResource(resource, type) {
   const title = type === 'driver' ? resource.name : identity;
   const detail = type === 'driver' ? (resource.phone || 'No phone recorded') : (resource.description || 'No description recorded');
   const nextActive = !resource.active;
+  const actionLabel = `${nextActive ? 'Reactivate' : 'Deactivate'} ${type} ${title}`;
   return `
     <article class="resource-card${resource.active ? '' : ' is-inactive'}">
       <div>
@@ -253,7 +291,7 @@ function renderResource(resource, type) {
       </div>
       <div class="resource-card-actions">
         <span class="status-badge">${resourceStatusLabel(resource)}</span>
-        <button class="secondary-button resource-toggle-button" type="button" data-resource-type="${type}" data-resource-id="${escapeHtml(resource.id)}" data-resource-active="${String(nextActive)}">${nextActive ? 'Reactivate' : 'Deactivate'}</button>
+        <button class="secondary-button resource-toggle-button" type="button" data-resource-type="${type}" data-resource-id="${escapeHtml(resource.id)}" data-resource-active="${String(nextActive)}" aria-label="${escapeHtml(actionLabel)}">${nextActive ? 'Reactivate' : 'Deactivate'}</button>
       </div>
     </article>`;
 }
@@ -315,6 +353,26 @@ export function createDispatchApp({
     if (resourceStatus) resourceStatus.textContent = message;
   }
 
+  function clearSensitiveState() {
+    boardRequestSequence += 1;
+    resourceRequestSequence += 1;
+    state = createDispatchState();
+    setAuthenticated(false);
+    render();
+    for (const id of ['driverList', 'lorryList']) {
+      const list = $(root, `#${id}`);
+      if (list) list.innerHTML = '';
+    }
+    resourceForm?.reset?.();
+    updateResourceTypeFields();
+  }
+
+  function handleSessionLoss() {
+    clearSensitiveState();
+    setLoginMessage('Your session has expired. Sign in again.');
+    setResourceMessage('Your session has expired. Sign in again.');
+  }
+
   function render() {
     renderDispatchBoard(root, state);
   }
@@ -337,7 +395,12 @@ export function createDispatchApp({
       return state;
     } catch (error) {
       if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
-      $(root, '#statusMessage').textContent = 'The board could not be loaded. Review the fixture transport before retrying.';
+      if (error.code === 'unauthorized') {
+        handleSessionLoss();
+        $(root, '#statusMessage').textContent = 'Your session has expired. Sign in again.';
+      } else {
+        $(root, '#statusMessage').textContent = 'The board could not be loaded. Review the fixture transport before retrying.';
+      }
       throw error;
     }
   }
@@ -355,9 +418,11 @@ export function createDispatchApp({
       return resources;
     } catch (error) {
       if (requestSequence !== resourceRequestSequence || !authenticated) return null;
-      setResourceMessage(error.code === 'unauthorized'
-        ? 'Your session has expired. Sign in again.'
-        : 'Resources could not be loaded. Try again.');
+      if (error.code === 'unauthorized') {
+        handleSessionLoss();
+      } else {
+        setResourceMessage('Resources could not be loaded. Try again.');
+      }
       throw error;
     }
   }
@@ -369,9 +434,11 @@ export function createDispatchApp({
       setResourceMessage('Resource updated.');
       await loadResources();
     } catch (error) {
-      setResourceMessage(error.code === 'unauthorized'
-        ? 'Your session has expired. Sign in again.'
-        : 'Resource could not be updated. Try again.');
+      if (error.code === 'unauthorized') {
+        handleSessionLoss();
+      } else {
+        setResourceMessage('Resource could not be updated. Try again.');
+      }
       throw error;
     }
   }
@@ -408,11 +475,13 @@ export function createDispatchApp({
       setResourceMessage('Resource added.');
       await loadResources();
     } catch (error) {
-      setResourceMessage(error.code === 'resource_conflict'
-        ? 'A resource with that identity already exists.'
-        : error.code === 'unauthorized'
-          ? 'Your session has expired. Sign in again.'
-          : 'Resource could not be added. Try again.');
+      if (error.code === 'resource_conflict') {
+        setResourceMessage('A resource with that identity already exists.');
+      } else if (error.code === 'unauthorized') {
+        handleSessionLoss();
+      } else {
+        setResourceMessage('Resource could not be added. Try again.');
+      }
       throw error;
     } finally {
       if (resourceSubmit) resourceSubmit.disabled = false;
@@ -449,11 +518,19 @@ export function createDispatchApp({
 
   async function logout() {
     try {
-      await sessionTransport.logout();
-    } finally {
-      setAuthenticated(false);
-      state = createDispatchState();
-      render();
+      const result = await sessionTransport.logout();
+      if (!result || result.authenticated !== false || result.success === false) {
+        const error = new Error('sign-out was not confirmed by the server');
+        error.code = 'logout_not_confirmed';
+        throw error;
+      }
+    } catch (error) {
+      $(root, '#statusMessage').textContent = 'Sign-out could not be completed. Try again.';
+      setResourceMessage('Sign-out could not be completed. Try again.');
+      throw error;
+    }
+    clearSensitiveState();
+    {
       setLoginMessage('You have been signed out.');
       clerkIdInput?.focus?.();
     }
@@ -472,8 +549,12 @@ export function createDispatchApp({
       } else {
         setLoginMessage('Sign in to continue.');
       }
-    } catch {
-      setLoginMessage('Sign-in is temporarily unavailable. Try again.');
+    } catch (error) {
+      if (error.code === 'unauthorized') {
+        handleSessionLoss();
+      } else {
+        setLoginMessage('Sign-in is temporarily unavailable. Try again.');
+      }
     }
   }
 

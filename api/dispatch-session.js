@@ -1,4 +1,6 @@
 const defaultAuth = require('../lib/dispatch/auth');
+const { pool } = require('../lib/db/pool');
+const { createLoginThrottleStore } = require('../lib/dispatch/throttle');
 const {
   assertAllowedKeys,
   assertPlainObject,
@@ -11,7 +13,14 @@ const {
 
 const LOGIN_BODY_KEYS = ['clerkId', 'pin'];
 
-function createDispatchSessionHandler({ auth = defaultAuth, env = process.env, now } = {}) {
+function createDispatchSessionHandler({
+  auth = defaultAuth,
+  env = process.env,
+  now,
+  throttleStore = createLoginThrottleStore(pool),
+  scryptLimiter,
+  verifyPin,
+} = {}) {
   return async function dispatchSession(req, res) {
     if (req?.method === 'OPTIONS') {
       if (typeof res.setHeader === 'function') res.setHeader('Allow', 'GET, POST, DELETE, OPTIONS');
@@ -46,7 +55,14 @@ function createDispatchSessionHandler({ auth = defaultAuth, env = process.env, n
 
       const login = await auth.authenticateDispatchLogin(
         { clerkId: body.clerkId, pin: body.pin },
-        { env, now },
+        {
+          env,
+          now,
+          req,
+          throttleStore,
+          scryptLimiter,
+          verifyPin,
+        },
       );
       if (!login) return sendError(res, 401, 'invalid_credentials');
       if (typeof res.setHeader === 'function') res.setHeader('Set-Cookie', login.cookie);

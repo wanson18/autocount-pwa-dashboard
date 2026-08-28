@@ -66,6 +66,9 @@ Required variables:
 | `AUTOCOUNT_KEY_ID`          | Your AutoCount Key ID                       |
 | `AUTOCOUNT_ACCOUNT_BOOK_ID` | Your account book ID (e.g., `63688`)        |
 | `USE_MOCK_DATA`             | `false` for live data, `true` for mock      |
+| `DATABASE_URL`              | Pooled PostgreSQL URL for dispatch state    |
+| `DISPATCH_USERS_JSON`       | Server-side clerk identities and scrypt hashes |
+| `DISPATCH_SESSION_SECRET`   | Base64url for exactly 32 random secret bytes |
 
 ### 3. Run Locally
 
@@ -87,6 +90,23 @@ The migration runner records applied filenames in `schema_migrations` and
 uses a transaction-scoped Postgres advisory lock. It does not print the
 connection string. The runtime pool is module-scoped and attached for Vercel
 Functions connection reuse.
+
+Dispatch authentication requires `DISPATCH_SESSION_SECRET` to be the canonical
+base64url encoding of exactly 32 random bytes (43 characters without `=`
+padding). PIN hashes use the canonical
+`scrypt$N$r$p$salt$derived-key` form with bounded parameters and byte lengths.
+Login throttling is persisted in PostgreSQL, keyed by HMAC digests of the
+normalized clerk ID and trusted client address; the service fails closed if that
+store is unavailable. Resource POST/PATCH requests require a validated
+`request_id`, and the database stores its fingerprint, response, and audit event
+in the same transaction so a retry cannot create a second resource or event.
+
+The dispatch browser uses same-origin JSON requests with a Secure, HttpOnly,
+`SameSite=Lax` session cookie. The CSRF boundary assumes no permissive CORS is
+configured and that cross-site forms cannot submit the required
+`application/json` mutation body. This is an explicit deployment assumption,
+not a substitute for authentication; if another origin must call dispatch, add
+an origin check or CSRF token before enabling it.
 
 ### Legacy non-finite quantity gate
 
