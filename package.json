@@ -7,15 +7,22 @@
     "start": "vercel dev",
     "build": "echo 'No build step required - static frontend'",
     "test:dispatch": "node --test api/dispatch-invoices.test.js",
+    "test:repository": "node --test api/dispatch-repository.test.js",
     "test": "node --test api/*.test.js",
+    "migrate": "node scripts/migrate.js",
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@vercel/functions": "^3.9.5",
     "axios": "^1.7.0",
     "dotenv": "^16.4.0",
-    "lossless-json": "^4.3.1"
+    "lossless-json": "^4.3.1",
+    "pg": "^8.23.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }

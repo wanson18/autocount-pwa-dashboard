@@ -73,6 +73,33 @@ Required variables:
 npx vercel dev
 ```
 
+## Delivery dispatch persistence
+
+Dispatch state is stored only in PostgreSQL. AutoCount remains the invoice
+source. Set `DATABASE_URL` to the pooled Postgres connection supplied by the
+deployment provider, then apply ordered migrations with:
+
+```powershell
+npm run migrate
+```
+
+The migration runner records applied filenames in `schema_migrations` and
+uses a transaction-scoped Postgres advisory lock. It does not print the
+connection string. The runtime pool is module-scoped and attached for Vercel
+Functions connection reuse.
+
+Repository tests execute the actual migration SQL and transaction behavior
+against in-memory WASM PostgreSQL when no test URL is configured:
+
+```powershell
+npm run test:repository
+```
+
+To run the same file against a temporary real Postgres database, set
+`TEST_DATABASE_URL` for that command. The embedded engine cannot prove
+Postgres advisory-lock behavior or Vercel pool attachment; those require the
+real preview gate.
+
 ## Deploy to Vercel
 
 ```bash
