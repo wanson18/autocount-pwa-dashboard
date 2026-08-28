@@ -1,5 +1,11 @@
 export const COMPANY_KEYS = ['enterprise', 'sdn_bhd'];
 export const COMPANY_FILTERS = ['all', ...COMPANY_KEYS];
+export const COMPANY_FILTER_LABELS = {
+  all: 'ALL',
+  enterprise: 'ENTERPRISE',
+  sdn_bhd: 'SDN BHD',
+};
+export const TAB_NAMES = ['board', 'trips', 'reports', 'resources'];
 
 export const COMPANY_NAMES = {
   enterprise: 'Wanson Enterprise',
@@ -16,6 +22,7 @@ export const DISPATCH_FIXTURE = {
     {
       companyKey: 'enterprise',
       invoiceId: 'enterprise-doc-001',
+      docKey: 'enterprise-doc-001',
       docNo: 'ENT-SI-0001',
       docDate: '2026-08-28',
       customer: { code: 'ENT-CUST-001', name: 'Sanitized Enterprise Customer' },
@@ -27,6 +34,7 @@ export const DISPATCH_FIXTURE = {
     {
       companyKey: 'sdn_bhd',
       invoiceId: 'sdn-bhd-doc-001',
+      docKey: 'sdn-bhd-doc-001',
       docNo: 'SDN-SI-0001',
       docDate: '2026-08-28',
       customer: { code: 'SDN-CUST-001', name: 'Sanitized Sdn Bhd Customer' },
@@ -38,6 +46,7 @@ export const DISPATCH_FIXTURE = {
     {
       companyKey: 'enterprise',
       invoiceId: 'enterprise-doc-002',
+      docKey: 'enterprise-doc-002',
       docNo: 'ENT-SI-0002',
       docDate: '2026-08-28',
       customer: { code: 'ENT-CUST-002', name: 'Second Enterprise Customer' },
@@ -49,6 +58,7 @@ export const DISPATCH_FIXTURE = {
     {
       companyKey: 'sdn_bhd',
       invoiceId: 'sdn-bhd-doc-002',
+      docKey: 'sdn-bhd-doc-002',
       docNo: 'SDN-SI-0002',
       docDate: '2026-08-28',
       customer: { code: 'SDN-CUST-002', name: 'Second Sdn Bhd Customer' },
@@ -124,6 +134,23 @@ export function createDispatchState({ invoices = DISPATCH_FIXTURE.invoices, trip
 export function setCompanyFilter(state, companyFilter) {
   if (!COMPANY_FILTERS.includes(companyFilter)) throw new Error(`invalid company filter: ${companyFilter}`);
   return { ...copy(state), companyFilter };
+}
+
+export function getCompanyFilterLabel(companyFilter) {
+  return COMPANY_FILTER_LABELS[companyFilter] || '';
+}
+
+export function reloadDispatchState(previousState, board) {
+  return createDispatchState({ ...board, companyFilter: previousState.companyFilter });
+}
+
+export function getTabNavigationIndex(currentIndex, key, tabCount = TAB_NAMES.length) {
+  if (!Number.isInteger(currentIndex) || !Number.isInteger(tabCount) || tabCount < 1) return null;
+  if (key === 'Home') return 0;
+  if (key === 'End') return tabCount - 1;
+  if (key === 'ArrowLeft') return (currentIndex - 1 + tabCount) % tabCount;
+  if (key === 'ArrowRight') return (currentIndex + 1) % tabCount;
+  return null;
 }
 
 export function visibleUnassignedInvoices(state) {

@@ -3,8 +3,11 @@ import {
   DISPATCH_FIXTURE,
   createDispatchState,
   createFixtureTransport,
+  getCompanyFilterLabel,
   getInvoiceKey,
   getTripInvoices,
+  getTabNavigationIndex,
+  reloadDispatchState,
   selectInvoice,
   selectTrip,
   setCompanyFilter,
@@ -48,7 +51,7 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false } 
         Assign to trip <span class="button-note">Available in Task 6</span>
       </button>`;
   return `
-    <article class="invoice-card${selectedClass}" data-invoice-key="${escapeHtml(key)}" tabindex="0" role="button" aria-label="Select invoice ${escapeHtml(invoice.docNo)} from ${escapeHtml(COMPANY_BADGES[companyKeyOf(invoice)] || companyKeyOf(invoice))}">
+    <article class="invoice-card${selectedClass}" data-invoice-key="${escapeHtml(key)}">
       <div class="invoice-heading">
         <span><span class="invoice-number">${escapeHtml(invoice.docNo)}</span>${companyBadge(invoice)}</span>
         <span class="drag-affordance" aria-label="Drag assignment available in Task 6">↔ Drag / select</span>
@@ -58,17 +61,18 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false } 
       <div class="invoice-footer">
         <span class="invoice-items">${itemSummary(invoice)}</span>
         <span class="invoice-date">${escapeHtml(invoice.docDate)}</span>
-      </div>${action}
+      </div>
+      <button class="invoice-select-button" type="button" data-select-invoice="${escapeHtml(key)}" aria-pressed="${String(selected)}" aria-label="Select invoice ${escapeHtml(invoice.docNo)} from ${escapeHtml(COMPANY_BADGES[companyKeyOf(invoice)] || companyKeyOf(invoice))}">Select invoice</button>${action}
     </article>`;
 }
 
-function renderTripCard(state, trip) {
+export function renderTripCard(state, trip) {
   const tripInvoices = getTripInvoices(state, trip.id);
   const driverName = trip.driver?.name || trip.driverName || 'Driver not set';
   const lorryNumber = trip.lorry?.registrationNo || trip.registrationNo || 'Lorry not set';
   const invoiceCount = tripInvoices.length;
   return `
-    <article class="trip-card${String(state.selectedTripId) === String(trip.id) ? ' is-selected' : ''}" data-trip-id="${escapeHtml(trip.id)}" tabindex="0" role="button" aria-label="Select trip ${escapeHtml(trip.id)} with ${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}">
+    <article class="trip-card${String(state.selectedTripId) === String(trip.id) ? ' is-selected' : ''}" data-trip-id="${escapeHtml(trip.id)}">
       <div class="trip-card-header">
         <div>
           <p class="eyebrow">Trip ${escapeHtml(trip.id)}</p>
@@ -78,6 +82,7 @@ function renderTripCard(state, trip) {
         <span class="status-badge">${escapeHtml(trip.status || 'planned')}</span>
       </div>
       <p class="trip-route">${escapeHtml(trip.routeNotes || 'Route notes not set')}</p>
+      <button class="trip-select-button" type="button" data-select-trip="${escapeHtml(trip.id)}" aria-pressed="${String(String(state.selectedTripId) === String(trip.id))}" aria-label="Select trip ${escapeHtml(trip.id)} with ${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}">Select trip</button>
       <div class="trip-invoices" aria-label="Invoices assigned to trip ${escapeHtml(trip.id)}">
         ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key })).join('') : '<div class="empty-dropzone">Drop or select an invoice here<br /><span>Assignment available in Task 6</span></div>'}
       </div>
@@ -106,7 +111,14 @@ export function renderDispatchBoard(root, state) {
   const unassigned = visibleUnassignedInvoices(state);
   const unassignedList = $(root, '#unassignedList');
   const tripList = $(root, '#tripList');
+  const companyFilter = $(root, '#companyFilter');
+  const queueKey = $(root, '#queueKey');
   $(root, '#unassignedCount').textContent = String(unassigned.length);
+  if (companyFilter) companyFilter.value = state.companyFilter;
+  if (queueKey) {
+    queueKey.textContent = getCompanyFilterLabel(state.companyFilter);
+    queueKey.setAttribute('aria-label', `${getCompanyFilterLabel(state.companyFilter)} company queue`);
+  }
   unassignedList.innerHTML = unassigned.length
     ? unassigned.map((invoice) => renderInvoiceCard(invoice, { selected: state.selectedInvoiceKey === invoice.key })).join('')
     : '<div class="empty-dropzone">No unassigned invoices in this company view.</div>';
@@ -149,8 +161,9 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
   async function loadBoard() {
     $(root, '#statusMessage').textContent = 'Loading fixture board…';
     try {
-      const board = await transport.loadBoard({ company: 'all' });
-      state = createDispatchState(board);
+      const company = state.companyFilter;
+      const board = await transport.loadBoard({ company });
+      state = reloadDispatchState(state, board);
       render();
       return state;
     } catch (error) {
@@ -159,11 +172,13 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
     }
   }
 
-  function activateTab(tabName) {
+  function activateTab(tabName, { focus = false } = {}) {
     root.querySelectorAll('[role="tab"]').forEach((tab) => {
       const active = tab.dataset.tab === tabName;
       tab.classList.toggle('is-active', active);
       tab.setAttribute('aria-selected', String(active));
+      tab.setAttribute('tabindex', active ? '0' : '-1');
+      if (active && focus) tab.focus();
     });
     root.querySelectorAll('[role="tabpanel"]').forEach((panel) => {
       panel.hidden = panel.id !== `${tabName}View`;
@@ -175,29 +190,27 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
   $(root, '#refreshBoard').addEventListener('click', () => loadBoard().catch(() => {}));
 
   root.addEventListener('click', (event) => {
-    const invoiceCard = event.target.closest('[data-invoice-key]');
-    if (invoiceCard && !event.target.closest('button')) {
-      setState(selectInvoice(state, invoiceCard.dataset.invoiceKey));
+    const invoiceSelect = event.target.closest('[data-select-invoice]');
+    if (invoiceSelect) {
+      setState(selectInvoice(state, invoiceSelect.dataset.selectInvoice));
       return;
     }
-    const tripCard = event.target.closest('[data-trip-id]');
-    if (tripCard && !event.target.closest('[data-invoice-key]') && !event.target.closest('button')) {
-      setState(selectTrip(state, tripCard.dataset.tripId));
+    const tripSelect = event.target.closest('[data-select-trip]');
+    if (tripSelect) {
+      setState(selectTrip(state, tripSelect.dataset.selectTrip));
     }
   });
 
   root.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    const invoiceCard = event.target.closest('[data-invoice-key]');
-    if (invoiceCard) {
-      event.preventDefault();
-      setState(selectInvoice(state, invoiceCard.dataset.invoiceKey));
+    const tab = event.target.closest?.('[role="tab"]');
+    if (tab) {
+      const tabs = [...root.querySelectorAll('[role="tab"]')];
+      const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length);
+      if (nextIndex !== null) {
+        event.preventDefault();
+        activateTab(tabs[nextIndex].dataset.tab, { focus: true });
+      }
       return;
-    }
-    const tripCard = event.target.closest('[data-trip-id]');
-    if (tripCard) {
-      event.preventDefault();
-      setState(selectTrip(state, tripCard.dataset.tripId));
     }
   });
 

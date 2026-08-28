@@ -30,10 +30,10 @@
       <p class="intro-copy">Plan one physical trip across both company invoice queues. Accounting ownership stays visible on every stop.</p>
 
       <nav class="tab-list" aria-label="Dispatch sections" role="tablist">
-        <button class="tab-button is-active" id="boardTab" type="button" role="tab" aria-selected="true" aria-controls="boardView" data-tab="board">Board</button>
-        <button class="tab-button" id="tripsTab" type="button" role="tab" aria-selected="false" aria-controls="tripsView" data-tab="trips">Trips</button>
-        <button class="tab-button" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" data-tab="reports">Reports</button>
-        <button class="tab-button" id="resourcesTab" type="button" role="tab" aria-selected="false" aria-controls="resourcesView" data-tab="resources">Resources</button>
+        <button class="tab-button is-active" id="boardTab" type="button" role="tab" aria-selected="true" aria-controls="boardView" tabindex="0" data-tab="board">Board</button>
+        <button class="tab-button" id="tripsTab" type="button" role="tab" aria-selected="false" aria-controls="tripsView" tabindex="-1" data-tab="trips">Trips</button>
+        <button class="tab-button" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" tabindex="-1" data-tab="reports">Reports</button>
+        <button class="tab-button" id="resourcesTab" type="button" role="tab" aria-selected="false" aria-controls="resourcesView" tabindex="-1" data-tab="resources">Resources</button>
       </nav>
 
       <div class="status-row" aria-live="polite" aria-atomic="true">
@@ -68,7 +68,7 @@
                   <p class="eyebrow">Ready to place</p>
                   <h2 id="unassignedTitle">Unassigned invoices <span class="count-pill" id="unassignedCount">0</span></h2>
                 </div>
-                <span class="queue-key" aria-label="Combined company queue">ALL</span>
+                <span class="queue-key" id="queueKey" aria-label="ALL company queue">ALL</span>
               </div>
               <p class="section-help">Drag on desktop, or select an invoice and trip on mobile. Assignment is not active in this preview.</p>
               <div class="invoice-list" id="unassignedList" aria-live="polite"></div>

@@ -183,6 +183,8 @@ h2 {
 .tab-button,
 .primary-button,
 .secondary-button,
+.invoice-select-button,
+.trip-select-button,
 .assign-button,
 .future-print-button {
   min-height: 44px;
@@ -377,7 +379,6 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 11px;
   background: #172235;
-  cursor: pointer;
 }
 
 .invoice-card:hover,
@@ -452,6 +453,32 @@ h2 {
   gap: 8px;
   padding-top: 9px;
   border-top: 1px solid rgba(71, 85, 105, 0.55);
+}
+
+.invoice-select-button,
+.trip-select-button {
+  border-color: var(--border-light);
+  background: #263449;
+  color: #dbeafe;
+  cursor: pointer;
+}
+
+.invoice-select-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 12px;
+}
+
+.trip-select-button {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.invoice-select-button:hover,
+.trip-select-button:hover {
+  border-color: rgba(147, 197, 253, 0.72);
+  background: var(--blue-soft);
 }
 
 .invoice-items {
