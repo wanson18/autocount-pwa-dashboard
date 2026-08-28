@@ -158,6 +158,49 @@ test('assignment preserves exact numeric quantities and immutable snapshots', as
     () => pool.query('UPDATE delivery_assignment_items SET quantity = 9.999 WHERE assignment_id = $1', [assignment.id]),
     /immutable|snapshot/i,
   );
+  await assert.rejects(
+    () => pool.query('DELETE FROM delivery_assignment_items WHERE assignment_id = $1', [assignment.id]),
+    /immutable|snapshot/i,
+  );
+});
+
+test('assignment identity and timestamp snapshots reject direct updates', async () => {
+  const { trip } = await seedTrip();
+  const assignment = await repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-IMMUTABLE') });
+  const updates = [
+    ['company_key', "'sdn_bhd'"],
+    ['invoice_id', "'INV-CHANGED'"],
+    ['doc_no', "'DOC-CHANGED'"],
+    ['doc_date', "'2026-08-29'"],
+    ['assigned_at', "CURRENT_TIMESTAMP"],
+    ['invoice_header', "'{}'::jsonb"],
+  ];
+
+  for (const [column, value] of updates) {
+    await assert.rejects(
+      () => pool.query(`UPDATE delivery_assignments SET ${column} = ${value} WHERE id = $1`, [assignment.id]),
+      /immutable|snapshot/i,
+      `direct update of ${column} should be rejected`,
+    );
+  }
+});
+
+test('numeric quantity checks reject every non-finite value and preserve decimal strings', async () => {
+  const { trip } = await seedTrip();
+  const valid = invoiceSnapshot('INV-FINITE');
+  valid.items = [{ ...valid.items[0], quantity: '12345678901234567890.000125' }];
+  const assignment = await repository.assignInvoice({ tripId: trip.id, ...valid });
+  assert.equal(assignment.items[0].quantity, '12345678901234567890.000125');
+
+  for (const [index, quantity] of ['NaN', 'Infinity', '-Infinity'].entries()) {
+    const snapshot = invoiceSnapshot(`INV-NONFINITE-${index}`);
+    snapshot.items = [{ ...snapshot.items[0], quantity }];
+    await assert.rejects(
+      () => repository.assignInvoice({ tripId: trip.id, ...snapshot }),
+      /check|finite|numeric|invalid/i,
+      `non-finite quantity ${quantity} should be rejected`,
+    );
+  }
 });
 
 test('active assignment uniqueness is company-scoped and permits reassignment after removal', async () => {
@@ -193,6 +236,28 @@ test('failed and returned assignments may be replaced but delivered assignments 
   );
 });
 
+test('loaded and out_for_delivery assignments stay unique, while returned assignments can be reused', async () => {
+  const { trip } = await seedTrip();
+  const loaded = await repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-LOADED') });
+  await repository.updateAssignment(loaded.id, { status: 'loaded' });
+  await assert.rejects(
+    () => repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-LOADED') }),
+    (error) => error.code === 'invoice_already_assigned' || /duplicate|unique/i.test(error.message),
+  );
+
+  const outForDelivery = await repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-OUT') });
+  await repository.updateAssignment(outForDelivery.id, { status: 'out_for_delivery' });
+  await assert.rejects(
+    () => repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-OUT') }),
+    (error) => error.code === 'invoice_already_assigned' || /duplicate|unique/i.test(error.message),
+  );
+
+  const returned = await repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-RETURNED') });
+  await repository.updateAssignment(returned.id, { status: 'returned' });
+  const replacement = await repository.assignInvoice({ tripId: trip.id, ...invoiceSnapshot('INV-RETURNED') });
+  assert.equal(replacement.status, 'assigned');
+});
+
 test('assignment moves keep snapshots and append event history', async () => {
   const first = await seedTrip();
   const second = await seedTrip();
@@ -208,6 +273,10 @@ test('assignment moves keep snapshots and append event history', async () => {
   });
   await assert.rejects(
     () => pool.query("UPDATE delivery_events SET event_type = 'tampered' WHERE id = $1", [events[0].id]),
+    /append.only|immutable|event history/i,
+  );
+  await assert.rejects(
+    () => pool.query('DELETE FROM delivery_events WHERE id = $1', [events[0].id]),
     /append.only|immutable|event history/i,
   );
   const current = await repository.getAssignment(assignment.id);
@@ -229,4 +298,44 @@ test('transaction helper rolls back all work after a failure', async () => {
   );
   const result = await pool.query("SELECT count(*)::int AS count FROM dispatch_drivers WHERE license_no = 'D-ROLLBACK'");
   assert.equal(result.rows[0].count, 0);
+});
+
+test('assignment transaction rolls back assignment, prior items, and events after a later item fails', async () => {
+  const { trip } = await seedTrip();
+  const snapshot = invoiceSnapshot('INV-ROLLBACK-ASSIGNMENT');
+  snapshot.items = [
+    snapshot.items[0],
+    { ...snapshot.items[1], itemCode: '' },
+  ];
+
+  await assert.rejects(
+    () => repository.assignInvoice({ tripId: trip.id, ...snapshot }),
+    /check|empty|invalid/i,
+  );
+
+  const assignmentRows = await pool.query(
+    'SELECT count(*)::int AS count FROM delivery_assignments WHERE invoice_id = $1',
+    [snapshot.invoiceId],
+  );
+  const itemRows = await pool.query(
+    `SELECT count(*)::int AS count
+     FROM delivery_assignment_items items
+     JOIN delivery_assignments assignments ON assignments.id = items.assignment_id
+     WHERE assignments.invoice_id = $1`,
+    [snapshot.invoiceId],
+  );
+  const eventRows = await pool.query(
+    'SELECT count(*)::int AS count FROM delivery_events WHERE trip_id = $1',
+    [trip.id],
+  );
+  assert.equal(assignmentRows.rows[0].count, 0);
+  assert.equal(itemRows.rows[0].count, 0);
+  assert.equal(eventRows.rows[0].count, 0);
+});
+
+test('project and lockfile declare the Node 20 runtime required by Vercel Functions', () => {
+  const packageJson = require('../package.json');
+  const packageLock = require('../package-lock.json');
+  assert.equal(packageJson.engines.node, '>=20.0.0');
+  assert.equal(packageLock.packages[''].engines.node, '>=20.0.0');
 });

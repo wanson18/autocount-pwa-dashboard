@@ -55,7 +55,12 @@ CREATE TABLE IF NOT EXISTS delivery_assignment_items (
   item_code TEXT NOT NULL CHECK (item_code <> ''),
   description TEXT NOT NULL,
   uom TEXT NOT NULL CHECK (uom <> ''),
-  quantity NUMERIC NOT NULL CHECK (quantity > 0),
+  quantity NUMERIC NOT NULL CHECK (
+    quantity > 0
+    AND quantity <> 'NaN'::numeric
+    AND quantity <> 'Infinity'::numeric
+    AND quantity <> '-Infinity'::numeric
+  ),
   UNIQUE (assignment_id, line_no)
 );
 
@@ -79,6 +84,12 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   IF TG_OP = 'DELETE'
+    OR NEW.id IS DISTINCT FROM OLD.id
+    OR NEW.company_key IS DISTINCT FROM OLD.company_key
+    OR NEW.invoice_id IS DISTINCT FROM OLD.invoice_id
+    OR NEW.doc_no IS DISTINCT FROM OLD.doc_no
+    OR NEW.doc_date IS DISTINCT FROM OLD.doc_date
+    OR NEW.assigned_at IS DISTINCT FROM OLD.assigned_at
     OR NEW.invoice_header IS DISTINCT FROM OLD.invoice_header
   THEN
     RAISE EXCEPTION 'delivery assignment invoice snapshot is immutable';
