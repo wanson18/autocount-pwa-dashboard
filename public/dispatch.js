@@ -31,6 +31,19 @@ function companyKeyOf(invoice) {
   return invoice.companyKey ?? invoice.company_key;
 }
 
+export function resolveDispatchClickTarget(target) {
+  if (target?.closest?.('button:disabled')) return null;
+  const invoiceSelect = target?.closest?.('[data-select-invoice]');
+  if (invoiceSelect?.dataset?.selectInvoice) {
+    return { kind: 'invoice', key: invoiceSelect.dataset.selectInvoice };
+  }
+  const tripSelect = target?.closest?.('[data-select-trip]');
+  if (tripSelect?.dataset?.selectTrip) {
+    return { kind: 'trip', id: tripSelect.dataset.selectTrip };
+  }
+  return null;
+}
+
 function companyBadge(invoice) {
   const companyKey = companyKeyOf(invoice);
   const className = companyKey === 'enterprise' ? 'enterprise' : 'sdn-bhd';
@@ -148,6 +161,7 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
   const root = documentRef.querySelector('#dispatchApp');
   if (!root) throw new Error('dispatch app root is required');
   let state = createDispatchState();
+  let boardRequestSequence = 0;
 
   function render() {
     renderDispatchBoard(root, state);
@@ -160,13 +174,16 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
 
   async function loadBoard() {
     $(root, '#statusMessage').textContent = 'Loading fixture board…';
+    const requestSequence = ++boardRequestSequence;
+    const requestedCompany = state.companyFilter;
     try {
-      const company = state.companyFilter;
-      const board = await transport.loadBoard({ company });
+      const board = await transport.loadBoard({ company: requestedCompany });
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
       state = reloadDispatchState(state, board);
       render();
       return state;
     } catch (error) {
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
       $(root, '#statusMessage').textContent = 'The board could not be loaded. Review the fixture transport before retrying.';
       throw error;
     }
@@ -190,14 +207,14 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
   $(root, '#refreshBoard').addEventListener('click', () => loadBoard().catch(() => {}));
 
   root.addEventListener('click', (event) => {
-    const invoiceSelect = event.target.closest('[data-select-invoice]');
-    if (invoiceSelect) {
-      setState(selectInvoice(state, invoiceSelect.dataset.selectInvoice));
+    const selection = resolveDispatchClickTarget(event.target);
+    if (!selection) return;
+    if (selection.kind === 'invoice') {
+      setState(selectInvoice(state, selection.key));
       return;
     }
-    const tripSelect = event.target.closest('[data-select-trip]');
-    if (tripSelect) {
-      setState(selectTrip(state, tripSelect.dataset.selectTrip));
+    if (selection.kind === 'trip') {
+      setState(selectTrip(state, selection.id));
     }
   });
 

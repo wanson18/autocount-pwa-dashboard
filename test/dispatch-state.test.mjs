@@ -20,7 +20,12 @@ import {
   settleMoveResponse,
   visibleUnassignedInvoices,
 } from '../public/dispatch-state.mjs';
-import { createDispatchApp, renderInvoiceCard, renderTripCard } from '../public/dispatch.js';
+import {
+  createDispatchApp,
+  renderInvoiceCard,
+  renderTripCard,
+  resolveDispatchClickTarget,
+} from '../public/dispatch.js';
 
 const invoices = [
   {
@@ -315,6 +320,14 @@ function createFakeDispatchDocument() {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 test('tab activation uses roving tabindex, selects the panel, and moves focus on keyboard navigation', () => {
   const fake = createFakeDispatchDocument();
   const app = createDispatchApp({ documentRef: fake.documentRef });
@@ -363,4 +376,107 @@ test('refresh keeps the selected company in the control, badge, state, and trans
   assert.equal(app.getState().companyFilter, 'sdn_bhd');
   assert.equal(fake.companyFilter.value, 'sdn_bhd');
   assert.equal(fake.queueKey.textContent, 'SDN BHD');
+});
+
+test('late response from an old company filter cannot replace the newer visible board', async () => {
+  const fake = createFakeDispatchDocument();
+  const pending = new Map();
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: {
+      loadBoard({ company }) {
+        const request = deferred();
+        pending.set(company, request);
+        return request.promise;
+      },
+    },
+  });
+
+  fake.companyFilter.value = 'enterprise';
+  fake.companyFilter.dispatch('change', { target: fake.companyFilter });
+  const enterpriseRefresh = app.loadBoard();
+
+  fake.companyFilter.value = 'sdn_bhd';
+  fake.companyFilter.dispatch('change', { target: fake.companyFilter });
+  const sdnBhdRefresh = app.loadBoard();
+
+  pending.get('sdn_bhd').resolve({ invoices: [invoices[1]], trips: [] });
+  await sdnBhdRefresh;
+  pending.get('enterprise').resolve({ invoices: [invoices[0]], trips: [] });
+  await enterpriseRefresh;
+
+  assert.equal(app.getState().companyFilter, 'sdn_bhd');
+  assert.deepEqual(app.getState().invoices.map((invoice) => invoice.docNo), ['SDN-001']);
+  assert.equal(fake.companyFilter.value, 'sdn_bhd');
+  assert.equal(fake.queueKey.textContent, 'SDN BHD');
+});
+
+test('same-filter overlapping refreshes apply only the latest response', async () => {
+  const fake = createFakeDispatchDocument();
+  const requests = [];
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: {
+      loadBoard({ company }) {
+        const request = deferred();
+        requests.push({ company, request });
+        return request.promise;
+      },
+    },
+  });
+
+  fake.companyFilter.value = 'enterprise';
+  fake.companyFilter.dispatch('change', { target: fake.companyFilter });
+  const olderRefresh = app.loadBoard();
+  const newerRefresh = app.loadBoard();
+
+  requests[1].request.resolve({ invoices: [invoices[2]], trips: [] });
+  await newerRefresh;
+  requests[0].request.resolve({ invoices: [invoices[0]], trips: [] });
+  await olderRefresh;
+
+  assert.deepEqual(app.getState().invoices.map((invoice) => invoice.docNo), ['ENT-002']);
+  assert.equal(fake.companyFilter.value, 'enterprise');
+  assert.equal(fake.queueKey.textContent, 'ENTERPRISE');
+});
+
+function clickTarget({ invoiceKey = null, tripId = null, disabled = false } = {}) {
+  return {
+    closest(selector) {
+      if (selector === 'button:disabled' && disabled) return { disabled: true };
+      if (selector === '[data-select-invoice]' && invoiceKey) {
+        return { dataset: { selectInvoice: invoiceKey } };
+      }
+      if (selector === '[data-select-trip]' && tripId) {
+        return { dataset: { selectTrip: tripId } };
+      }
+      return null;
+    },
+  };
+}
+
+test('click delegation ignores disabled actions, keeps child invoice clicks scoped, and resolves dedicated Select controls', () => {
+  assert.equal(
+    resolveDispatchClickTarget(clickTarget({ invoiceKey: 'enterprise:shared-doc-001', disabled: true })),
+    null,
+    'disabled Assign does not select its invoice',
+  );
+  assert.equal(
+    resolveDispatchClickTarget(clickTarget({ tripId: 'trip-001', disabled: true })),
+    null,
+    'disabled Print Items does not select its trip',
+  );
+
+  assert.deepEqual(
+    resolveDispatchClickTarget(clickTarget({ invoiceKey: 'enterprise:shared-doc-001', tripId: 'trip-001' })),
+    { kind: 'invoice', key: 'enterprise:shared-doc-001' },
+  );
+  assert.deepEqual(
+    resolveDispatchClickTarget(clickTarget({ invoiceKey: 'sdn_bhd:shared-doc-001' })),
+    { kind: 'invoice', key: 'sdn_bhd:shared-doc-001' },
+  );
+  assert.deepEqual(
+    resolveDispatchClickTarget(clickTarget({ tripId: 'trip-001' })),
+    { kind: 'trip', id: 'trip-001' },
+  );
 });
