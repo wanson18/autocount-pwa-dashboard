@@ -87,7 +87,7 @@ test.after(async () => {
 
 test('durable throttle stores only HMAC account and IP bucket keys', async () => {
   const keys = bucketPair('privacy');
-  await store.recordFailure({ ...keys, now: NOW });
+  await store.reserveAttempt({ ...keys, now: NOW });
 
   const rows = await database.pool.query(
     'SELECT bucket_type, bucket_key, failure_count FROM dispatch_login_throttle_buckets ORDER BY bucket_type',
@@ -101,14 +101,15 @@ test('durable throttle stores only HMAC account and IP bucket keys', async () =>
 test('throttle blocks at the threshold with a bounded exponential retry window', async () => {
   const keys = bucketPair('threshold');
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    await store.recordFailure({ ...keys, now: new Date(NOW.getTime() + attempt * 1000) });
+    const decision = await store.reserveAttempt({ ...keys, now: new Date(NOW.getTime() + attempt * 1000) });
+    assert.equal(decision.allowed, true);
   }
 
-  const blocked = await store.check({ ...keys, now: new Date(NOW.getTime() + 2000) });
+  const blocked = await store.reserveAttempt({ ...keys, now: new Date(NOW.getTime() + 2000) });
   assert.equal(blocked.allowed, false);
   assert.equal(blocked.retryAfterSeconds, 60);
 
-  const afterExpiry = await store.check({
+  const afterExpiry = await store.reserveAttempt({
     ...keys,
     now: new Date(NOW.getTime() + 64 * 1000),
   });
@@ -117,14 +118,14 @@ test('throttle blocks at the threshold with a bounded exponential retry window',
 
 test('expired throttle rows are removed and the failure window resets', async () => {
   const keys = bucketPair('expiry');
-  await store.recordFailure({ ...keys, now: NOW });
+  await store.reserveAttempt({ ...keys, now: NOW });
   const before = await database.pool.query(
     'SELECT count(*)::int AS count FROM dispatch_login_throttle_buckets WHERE bucket_key IN ($1, $2)',
     [keys.accountKey, keys.ipKey],
   );
   assert.equal(before.rows[0].count, 2);
 
-  const decision = await store.check({
+  const decision = await store.reserveAttempt({
     ...keys,
     now: new Date(NOW.getTime() + 301 * 1000),
   });
@@ -133,30 +134,40 @@ test('expired throttle rows are removed and the failure window resets', async ()
     'SELECT count(*)::int AS count FROM dispatch_login_throttle_buckets WHERE bucket_key IN ($1, $2)',
     [keys.accountKey, keys.ipKey],
   );
-  assert.equal(after.rows[0].count, 0);
+  assert.equal(after.rows[0].count, 2);
+  const resetRows = await database.pool.query(
+    'SELECT bucket_type, failure_count FROM dispatch_login_throttle_buckets WHERE bucket_key IN ($1, $2) ORDER BY bucket_type',
+    [keys.accountKey, keys.ipKey],
+  );
+  assert.deepEqual(resetRows.rows, [
+    { bucket_type: 'account', failure_count: 1 },
+    { bucket_type: 'ip', failure_count: 1 },
+  ]);
 });
 
-test('concurrent failed attempts increment each durable bucket atomically', async () => {
+test('concurrent reservations admit only the configured number in each durable bucket', async () => {
   const keys = bucketPair('concurrent');
-  await Promise.all(Array.from({ length: 12 }, (_, attempt) => store.recordFailure({
+  const decisions = await Promise.all(Array.from({ length: 12 }, (_, attempt) => store.reserveAttempt({
     ...keys,
     now: new Date(NOW.getTime() + attempt * 10),
   })));
+  assert.equal(decisions.filter((decision) => decision.allowed).length, 3);
+  assert.equal(decisions.filter((decision) => !decision.allowed).length, 9);
 
   const rows = await database.pool.query(
     'SELECT bucket_type, failure_count FROM dispatch_login_throttle_buckets WHERE bucket_key IN ($1, $2) ORDER BY bucket_type',
     [keys.accountKey, keys.ipKey],
   );
   assert.deepEqual(rows.rows, [
-    { bucket_type: 'account', failure_count: 12 },
-    { bucket_type: 'ip', failure_count: 12 },
+    { bucket_type: 'account', failure_count: 3 },
+    { bucket_type: 'ip', failure_count: 3 },
   ]);
 });
 
 test('successful login clears account failures and relaxes the IP bucket', async () => {
   const keys = bucketPair('success');
-  await store.recordFailure({ ...keys, now: NOW });
-  await store.recordFailure({ ...keys, now: new Date(NOW.getTime() + 1000) });
+  await store.reserveAttempt({ ...keys, now: NOW });
+  await store.reserveAttempt({ ...keys, now: new Date(NOW.getTime() + 1000) });
   await store.recordSuccess({ ...keys, now: new Date(NOW.getTime() + 2000) });
 
   const rows = await database.pool.query(
@@ -169,7 +180,7 @@ test('successful login clears account failures and relaxes the IP bucket', async
 test('throttle cleanup keeps bucket rows bounded', async () => {
   requireThrottle();
   for (let index = 0; index < 12; index += 1) {
-    await store.recordFailure({
+    await store.reserveAttempt({
       ...bucketPair(`bound-${index}`),
       now: new Date(NOW.getTime() + index * 1000),
     });
@@ -280,4 +291,135 @@ test('unknown clerk attempts execute the same scrypt verification shape as known
     ['scrypt', '16384', '8', '1'],
     ['scrypt', '16384', '8', '1'],
   ]);
+});
+
+function loginRequest(clerkId, pin, ip) {
+  const body = JSON.stringify({ clerkId, pin });
+  return {
+    method: 'POST',
+    ip,
+    headers: {
+      'content-type': 'application/json',
+      'content-length': String(Buffer.byteLength(body)),
+    },
+    body,
+  };
+}
+
+function waitFor(predicate, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const poll = () => {
+      if (predicate()) {
+        resolve();
+      } else if (Date.now() >= deadline) {
+        reject(new Error('timed out waiting for concurrent login responses'));
+      } else {
+        setImmediate(poll);
+      }
+    };
+    poll();
+  });
+}
+
+test('concurrent login requests reserve exactly the threshold before PIN verification', async () => {
+  const env = await makeEnv('clerk-concurrent-admission');
+  const endpointStore = throttle.createLoginThrottleStore(database.pool, {
+    failureThreshold: 3,
+    windowSeconds: 300,
+    baseBlockSeconds: 60,
+    maxBlockSeconds: 600,
+    maxRows: 100,
+  });
+  let verifyCalls = 0;
+  let releaseVerification;
+  const verification = new Promise((resolve) => { releaseVerification = resolve; });
+  const handler = sessionApi.createDispatchSessionHandler({
+    env,
+    throttleStore: endpointStore,
+    now: NOW,
+    scryptLimiter: auth.createScryptLimiter(20),
+    verifyPin: async () => {
+      verifyCalls += 1;
+      return verification;
+    },
+  });
+
+  const responses = Array.from({ length: 12 }, () => responseRecorder());
+  const requests = Promise.all(responses.map((response) => (
+    handler(loginRequest('clerk-concurrent-admission', '9999', '198.51.100.88'), response)
+  )));
+
+  let observationError;
+  try {
+    await waitFor(() => responses.filter((response) => response.statusCode === 429).length === 9);
+    assert.equal(verifyCalls, 3, 'the fourth concurrent request must be denied before PIN verification');
+  } catch (error) {
+    observationError = error;
+  }
+  releaseVerification(false);
+  await requests;
+  if (observationError) throw observationError;
+
+  assert.equal(responses.filter((response) => response.statusCode === 401).length, 3);
+  assert.equal(responses.filter((response) => response.statusCode === 429).length, 9);
+});
+
+test('login reservation expiry admits again and successful verification resets the reserved state', async () => {
+  const env = await makeEnv('clerk-reservation-lifecycle');
+  const endpointStore = throttle.createLoginThrottleStore(database.pool, {
+    failureThreshold: 3,
+    windowSeconds: 300,
+    baseBlockSeconds: 60,
+    maxBlockSeconds: 600,
+    maxRows: 100,
+  });
+  const baseOptions = {
+    env,
+    throttleStore: endpointStore,
+    scryptLimiter: auth.createScryptLimiter(4),
+  };
+  const failedHandler = sessionApi.createDispatchSessionHandler({
+    ...baseOptions,
+    now: NOW,
+    verifyPin: async () => false,
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = responseRecorder();
+    await failedHandler(loginRequest('clerk-reservation-lifecycle', '9999', '198.51.100.77'), response);
+    assert.equal(response.statusCode, 401);
+  }
+
+  const blocked = responseRecorder();
+  await failedHandler(loginRequest('clerk-reservation-lifecycle', '2468', '198.51.100.77'), blocked);
+  assert.equal(blocked.statusCode, 429);
+  assert.equal(blocked.headers['Retry-After'], '60');
+
+  const expiredHandler = sessionApi.createDispatchSessionHandler({
+    ...baseOptions,
+    now: new Date(NOW.getTime() + 301 * 1000),
+    verifyPin: async () => false,
+  });
+  const afterExpiry = responseRecorder();
+  await expiredHandler(loginRequest('clerk-reservation-lifecycle', '9999', '198.51.100.77'), afterExpiry);
+  assert.equal(afterExpiry.statusCode, 401, 'expired blocks must not deny before verification');
+
+  const successHandler = sessionApi.createDispatchSessionHandler({
+    ...baseOptions,
+    now: new Date(NOW.getTime() + 302 * 1000),
+    verifyPin: async () => true,
+  });
+  const success = responseRecorder();
+  await successHandler(loginRequest('clerk-reservation-lifecycle', '2468', '198.51.100.77'), success);
+  assert.equal(success.statusCode, 200);
+
+  const keys = {
+    accountKey: throttle.deriveThrottleBucketKey(SECRET, 'account', 'clerk-reservation-lifecycle'),
+    ipKey: throttle.deriveThrottleBucketKey(SECRET, 'ip', '198.51.100.77'),
+  };
+  const rows = await database.pool.query(
+    'SELECT bucket_type, failure_count, blocked_until FROM dispatch_login_throttle_buckets WHERE bucket_key IN ($1, $2) ORDER BY bucket_type',
+    [keys.accountKey, keys.ipKey],
+  );
+  assert.deepEqual(rows.rows, [{ bucket_type: 'ip', failure_count: 1, blocked_until: null }]);
 });

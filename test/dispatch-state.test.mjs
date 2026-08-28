@@ -22,6 +22,7 @@ import {
 } from '../public/dispatch-state.mjs';
 import {
   createDispatchApp,
+  createFetchTransport,
   renderInvoiceCard,
   renderResources,
   renderTripCard,
@@ -579,6 +580,61 @@ test('protected-resource 401 clears resource and actor state and returns the UI 
   await assert.rejects(() => app.loadResources(), (error) => error.code === 'unauthorized');
 
   assert.equal(app.getSession(), null);
+  assert.equal(fake.elements.get('loginView').hidden, false);
+  assert.equal(fake.elements.get('authenticatedView').hidden, true);
+  assert.equal(fake.elements.get('driverList').innerHTML, '');
+  assert.equal(fake.elements.get('lorryList').innerHTML, '');
+  assert.match(fake.elements.get('loginMessage').textContent, /session has expired/i);
+});
+
+test('invoice fetch transport preserves unauthorized 401 so board load clears sensitive state', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  let boardCalls = 0;
+  const transport = createFetchTransport({
+    fetchImpl: async () => {
+      boardCalls += 1;
+      if (boardCalls === 1) {
+        return {
+          ok: true,
+          status: 200,
+          async json() { return { invoices, trips: [] }; },
+        };
+      }
+      return {
+        ok: false,
+        status: 401,
+        async json() {
+          return { success: false, error: { code: 'unauthorized', message: 'Authentication is required.' } };
+        },
+      };
+    },
+  });
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport,
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session: { clerkId: 'clerk-1', role: 'clerk' } }),
+      logout: async () => ({ authenticated: false }),
+    },
+    resourcesTransport: {
+      loadResources: async () => ({ drivers: [], lorries: [] }),
+      createResource: async () => null,
+      updateResource: async () => null,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  renderResources(fake.root, {
+    drivers: [{ id: 1, name: 'Sensitive Driver', licenseNo: 'D-1', active: true }],
+    lorries: [{ id: 2, registrationNo: 'WXY-1', description: 'Sensitive Lorry', active: true }],
+  });
+
+  await assert.rejects(
+    () => app.loadBoard(),
+    (error) => error.code === 'unauthorized' && error.status === 401,
+  );
+
+  assert.equal(app.getSession(), null);
+  assert.deepEqual(app.getState().invoices, []);
   assert.equal(fake.elements.get('loginView').hidden, false);
   assert.equal(fake.elements.get('authenticatedView').hidden, true);
   assert.equal(fake.elements.get('driverList').innerHTML, '');

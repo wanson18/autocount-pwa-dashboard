@@ -191,8 +191,7 @@ export function createFetchTransport({ fetchImpl = globalThis.fetch } = {}) {
         credentials: 'same-origin',
         headers: { 'Accept': 'application/json' },
       });
-      if (!response.ok) throw new Error(`Dispatch feed failed with status ${response.status}`);
-      return response.json();
+      return parseApiResponse(response, 'The board could not be loaded.');
     },
   };
 }
@@ -205,10 +204,12 @@ async function parseApiResponse(response, fallbackMessage) {
     // The client only exposes a generic message when the server response is not JSON.
   }
   if (!response.ok) {
-    const error = new Error(payload?.error?.code === 'invalid_credentials'
+    const code = payload?.error?.code || (response.status === 401 ? 'unauthorized' : 'request_failed');
+    const error = new Error(code === 'invalid_credentials'
       ? 'Invalid clerk ID or PIN.'
       : fallbackMessage);
-    error.code = payload?.error?.code || 'request_failed';
+    error.code = code;
+    error.status = response.status;
     throw error;
   }
   return payload;
@@ -356,7 +357,7 @@ export function createDispatchApp({
   function clearSensitiveState() {
     boardRequestSequence += 1;
     resourceRequestSequence += 1;
-    state = createDispatchState();
+    state = createDispatchState({ invoices: [], trips: [] });
     setAuthenticated(false);
     render();
     for (const id of ['driverList', 'lorryList']) {

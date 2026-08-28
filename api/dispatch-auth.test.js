@@ -79,10 +79,9 @@ function jsonRequest(method, body, contentType = 'application/json') {
 
 function allowingThrottleStore() {
   return {
-    async check() {
+    async reserveAttempt() {
       return { allowed: true, retryAfterSeconds: 0 };
     },
-    async recordFailure() {},
     async recordSuccess() {},
   };
 }
@@ -162,6 +161,35 @@ test('scrypt PIN verification accepts the right PIN, rejects the wrong PIN, and 
   assert.equal(await implementation.verifyScryptPin('2468', 'not-a-scrypt-hash'), false);
 });
 
+test('all configured scrypt hashes use one exact approved cost, key, and salt profile', async () => {
+  const implementation = requireAuth();
+  const salt = Buffer.alloc(16, 12).toString('base64url');
+  const key = Buffer.alloc(64, 13).toString('base64url');
+  const alternateHashes = [
+    `scrypt$32768$8$1$${salt}$${key}`,
+    `scrypt$16384$4$1$${salt}$${key}`,
+    `scrypt$16384$8$2$${salt}$${key}`,
+    `scrypt$16384$8$1$${Buffer.alloc(32, 14).toString('base64url')}$${key}`,
+    `scrypt$16384$8$1$${salt}$${Buffer.alloc(32, 15).toString('base64url')}`,
+  ];
+
+  for (const encodedHash of alternateHashes) {
+    assert.throws(
+      () => implementation.parseScryptHash(encodedHash),
+      (error) => error.code === 'invalid_dispatch_config',
+      encodedHash,
+    );
+  }
+  await assert.rejects(
+    () => implementation.hashDispatchPin('2468', { N: 32768, salt: Buffer.alloc(16, 16) }),
+    (error) => error.code === 'invalid_dispatch_config',
+  );
+  await assert.rejects(
+    () => implementation.hashDispatchPin('2468', { salt: Buffer.alloc(32, 17) }),
+    /salt must be a byte buffer/,
+  );
+});
+
 test('timing-safe comparison handles equal and unequal buffers without length exceptions', () => {
   const implementation = requireAuth();
 
@@ -200,6 +228,8 @@ test('login signs an eight-hour cookie and session verification rejects tamperin
   const tampered = `${cookiePair.slice(0, cookiePair.indexOf(token))}${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`;
   assert.equal(implementation.verifySessionCookie(tampered, { env, now: NOW }), null);
   assert.equal(implementation.verifySessionCookie(`${cookiePair}; ${cookiePair}`, { env, now: NOW }), null);
+  assert.equal(implementation.verifySessionCookie(`${cookiePair}; dispatch_session`, { env, now: NOW }), null);
+  assert.equal(implementation.verifySessionCookie(`dispatch_session; ${cookiePair}`, { env, now: NOW }), null);
   assert.equal(implementation.verifySessionCookie(`${cookiePair}=${''}`, { env, now: NOW }), null);
   assert.deepEqual(implementation.verifySessionCookie(`${cookiePair};`, { env, now: NOW }), login.session);
   const nonCanonicalSignature = `${cookiePair.split('=').slice(0, 1).join('=')}=${token.split('.')[0]}.${token.split('.')[1]}=`;
@@ -317,7 +347,7 @@ test('session POST fails closed before PIN verification when the durable throttl
   const env = await makeEnv();
   let verifyCalls = 0;
   const unavailable = {
-    async check() {
+    async reserveAttempt() {
       const error = new Error('provider detail must not escape');
       error.code = 'dispatch_auth_store_unavailable';
       throw error;
@@ -348,7 +378,7 @@ test('blocked login uses a generic 429 envelope and Retry-After without exposing
   const handler = api.createDispatchSessionHandler({
     env,
     throttleStore: {
-      async check() { return { allowed: false, retryAfterSeconds: 17 }; },
+      async reserveAttempt() { return { allowed: false, retryAfterSeconds: 17 }; },
     },
   });
   const res = responseRecorder();

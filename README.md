@@ -93,8 +93,12 @@ Functions connection reuse.
 
 Dispatch authentication requires `DISPATCH_SESSION_SECRET` to be the canonical
 base64url encoding of exactly 32 random bytes (43 characters without `=`
-padding). PIN hashes use the canonical
-`scrypt$N$r$p$salt$derived-key` form with bounded parameters and byte lengths.
+padding). PIN hashes use the canonical positional
+`scrypt$N$r$p$salt$derived-key` form with one approved profile only:
+`N=16384`, `r=8`, `p=1`, a 16-byte salt, and a 64-byte derived key. Alternate
+profiles, unknown or duplicate parameters, noncanonical encodings, and malformed
+or out-of-bound salt/key lengths fail closed. The bounded parser checks remain in
+place as a defense-in-depth limit around that exact profile.
 Login throttling is persisted in PostgreSQL, keyed by HMAC digests of the
 normalized clerk ID and trusted client address; the service fails closed if that
 store is unavailable. Resource POST/PATCH requests require a validated
@@ -107,6 +111,18 @@ configured and that cross-site forms cannot submit the required
 `application/json` mutation body. This is an explicit deployment assumption,
 not a substitute for authentication; if another origin must call dispatch, add
 an origin check or CSRF token before enabling it.
+
+Login admission is reserved atomically before PIN verification. The durable
+transaction locks `dispatch_login_throttle_meta` and the selected account and
+client-address bucket rows, then reserves both slots or denies the request; the
+same-process queue only keeps the embedded PGlite test harness from pretending
+one connection is multiple PostgreSQL clients. Before preview, the provider
+gate must run the concurrent login regression against real pooled PostgreSQL
+connections (including separate worker/process or pool instances), verify that
+12 simultaneous requests admit exactly the configured threshold and that all
+remaining requests receive `429` with `Retry-After`, then verify expiry, success
+reset, migration, TLS, and Vercel pool attachment. This provider rehearsal was
+not run in the local security-fix pass.
 
 ### Legacy non-finite quantity gate
 
