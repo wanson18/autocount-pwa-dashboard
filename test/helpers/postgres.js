@@ -21,6 +21,24 @@ async function dropProviderSchema(connectionString, schema) {
   }
 }
 
+async function createProviderTestDatabases(databaseFactory = createTestDatabase) {
+  let first;
+  try {
+    first = await databaseFactory();
+    const second = await databaseFactory();
+    return { first, second };
+  } catch (error) {
+    if (first) {
+      try {
+        await first.close();
+      } catch {
+        // Preserve the original provider setup error.
+      }
+    }
+    throw error;
+  }
+}
+
 async function createTestDatabase() {
   if (process.env.TEST_DATABASE_URL) {
     const connectionString = process.env.TEST_DATABASE_URL;
@@ -98,4 +116,4 @@ async function createTestDatabase() {
   };
 }
 
-module.exports = { createTestDatabase };
+module.exports = { createProviderTestDatabases, createTestDatabase };

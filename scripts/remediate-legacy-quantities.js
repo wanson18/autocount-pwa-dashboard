@@ -129,13 +129,6 @@ async function remediateLegacyQuantities({
     );
     if (existingRequest.rows.length !== 0) throw remediationError('REQUEST_ID_ALREADY_USED');
 
-    if (summary.count === 0) {
-      if (providedIds.size !== 0) throw remediationError('REPLACEMENT_SET_MISMATCH');
-      await client.query('COMMIT');
-      transactionStarted = false;
-      return { remediatedCount: 0, itemIds: [] };
-    }
-
     try {
       await client.query(
         `INSERT INTO ${REMEDIATION_REQUEST_TABLE} (request_id, approved_by) VALUES ($1, $2)`,
@@ -144,6 +137,13 @@ async function remediateLegacyQuantities({
     } catch (error) {
       if (error.code === '23505') throw remediationError('REQUEST_ID_ALREADY_USED');
       throw error;
+    }
+
+    if (summary.count === 0) {
+      if (providedIds.size !== 0) throw remediationError('REPLACEMENT_SET_MISMATCH');
+      await client.query('COMMIT');
+      transactionStarted = false;
+      return { remediatedCount: 0, itemIds: [] };
     }
 
     const remainingIds = new Set(providedIds);

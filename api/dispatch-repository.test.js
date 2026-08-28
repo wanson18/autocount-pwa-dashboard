@@ -4,7 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Pool } = require('pg');
 
-const { createTestDatabase } = require('../test/helpers/postgres');
+const {
+  createProviderTestDatabases,
+  createTestDatabase,
+} = require('../test/helpers/postgres');
 
 const LEGACY_MIGRATIONS_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'migration-upgrade-5fe2aa9');
 const HARDENING_MIGRATION_PATH = path.join(__dirname, '..', 'db', 'migrations', '002_delivery_dispatch_hardening.sql');
@@ -516,6 +519,80 @@ test('remediation request IDs are single-use and preserve audit history on retry
   }
 });
 
+test('successful no-op remediation consumes its request ID before later contamination appears', async () => {
+  const cleanDatabase = await createTestDatabase();
+  try {
+    const { migrate } = require('../scripts/migrate');
+    await migrate({
+      pool: cleanDatabase.pool,
+      migrationsDir: LEGACY_MIGRATIONS_DIR,
+      skipAdvisoryLock: cleanDatabase.embedded,
+    });
+    const { remediateLegacyQuantities } = require('../scripts/remediate-legacy-quantities');
+    const { createRepository } = require('../lib/dispatch/repository');
+    const requestId = "legacy-remediation-no-op-'single-quote'";
+
+    const remediation = await remediateLegacyQuantities({
+      pool: cleanDatabase.pool,
+      replacements: {},
+      approvedBy: 'dispatch-operator',
+      requestId,
+      confirm: true,
+    });
+    assert.deepEqual(remediation, { remediatedCount: 0, itemIds: [] });
+
+    const requestRows = await cleanDatabase.pool.query(
+      'SELECT request_id, approved_by FROM delivery_quantity_remediation_requests',
+    );
+    const auditRows = await cleanDatabase.pool.query(
+      'SELECT count(*)::int AS count FROM delivery_assignment_item_quantity_remediations',
+    );
+    assert.deepEqual(requestRows.rows, [{ request_id: requestId, approved_by: 'dispatch-operator' }]);
+    assert.equal(auditRows.rows[0].count, 0);
+
+    const repository = createRepository(cleanDatabase.pool);
+    const driver = await repository.createDriver({ name: 'No-op Driver', licenseNo: 'D-NO-OP' });
+    const vehicle = await repository.createVehicle({ registrationNo: 'NO-OP-REG' });
+    const trip = await repository.createTrip({
+      tripDate: '2026-08-28',
+      driverId: driver.id,
+      vehicleId: vehicle.id,
+    });
+    const assignment = await repository.assignInvoice({
+      tripId: trip.id,
+      ...invoiceSnapshot('INV-NO-OP'),
+    });
+    await cleanDatabase.pool.query(
+      `INSERT INTO delivery_assignment_items
+         (assignment_id, line_no, item_code, description, uom, quantity)
+       VALUES ($1, 3, 'OIL-NO-OP', 'Contamination after no-op', 'CTN', 'NaN'::numeric)`,
+      [assignment.id],
+    );
+
+    await assert.rejects(
+      () => remediateLegacyQuantities({
+        pool: cleanDatabase.pool,
+        replacements: { extra: '1' },
+        approvedBy: 'dispatch-operator',
+        requestId,
+        confirm: true,
+      }),
+      /REQUEST_ID_ALREADY_USED/,
+    );
+
+    const finalRequestRows = await cleanDatabase.pool.query(
+      'SELECT count(*)::int AS count FROM delivery_quantity_remediation_requests',
+    );
+    const finalAuditRows = await cleanDatabase.pool.query(
+      'SELECT count(*)::int AS count FROM delivery_assignment_item_quantity_remediations',
+    );
+    assert.equal(finalRequestRows.rows[0].count, 1);
+    assert.equal(finalAuditRows.rows[0].count, 0);
+  } finally {
+    await cleanDatabase.close();
+  }
+});
+
 test('remediation accepts only positive finite replacement quantities and rolls back invalid attempts', async () => {
   const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
   try {
@@ -616,6 +693,58 @@ test('preflight keyset pagination covers the complete bigint ID range', async ()
   }
 });
 
+test('preflight accepts signed bigint boundary cursors as strings without JSON coercion', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  try {
+    const minId = '-9223372036854775808';
+    const maxId = '9223372036854775807';
+    await legacyDatabase.pool.query(`
+      INSERT INTO delivery_assignment_items
+        (id, assignment_id, line_no, item_code, description, uom, quantity)
+      VALUES ($1, $2, 3, 'OIL-MIN-ID', 'Minimum ID NaN', 'CTN', 'NaN'::numeric),
+             ($3, $2, 4, 'OIL-MAX-ID', 'Maximum ID Infinity', 'CTN', 'Infinity'::numeric)
+    `, [minId, assignmentId, maxId]);
+
+    const { LEGACY_QUANTITY_BATCH_QUERY, iterateLegacyQuantityContamination } = require('../scripts/migrate-preflight');
+    const first = await legacyDatabase.pool.query(LEGACY_QUANTITY_BATCH_QUERY, [null, 1]);
+    assert.equal(String(first.rows[0].itemId), minId);
+    if (legacyDatabase.embedded) {
+      assert.equal(typeof first.rows[0].itemId, 'bigint');
+      assert.throws(() => JSON.stringify(first.rows), /BigInt/);
+    } else {
+      assert.equal(typeof first.rows[0].itemId, 'string');
+    }
+
+    const afterMinimum = await legacyDatabase.pool.query(
+      LEGACY_QUANTITY_BATCH_QUERY,
+      [minId, 100],
+    );
+    assert.equal(String(afterMinimum.rows.at(-1).itemId), maxId);
+
+    const afterMaximum = await legacyDatabase.pool.query(
+      LEGACY_QUANTITY_BATCH_QUERY,
+      [maxId, 1],
+    );
+    assert.equal(afterMaximum.rows.length, 0);
+
+    const records = [];
+    for await (const batch of iterateLegacyQuantityContamination({
+      pool: legacyDatabase.pool,
+      batchSize: 1,
+    })) {
+      records.push(...batch);
+    }
+    assert.deepEqual(records.map((record) => String(record.itemId)), [
+      minId,
+      String(items[0].id),
+      String(items[1].id),
+      maxId,
+    ]);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
 test('remediation rescans the complete scope inside its transaction and rolls back when it grows after preflight', async () => {
   const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
   let injected = false;
@@ -684,8 +813,7 @@ test('finite quantity classification is version-neutral and does not cast specia
 test('TEST_DATABASE_URL fixtures use unique temporary schemas and clean them up', {
   skip: !process.env.TEST_DATABASE_URL,
 }, async () => {
-  const first = await createTestDatabase();
-  const second = await createTestDatabase();
+  const { first, second } = await createProviderTestDatabases();
   const firstSchema = first.schema;
   const secondSchema = second.schema;
   try {
@@ -727,6 +855,20 @@ test('TEST_DATABASE_URL fixtures use unique temporary schemas and clean them up'
   } finally {
     await cleanupPool.end();
   }
+});
+
+test('provider fixture setup closes the first database when the second setup fails', async () => {
+  let attempts = 0;
+  let closeCount = 0;
+  await assert.rejects(
+    () => createProviderTestDatabases(async () => {
+      attempts += 1;
+      if (attempts === 2) throw new Error('second schema setup failed');
+      return { close: async () => { closeCount += 1; } };
+    }),
+    /second schema setup failed/,
+  );
+  assert.equal(closeCount, 1);
 });
 
 test('database checks reject unknown companies and statuses', async () => {
