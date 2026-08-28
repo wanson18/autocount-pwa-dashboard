@@ -34,9 +34,16 @@ Status: COMPLETE_WITH_CONCERNS
 
 ## Responsive/layout evidence
 
-No local browser or screenshot runner was installed or exposed in this
-worktree, so 390px, 768px, and 1440px screenshots could not be captured.
-Concrete asset assertions passed for:
+Actual Chromium inspection covered 390x844, 768x1024, and 1440x1000. At each
+viewport, `documentScrollWidth == documentClientWidth`, no primary controls
+were clipped, Board/Reports/Resources navigation worked, and invoice/trip
+selection worked. The captured evidence remains intentionally untracked:
+
+- `output/playwright/dispatch-390.png`
+- `output/playwright/dispatch-768.png`
+- `output/playwright/dispatch-1440.png`
+
+These images are not committed. Concrete asset assertions also passed for:
 
 - Board/Trips/Reports/Resources tab wiring and accessible header/main/tabpanel
   landmarks.
@@ -60,5 +67,7 @@ Concrete asset assertions passed for:
   does not install or expose Prettier.
 - Assignment, trip mutation, authentication, printing, and live API wiring
   remain intentionally disabled for their later tasks.
-- A browser screenshot/accessibility pass should be run when a local browser
-  runner is available.
+- Fix round 1 adds DOM/markup regression coverage for interactive nesting and
+  lightweight DOM-style coverage for tab activation, roving focus, filter
+  synchronization, and fixture parity. See the separate fix-round report for
+  fresh command evidence.
