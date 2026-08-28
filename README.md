@@ -88,6 +88,41 @@ uses a transaction-scoped Postgres advisory lock. It does not print the
 connection string. The runtime pool is module-scoped and attached for Vercel
 Functions connection reuse.
 
+### Legacy non-finite quantity gate
+
+The hardening migration refuses to add the finite-quantity constraint when an
+existing `001_delivery_dispatch.sql` database contains `NaN`, `Infinity`, or
+`-Infinity` item quantities. It aborts before the hardening DDL, leaves `002`
+unapplied, and reports only a count plus bounded item and assignment IDs.
+
+Run the read-only structured preflight first:
+
+```powershell
+npm run migrate:preflight
+```
+
+Do not correct these rows by editing or deleting them ad hoc. If a correction
+is authorized, prepare a JSON replacement map keyed by the reported item IDs,
+then run the separate, explicitly confirmed remediation path:
+
+```powershell
+node scripts/remediate-legacy-quantities.js `
+  --confirm `
+  --approved-by=OPERATOR_ID `
+  --request-id=CHANGE_ID `
+  --replacements-file=path\to\replacements.json
+```
+
+The replacement map must cover exactly the contaminated IDs and contain
+operator-supplied positive finite decimal values. The remediation transaction
+first appends every original item quantity and identifying field to
+`delivery_assignment_item_quantity_remediations`, together with approval and
+request metadata, and makes that audit table append-only. It then replaces the
+active row with the supplied value while retaining its item ID. Migration does
+not invoke this path, and omitting `--confirm` cannot change data. Review the
+preflight findings, replacement values, and audit rows before running
+`npm run migrate` again.
+
 Repository tests execute the actual migration SQL and transaction behavior
 against in-memory WASM PostgreSQL when no test URL is configured:
 

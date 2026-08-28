@@ -207,6 +207,205 @@ test('migration upgrades the exact 5fe2aa9 schema with hardening exactly once', 
   }
 });
 
+test('migration blocks contaminated exact 001 data before hardening', async () => {
+  const legacyDatabase = await createTestDatabase();
+  try {
+    const { migrate } = require('../scripts/migrate');
+    await migrate({
+      pool: legacyDatabase.pool,
+      migrationsDir: LEGACY_MIGRATIONS_DIR,
+      skipAdvisoryLock: legacyDatabase.embedded,
+    });
+
+    const driver = await legacyDatabase.pool.query(
+      "INSERT INTO dispatch_drivers (name, license_no) VALUES ('Legacy Driver', 'D-LEGACY-CONTAMINATED') RETURNING id",
+    );
+    const vehicle = await legacyDatabase.pool.query(
+      "INSERT INTO dispatch_vehicles (registration_no) VALUES ('LEGACY-CONTAMINATED') RETURNING id",
+    );
+    const trip = await legacyDatabase.pool.query(`
+      INSERT INTO delivery_trips (trip_date, driver_id, vehicle_id)
+      VALUES ('2026-08-28', $1, $2)
+      RETURNING id
+    `, [driver.rows[0].id, vehicle.rows[0].id]);
+    const assignment = await legacyDatabase.pool.query(`
+      INSERT INTO delivery_assignments
+        (trip_id, company_key, invoice_id, doc_no, doc_date, invoice_header)
+      VALUES ($1, 'enterprise', 'INV-LEGACY-CONTAMINATED', 'ENT-LEGACY-CONTAMINATED', '2026-08-28', '{}')
+      RETURNING id
+    `, [trip.rows[0].id]);
+    await legacyDatabase.pool.query(`
+      INSERT INTO delivery_assignment_items
+        (assignment_id, line_no, item_code, description, uom, quantity)
+      VALUES
+        ($1, 1, 'OIL-NAN', 'Legacy NaN', 'CTN', 'NaN'::numeric),
+        ($1, 2, 'OIL-INFINITY', 'Legacy Infinity', 'CTN', 'Infinity'::numeric)
+    `, [assignment.rows[0].id]);
+
+    await assert.rejects(
+      () => migrate({ pool: legacyDatabase.pool, skipAdvisoryLock: legacyDatabase.embedded }),
+      /DELIVERY_DISPATCH_HARDENING_BLOCKED.*non-finite.*item_ids=.*assignment_ids=.*preflight/i,
+    );
+
+    const applied = await legacyDatabase.pool.query(
+      'SELECT filename FROM schema_migrations ORDER BY filename',
+    );
+    assert.deepEqual(applied.rows.map((row) => row.filename), ['001_delivery_dispatch.sql']);
+    const hardeningConstraint = await legacyDatabase.pool.query(`
+      SELECT count(*)::int AS count
+      FROM pg_constraint
+      WHERE conname = 'delivery_assignment_items_positive_finite_quantity_check'
+    `);
+    assert.equal(hardeningConstraint.rows[0].count, 0);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+async function createContaminatedLegacyDatabase() {
+  const legacyDatabase = await createTestDatabase();
+  const { migrate } = require('../scripts/migrate');
+  await migrate({
+    pool: legacyDatabase.pool,
+    migrationsDir: LEGACY_MIGRATIONS_DIR,
+    skipAdvisoryLock: legacyDatabase.embedded,
+  });
+  const driver = await legacyDatabase.pool.query(
+    "INSERT INTO dispatch_drivers (name, license_no) VALUES ('Legacy Driver', 'D-LEGACY-REMEDIATION') RETURNING id",
+  );
+  const vehicle = await legacyDatabase.pool.query(
+    "INSERT INTO dispatch_vehicles (registration_no) VALUES ('LEGACY-REMEDIATION') RETURNING id",
+  );
+  const trip = await legacyDatabase.pool.query(`
+    INSERT INTO delivery_trips (trip_date, driver_id, vehicle_id)
+    VALUES ('2026-08-28', $1, $2)
+    RETURNING id
+  `, [driver.rows[0].id, vehicle.rows[0].id]);
+  const assignment = await legacyDatabase.pool.query(`
+    INSERT INTO delivery_assignments
+      (trip_id, company_key, invoice_id, doc_no, doc_date, invoice_header)
+    VALUES ($1, 'enterprise', 'INV-LEGACY-REMEDIATION', 'ENT-LEGACY-REMEDIATION', '2026-08-28', '{}')
+    RETURNING id
+  `, [trip.rows[0].id]);
+  const items = await legacyDatabase.pool.query(`
+    INSERT INTO delivery_assignment_items
+      (assignment_id, line_no, item_code, description, uom, quantity)
+    VALUES
+      ($1, 1, 'OIL-NAN', 'Legacy NaN', 'CTN', 'NaN'::numeric),
+      ($1, 2, 'OIL-INFINITY', 'Legacy Infinity', 'CTN', 'Infinity'::numeric)
+    RETURNING id, assignment_id, line_no
+  `, [assignment.rows[0].id]);
+  return { legacyDatabase, assignmentId: assignment.rows[0].id, items: items.rows };
+}
+
+test('legacy quantity preflight reports safe affected-row findings', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  try {
+    const { findLegacyQuantityContamination } = require('../scripts/migrate-preflight');
+    const findings = await findLegacyQuantityContamination({ pool: legacyDatabase.pool });
+    assert.deepEqual(findings, {
+      condition: 'non_finite_delivery_assignment_item_quantities',
+      count: 2,
+      records: [
+        { itemId: items[0].id, assignmentId, lineNo: 1, quantityClass: 'NaN' },
+        { itemId: items[1].id, assignmentId, lineNo: 2, quantityClass: 'Infinity' },
+      ],
+    });
+    assert.equal(JSON.stringify(findings).includes('invoice_header'), false);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
+test('explicit audited remediation archives originals and permits hardening', async () => {
+  const { legacyDatabase, assignmentId, items } = await createContaminatedLegacyDatabase();
+  try {
+    const { migrate } = require('../scripts/migrate');
+    const { remediateLegacyQuantities } = require('../scripts/remediate-legacy-quantities');
+    const replacements = {
+      [items[0].id]: '2.5',
+      [items[1].id]: '3.75',
+    };
+
+    await assert.rejects(
+      () => remediateLegacyQuantities({
+        pool: legacyDatabase.pool,
+        replacements,
+        approvedBy: 'dispatch-operator',
+        requestId: 'legacy-remediation-test',
+      }),
+      /LEGACY_QUANTITY_REMEDIATION_CONFIRMATION_REQUIRED/,
+    );
+
+    const remediation = await remediateLegacyQuantities({
+      pool: legacyDatabase.pool,
+      replacements,
+      approvedBy: 'dispatch-operator',
+      requestId: 'legacy-remediation-test',
+      confirm: true,
+    });
+    assert.deepEqual(remediation.itemIds, items.map((item) => item.id));
+    assert.equal(remediation.remediatedCount, 2);
+
+    const auditRows = await legacyDatabase.pool.query(`
+      SELECT original_item_id, assignment_id, line_no, original_quantity,
+             replacement_quantity::text AS replacement_quantity, approved_by, request_id
+      FROM delivery_assignment_item_quantity_remediations
+      ORDER BY original_item_id
+    `);
+    assert.deepEqual(auditRows.rows, [
+      {
+        original_item_id: items[0].id,
+        assignment_id: assignmentId,
+        line_no: 1,
+        original_quantity: 'NaN',
+        replacement_quantity: '2.5',
+        approved_by: 'dispatch-operator',
+        request_id: 'legacy-remediation-test',
+      },
+      {
+        original_item_id: items[1].id,
+        assignment_id: assignmentId,
+        line_no: 2,
+        original_quantity: 'Infinity',
+        replacement_quantity: '3.75',
+        approved_by: 'dispatch-operator',
+        request_id: 'legacy-remediation-test',
+      },
+    ]);
+
+    const activeRows = await legacyDatabase.pool.query(`
+      SELECT id, quantity::text AS quantity
+      FROM delivery_assignment_items
+      WHERE assignment_id = $1
+      ORDER BY id
+    `, [assignmentId]);
+    assert.deepEqual(activeRows.rows, [
+      { id: items[0].id, quantity: '2.5' },
+      { id: items[1].id, quantity: '3.75' },
+    ]);
+
+    await migrate({ pool: legacyDatabase.pool, skipAdvisoryLock: legacyDatabase.embedded });
+    await assert.rejects(
+      () => legacyDatabase.pool.query(`
+        INSERT INTO delivery_assignment_items
+          (assignment_id, line_no, item_code, description, uom, quantity)
+        VALUES ($1, 3, 'OIL-INVALID', 'Invalid after hardening', 'CTN', 'NaN'::numeric)
+      `, [assignmentId]),
+      /check|finite|numeric/i,
+    );
+    const applied = await legacyDatabase.pool.query(
+      'SELECT filename FROM schema_migrations ORDER BY filename',
+    );
+    assert.deepEqual(applied.rows.map((row) => row.filename), [
+      '001_delivery_dispatch.sql',
+      '002_delivery_dispatch_hardening.sql',
+    ]);
+  } finally {
+    await legacyDatabase.close();
+  }
+});
+
 test('database checks reject unknown companies and statuses', async () => {
   const { trip } = await seedTrip();
   await assert.rejects(

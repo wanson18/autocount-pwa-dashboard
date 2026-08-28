@@ -1,4 +1,49 @@
 DO $$
+DECLARE
+  contaminated_count BIGINT;
+  contaminated_item_ids TEXT;
+  contaminated_assignment_ids TEXT;
+BEGIN
+  SELECT count(*)
+  INTO contaminated_count
+  FROM delivery_assignment_items
+  WHERE quantity IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric);
+
+  IF contaminated_count > 0 THEN
+    SELECT coalesce(string_agg(id::text, ',' ORDER BY id), '')
+    INTO contaminated_item_ids
+    FROM (
+      SELECT id
+      FROM delivery_assignment_items
+      WHERE quantity IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+      ORDER BY id
+      LIMIT 20
+    ) AS contaminated_items;
+
+    SELECT coalesce(string_agg(assignment_id::text, ',' ORDER BY assignment_id), '')
+    INTO contaminated_assignment_ids
+    FROM (
+      SELECT DISTINCT assignment_id
+      FROM delivery_assignment_items
+      WHERE quantity IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+      ORDER BY assignment_id
+      LIMIT 20
+    ) AS contaminated_assignments;
+
+    RAISE EXCEPTION USING
+      ERRCODE = 'check_violation',
+      MESSAGE = format(
+        'DELIVERY_DISPATCH_HARDENING_BLOCKED: found %s non-finite delivery_assignment_items row(s); item_ids=%s; assignment_ids=%s; run the read-only preflight before explicit audited remediation',
+        contaminated_count,
+        contaminated_item_ids,
+        contaminated_assignment_ids
+      ),
+      HINT = 'Run npm run migrate:preflight, then follow the documented explicit remediation workflow.';
+  END IF;
+END;
+$$;
+
+DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1

@@ -10,6 +10,7 @@
     "test:repository": "node --test api/dispatch-repository.test.js",
     "test": "node --test api/*.test.js",
     "migrate": "node scripts/migrate.js",
+    "migrate:preflight": "node scripts/migrate-preflight.js",
     "format:check": "prettier --check ."
   },
   "dependencies": {
