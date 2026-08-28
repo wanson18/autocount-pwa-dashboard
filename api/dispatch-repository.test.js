@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const { createTestDatabase } = require('../test/helpers/postgres');
+
+const LEGACY_MIGRATIONS_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'migration-upgrade-5fe2aa9');
 
 let database;
 let repository;
@@ -87,12 +90,121 @@ test('migration creates the six dispatch tables and is idempotent', async () => 
   ]);
 
   const before = await pool.query('SELECT filename FROM schema_migrations ORDER BY filename');
-  assert.deepEqual(before.rows.map((row) => row.filename), ['001_delivery_dispatch.sql']);
+  assert.deepEqual(before.rows.map((row) => row.filename), [
+    '001_delivery_dispatch.sql',
+    '002_delivery_dispatch_hardening.sql',
+  ]);
 
   const { migrate } = require('../scripts/migrate');
   await migrate({ pool, skipAdvisoryLock: database.embedded });
   const after = await pool.query('SELECT filename FROM schema_migrations ORDER BY filename');
   assert.deepEqual(after.rows, before.rows);
+});
+
+test('migration upgrades the exact 5fe2aa9 schema with hardening exactly once', async () => {
+  const legacyDatabase = await createTestDatabase();
+  try {
+    const { migrate } = require('../scripts/migrate');
+    await migrate({
+      pool: legacyDatabase.pool,
+      migrationsDir: LEGACY_MIGRATIONS_DIR,
+      skipAdvisoryLock: legacyDatabase.embedded,
+    });
+    const legacyApplied = await legacyDatabase.pool.query(
+      'SELECT filename FROM schema_migrations ORDER BY filename',
+    );
+    assert.deepEqual(legacyApplied.rows.map((row) => row.filename), ['001_delivery_dispatch.sql']);
+
+    await migrate({ pool: legacyDatabase.pool, skipAdvisoryLock: legacyDatabase.embedded });
+    const upgradedApplied = await legacyDatabase.pool.query(
+      'SELECT filename FROM schema_migrations ORDER BY filename',
+    );
+    assert.deepEqual(
+      upgradedApplied.rows.map((row) => row.filename),
+      ['001_delivery_dispatch.sql', '002_delivery_dispatch_hardening.sql'],
+      'an existing 001 database must receive the additive hardening migration',
+    );
+
+    await migrate({ pool: legacyDatabase.pool, skipAdvisoryLock: legacyDatabase.embedded });
+    const hardeningCount = await legacyDatabase.pool.query(`
+      SELECT filename, count(*)::int AS count
+      FROM schema_migrations
+      WHERE filename = '002_delivery_dispatch_hardening.sql'
+      GROUP BY filename
+    `);
+    assert.deepEqual(hardeningCount.rows, [{
+      filename: '002_delivery_dispatch_hardening.sql',
+      count: 1,
+    }]);
+
+    const { createRepository } = require('../lib/dispatch/repository');
+    const repository = createRepository(legacyDatabase.pool);
+    const driver = await repository.createDriver({ name: 'Upgrade Driver', licenseNo: 'D-UPGRADE' });
+    const vehicle = await repository.createVehicle({ registrationNo: 'UPGRADE-REG', description: 'Lorry' });
+    const trip = await repository.createTrip({
+      tripDate: '2026-08-28',
+      driverId: driver.id,
+      vehicleId: vehicle.id,
+    });
+    const assignment = await repository.assignInvoice({
+      tripId: trip.id,
+      companyKey: 'enterprise',
+      invoiceId: 'INV-UPGRADE',
+      docNo: 'ENT-INV-UPGRADE',
+      docDate: '2026-08-28',
+      header: { invoiceId: 'INV-UPGRADE', docNo: 'ENT-INV-UPGRADE' },
+      items: [{
+        itemCode: 'OIL-DECIMAL',
+        description: 'Decimal quantity',
+        uom: 'CTN',
+        quantity: '12345678901234567890.000125',
+      }],
+    });
+    assert.equal(assignment.items[0].quantity, '12345678901234567890.000125');
+
+    const immutableUpdates = [
+      ['id', `${assignment.id + 1}`],
+      ['company_key', "'sdn_bhd'"],
+      ['invoice_id', "'INV-CHANGED'"],
+      ['doc_no', "'DOC-CHANGED'"],
+      ['doc_date', "'2026-08-29'"],
+      ['assigned_at', "TIMESTAMP '2000-01-01 00:00:00+00'"],
+      ['invoice_header', "'{}'::jsonb"],
+    ];
+    for (const [column, value] of immutableUpdates) {
+      await assert.rejects(
+        () => legacyDatabase.pool.query(
+          `UPDATE delivery_assignments SET ${column} = ${value} WHERE id = $1`,
+          [assignment.id],
+        ),
+        /immutable|snapshot/i,
+        `direct update of ${column} should be rejected after upgrade`,
+      );
+    }
+
+    for (const [index, quantity] of ['NaN', 'Infinity', '-Infinity'].entries()) {
+      await assert.rejects(
+        () => repository.assignInvoice({
+          tripId: trip.id,
+          companyKey: 'enterprise',
+          invoiceId: `INV-UPGRADE-NONFINITE-${index}`,
+          docNo: `ENT-INV-UPGRADE-NONFINITE-${index}`,
+          docDate: '2026-08-28',
+          header: { invoiceId: `INV-UPGRADE-NONFINITE-${index}` },
+          items: [{
+            itemCode: 'OIL-NONFINITE',
+            description: 'Non-finite quantity',
+            uom: 'CTN',
+            quantity,
+          }],
+        }),
+        /check|finite|numeric|invalid/i,
+        `non-finite quantity ${quantity} should be rejected after upgrade`,
+      );
+    }
+  } finally {
+    await legacyDatabase.close();
+  }
 });
 
 test('database checks reject unknown companies and statuses', async () => {
