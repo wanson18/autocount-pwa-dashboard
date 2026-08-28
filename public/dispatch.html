@@ -12,37 +12,57 @@
   </head>
   <body>
     <div class="dispatch-app" id="dispatchApp">
-      <header class="page-header" aria-labelledby="pageTitle">
-        <div class="brand-lockup">
-          <a class="back-link" href="/" aria-label="Back to Sales Dashboard">←</a>
-          <div>
-            <p class="eyebrow">Operations</p>
-            <h1 id="pageTitle">Delivery Dispatch</h1>
+      <section class="login-view panel" id="loginView" aria-labelledby="loginTitle">
+        <p class="eyebrow">Operations access</p>
+        <h1 id="loginTitle">Delivery Dispatch</h1>
+        <p class="login-copy">Sign in with your dispatch clerk account to view the protected board and maintain resources.</p>
+        <form id="dispatchLoginForm" class="login-form" novalidate>
+          <label class="field-group" for="clerkId">
+            <span>Clerk ID</span>
+            <input class="field-control" id="clerkId" name="clerkId" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required />
+          </label>
+          <label class="field-group" for="clerkPin">
+            <span>PIN</span>
+            <input class="field-control" id="clerkPin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button" id="loginSubmit" type="submit">Sign in</button>
+        </form>
+        <p class="login-message" id="loginMessage" role="status" aria-live="polite"></p>
+      </section>
+
+      <div id="authenticatedView" hidden>
+        <header class="page-header" aria-labelledby="pageTitle">
+          <div class="brand-lockup">
+            <a class="back-link" href="/" aria-label="Back to Sales Dashboard">←</a>
+            <div>
+              <p class="eyebrow">Operations</p>
+              <h1 id="pageTitle">Delivery Dispatch</h1>
+            </div>
           </div>
+          <div class="header-meta" aria-label="Dispatch status">
+            <span class="online-indicator" aria-hidden="true"></span>
+            <span>Authenticated fixture preview</span>
+            <time id="updatedAt" datetime="2026-08-28">28 Aug 2026</time>
+            <button class="secondary-button" type="button" id="logoutButton">Sign out</button>
+          </div>
+        </header>
+
+        <p class="intro-copy">Plan one physical trip across both company invoice queues. Accounting ownership stays visible on every stop.</p>
+
+        <nav class="tab-list" aria-label="Dispatch sections" role="tablist">
+          <button class="tab-button is-active" id="boardTab" type="button" role="tab" aria-selected="true" aria-controls="boardView" tabindex="0" data-tab="board">Board</button>
+          <button class="tab-button" id="tripsTab" type="button" role="tab" aria-selected="false" aria-controls="tripsView" tabindex="-1" data-tab="trips">Trips</button>
+          <button class="tab-button" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" tabindex="-1" data-tab="reports">Reports</button>
+          <button class="tab-button" id="resourcesTab" type="button" role="tab" aria-selected="false" aria-controls="resourcesView" tabindex="-1" data-tab="resources">Resources</button>
+        </nav>
+
+        <div class="status-row" aria-live="polite" aria-atomic="true">
+          <span class="status-icon" aria-hidden="true">i</span>
+          <span id="statusMessage">Assignment controls are shown for review and will be enabled in Task 6.</span>
         </div>
-        <div class="header-meta" aria-label="Dispatch status">
-          <span class="online-indicator" aria-hidden="true"></span>
-          <span>Fixture preview</span>
-          <time id="updatedAt" datetime="2026-08-28">28 Aug 2026</time>
-        </div>
-      </header>
 
-      <p class="intro-copy">Plan one physical trip across both company invoice queues. Accounting ownership stays visible on every stop.</p>
-
-      <nav class="tab-list" aria-label="Dispatch sections" role="tablist">
-        <button class="tab-button is-active" id="boardTab" type="button" role="tab" aria-selected="true" aria-controls="boardView" tabindex="0" data-tab="board">Board</button>
-        <button class="tab-button" id="tripsTab" type="button" role="tab" aria-selected="false" aria-controls="tripsView" tabindex="-1" data-tab="trips">Trips</button>
-        <button class="tab-button" id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" tabindex="-1" data-tab="reports">Reports</button>
-        <button class="tab-button" id="resourcesTab" type="button" role="tab" aria-selected="false" aria-controls="resourcesView" tabindex="-1" data-tab="resources">Resources</button>
-      </nav>
-
-      <div class="status-row" aria-live="polite" aria-atomic="true">
-        <span class="status-icon" aria-hidden="true">i</span>
-        <span id="statusMessage">Assignment controls are shown for review and will be enabled in Task 6.</span>
-      </div>
-
-      <main>
-        <section class="view" id="boardView" role="tabpanel" aria-labelledby="boardTab">
+        <main>
+          <section class="view" id="boardView" role="tabpanel" aria-labelledby="boardTab">
           <div class="toolbar panel">
             <div>
               <p class="eyebrow">Invoice date</p>
@@ -94,31 +114,89 @@
             </div>
             <p id="selectionSummary">Selected details will appear here without changing the fixture.</p>
           </aside>
-        </section>
+          </section>
 
-        <section class="view panel placeholder-view" id="tripsView" role="tabpanel" aria-labelledby="tripsTab" hidden>
-          <p class="eyebrow">Trips</p>
-          <h2>Trip overview</h2>
-          <p>Trip history and status controls will be connected after the dispatch API is available.</p>
-        </section>
+          <section class="view panel placeholder-view" id="tripsView" role="tabpanel" aria-labelledby="tripsTab" hidden>
+            <p class="eyebrow">Trips</p>
+            <h2>Trip overview</h2>
+            <p>Trip history and status controls will be connected after the dispatch API is available.</p>
+          </section>
 
-        <section class="view panel placeholder-view" id="reportsView" role="tabpanel" aria-labelledby="reportsTab" hidden>
-          <p class="eyebrow">Reports</p>
-          <h2>Delivery reports</h2>
-          <p>Period filters and export will use persisted assignment snapshots in a later task.</p>
-        </section>
+          <section class="view panel placeholder-view" id="reportsView" role="tabpanel" aria-labelledby="reportsTab" hidden>
+            <p class="eyebrow">Reports</p>
+            <h2>Delivery reports</h2>
+            <p>Period filters and export will use persisted assignment snapshots in a later task.</p>
+          </section>
 
-        <section class="view panel placeholder-view" id="resourcesView" role="tabpanel" aria-labelledby="resourcesTab" hidden>
-          <p class="eyebrow">Resources</p>
-          <h2>Drivers and lorries</h2>
-          <p>Resource maintenance will be connected after clerk sign-in and the resource API are available.</p>
-        </section>
-      </main>
+          <section class="view panel resources-view" id="resourcesView" role="tabpanel" aria-labelledby="resourcesTab" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Resource register</p>
+                <h2>Drivers and lorries</h2>
+              </div>
+              <label class="resource-toggle" for="showInactiveResources">
+                <input id="showInactiveResources" type="checkbox" />
+                <span>Show inactive</span>
+              </label>
+            </div>
+            <p class="section-help">Changes are saved to the protected dispatch register. Sign-in identity is recorded by the server.</p>
+            <p class="resource-status" id="resourceStatus" role="status" aria-live="polite"></p>
+            <div class="resource-grid">
+              <section class="resource-list-panel" aria-labelledby="driverListTitle">
+                <h3 id="driverListTitle">Drivers</h3>
+                <div class="resource-list" id="driverList"></div>
+              </section>
+              <section class="resource-list-panel" aria-labelledby="lorryListTitle">
+                <h3 id="lorryListTitle">Lorries</h3>
+                <div class="resource-list" id="lorryList"></div>
+              </section>
+            </div>
+            <form id="resourceForm" class="resource-form" novalidate>
+              <div>
+                <p class="eyebrow">Add resource</p>
+                <h3>New driver or lorry</h3>
+              </div>
+              <label class="field-group" for="resourceType">
+                <span>Resource type</span>
+                <select class="field-control" id="resourceType" name="type">
+                  <option value="driver">Driver</option>
+                  <option value="lorry">Lorry</option>
+                </select>
+              </label>
+              <div class="resource-fields" id="driverResourceFields">
+                <label class="field-group" for="resourceName">
+                  <span>Driver name</span>
+                  <input class="field-control" id="resourceName" name="name" type="text" maxlength="120" />
+                </label>
+                <label class="field-group" for="resourceLicenseNo">
+                  <span>License number</span>
+                  <input class="field-control" id="resourceLicenseNo" name="licenseNo" type="text" maxlength="64" />
+                </label>
+                <label class="field-group" for="resourcePhone">
+                  <span>Phone (optional)</span>
+                  <input class="field-control" id="resourcePhone" name="phone" type="tel" maxlength="64" />
+                </label>
+              </div>
+              <div class="resource-fields" id="lorryResourceFields" hidden>
+                <label class="field-group" for="resourceRegistrationNo">
+                  <span>Registration number</span>
+                  <input class="field-control" id="resourceRegistrationNo" name="registrationNo" type="text" maxlength="64" />
+                </label>
+                <label class="field-group" for="resourceDescription">
+                  <span>Description (optional)</span>
+                  <input class="field-control" id="resourceDescription" name="description" type="text" maxlength="160" />
+                </label>
+              </div>
+              <button class="primary-button" id="resourceSubmit" type="submit">Add resource</button>
+            </form>
+          </section>
+        </main>
 
-      <footer class="page-footer">
-        <span>Dispatch preview · no records are changed</span>
-        <span class="future-action">Print Items area reserved for Task 7</span>
-      </footer>
+        <footer class="page-footer">
+          <span>Dispatch preview · no invoice records are changed</span>
+          <span class="future-action">Print Items area reserved for Task 7</span>
+        </footer>
+      </div>
     </div>
     <script type="module" src="/dispatch.js"></script>
   </body>

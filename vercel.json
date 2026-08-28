@@ -2,6 +2,14 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/api/dispatch/session",
+      "destination": "/api/dispatch-session.js"
+    },
+    {
+      "source": "/api/dispatch/resources",
+      "destination": "/api/dispatch-resources.js"
+    },
+    {
       "source": "/api/dispatch/invoices",
       "destination": "/api/dispatch-invoices.js"
     },
@@ -12,9 +20,21 @@
   ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/sales",
       "headers": [
         { "key": "Cache-Control", "value": "s-maxage=600" }
+      ]
+    },
+    {
+      "source": "/api/dispatch/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/api/dispatch-(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
       ]
     }
   ]

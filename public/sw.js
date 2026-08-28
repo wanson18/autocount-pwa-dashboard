@@ -31,6 +31,15 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
 
+  const url = new URL(request.url);
+  const isDispatchApi = url.pathname === '/api/dispatch'
+    || url.pathname.startsWith('/api/dispatch/')
+    || url.pathname.startsWith('/api/dispatch-');
+  if (isDispatchApi) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   if (request.url.includes('/api/')) {
     event.respondWith(
       fetch(request)

@@ -26,6 +26,7 @@ import {
   renderTripCard,
   resolveDispatchClickTarget,
 } from '../public/dispatch.js';
+import * as dispatchClient from '../public/dispatch.js';
 
 const invoices = [
   {
@@ -479,4 +480,54 @@ test('click delegation ignores disabled actions, keeps child invoice clicks scop
     resolveDispatchClickTarget(clickTarget({ tripId: 'trip-001' })),
     { kind: 'trip', id: 'trip-001' },
   );
+});
+
+test('dispatch shell provides a keyboard-accessible login boundary and resource controls', () => {
+  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'dispatch.html'), 'utf8');
+
+  assert.match(html, /id="loginView"/);
+  assert.match(html, /id="dispatchLoginForm"/);
+  assert.match(html, /id="clerkId"/);
+  assert.match(html, /id="clerkPin"/);
+  assert.match(html, /type="password"/);
+  assert.match(html, /id="authenticatedView"[^>]*hidden/);
+  assert.match(html, /id="resourceForm"/);
+  assert.match(html, /id="driverList"/);
+  assert.match(html, /id="lorryList"/);
+});
+
+test('dispatch client exposes same-origin session and resource transports without browser secrets', async () => {
+  assert.equal(typeof createDispatchApp, 'function');
+  assert.equal(typeof dispatchClient.createSessionTransport, 'function');
+  assert.equal(typeof dispatchClient.createResourceTransport, 'function');
+  const clientSource = fs.readFileSync(path.join(process.cwd(), 'public', 'dispatch.js'), 'utf8');
+  assert.match(clientSource, /api\/dispatch\/session/);
+  assert.match(clientSource, /api\/dispatch\/resources/);
+  assert.doesNotMatch(clientSource, /DISPATCH_SESSION_SECRET|DISPATCH_USERS_JSON|AUTOCOUNT_ACCOUNT_BOOK/);
+});
+
+test('dispatch client mutation transports send only server-owned resource fields', async () => {
+  assert.equal(typeof dispatchClient.createSessionTransport, 'function');
+  assert.equal(typeof dispatchClient.createResourceTransport, 'function');
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { success: true, authenticated: true, session: { clerkId: 'clerk-1', role: 'clerk' } };
+      },
+    };
+  };
+  const sessionTransport = dispatchClient.createSessionTransport({ fetchImpl });
+  const resourceTransport = dispatchClient.createResourceTransport({ fetchImpl });
+
+  await sessionTransport.login({ clerkId: 'clerk-1', pin: '2468' });
+  await resourceTransport.updateResource({ type: 'driver', id: 7, active: false });
+
+  assert.deepEqual(JSON.parse(calls[0].options.body), { clerkId: 'clerk-1', pin: '2468' });
+  assert.deepEqual(JSON.parse(calls[1].options.body), { type: 'driver', id: 7, active: false });
+  assert.equal(JSON.stringify(calls).includes('assigned_by'), false);
+  assert.equal(JSON.stringify(calls).includes('actor_id'), false);
 });

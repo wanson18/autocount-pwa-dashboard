@@ -15,6 +15,12 @@ const sdnBhdFixture = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'autocount-sdn-bhd-invoices.json')),
 );
 
+const TEST_SESSION = Object.freeze({ clerkId: 'test-clerk', role: 'clerk', iat: 1, exp: 2 });
+
+function withAuthenticatedSession(options) {
+  return { ...options, getSession: async () => TEST_SESSION };
+}
+
 const ENV = {
   AUTOCOUNT_API_URL: 'https://example.invalid',
   AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: 'enterprise-book-fixture',
@@ -271,10 +277,10 @@ test('adapter enriches missing detail UOM from the documented product master', a
 
 test('endpoint validates ISO dates before contacting AutoCount', async () => {
   let called = false;
-  const handler = createDispatchInvoicesHandler({
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({
     adapter: { listInvoices: async () => { called = true; return []; } },
     configs: loadCompanyConfigs(ENV),
-  });
+  }));
   const res = responseRecorder();
 
   await handler({ method: 'GET', query: { startDate: '2026-02-30', endDate: '2026-08-28', company: 'enterprise' } }, res);
@@ -285,10 +291,10 @@ test('endpoint validates ISO dates before contacting AutoCount', async () => {
 });
 
 test('endpoint returns invalid_request for an invalid calendar month', async () => {
-  const handler = createDispatchInvoicesHandler({
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({
     adapter: { listInvoices: async () => [] },
     configs: loadCompanyConfigs(ENV),
-  });
+  }));
   const res = responseRecorder();
 
   await handler({ method: 'GET', query: { startDate: '2026-13-01', endDate: '2026-08-28', company: 'enterprise' } }, res);
@@ -305,7 +311,7 @@ test('all endpoint returns mixed company invoices and source health', async () =
       return [{ companyKey: 'enterprise', docKey: 'enterprise-doc-001' }];
     },
   };
-  const handler = createDispatchInvoicesHandler({ adapter, configs });
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({ adapter, configs }));
   const res = responseRecorder();
 
   await handler({ method: 'GET', query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'all' } }, res);
@@ -328,7 +334,7 @@ test('endpoint preserves integrity error health separately from source outage he
       throw error;
     },
   };
-  const handler = createDispatchInvoicesHandler({ adapter, configs });
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({ adapter, configs }));
   const res = responseRecorder();
 
   await handler({ method: 'GET', query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'all' } }, res);
@@ -343,7 +349,7 @@ test('endpoint preserves integrity error health separately from source outage he
 test('single-company endpoint does not fetch the other company', async () => {
   const configs = loadCompanyConfigs(ENV);
   const seen = [];
-  const handler = createDispatchInvoicesHandler({
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({
     adapter: {
       async listInvoices(company) {
         seen.push(company.companyKey);
@@ -351,7 +357,7 @@ test('single-company endpoint does not fetch the other company', async () => {
       },
     },
     configs,
-  });
+  }));
   const res = responseRecorder();
 
   await handler({ method: 'GET', query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'sdn_bhd' } }, res);

@@ -149,19 +149,171 @@ export function createFetchTransport({ fetchImpl = globalThis.fetch } = {}) {
         endDate: endDate || DISPATCH_FIXTURE.dateRange.endDate,
         company,
       });
-      const response = await fetchImpl(`/api/dispatch/invoices?${query.toString()}`);
+      const response = await fetchImpl(`/api/dispatch/invoices?${query.toString()}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
       if (!response.ok) throw new Error(`Dispatch feed failed with status ${response.status}`);
       return response.json();
     },
   };
 }
 
-export function createDispatchApp({ documentRef = globalThis.document, transport = createFixtureTransport() } = {}) {
+async function parseApiResponse(response, fallbackMessage) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // The client only exposes a generic message when the server response is not JSON.
+  }
+  if (!response.ok) {
+    const error = new Error(payload?.error?.code === 'invalid_credentials'
+      ? 'Invalid clerk ID or PIN.'
+      : fallbackMessage);
+    error.code = payload?.error?.code || 'request_failed';
+    throw error;
+  }
+  return payload;
+}
+
+function createJsonRequest(method, body) {
+  return {
+    method,
+    credentials: 'same-origin',
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+export function createSessionTransport({ fetchImpl = globalThis.fetch } = {}) {
+  if (typeof fetchImpl !== 'function') throw new Error('a fetch implementation is required');
+  return {
+    async getSession() {
+      const response = await fetchImpl('/api/dispatch/session', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      return parseApiResponse(response, 'The session could not be checked.');
+    },
+    async login({ clerkId, pin }) {
+      const response = await fetchImpl('/api/dispatch/session', createJsonRequest('POST', { clerkId, pin }));
+      return parseApiResponse(response, 'Sign-in could not be completed.');
+    },
+    async logout() {
+      const response = await fetchImpl('/api/dispatch/session', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      return parseApiResponse(response, 'Sign-out could not be completed.');
+    },
+  };
+}
+
+export function createResourceTransport({ fetchImpl = globalThis.fetch } = {}) {
+  if (typeof fetchImpl !== 'function') throw new Error('a fetch implementation is required');
+  return {
+    async loadResources({ active = 'true' } = {}) {
+      const query = new URLSearchParams({ active: String(active) });
+      const response = await fetchImpl(`/api/dispatch/resources?${query.toString()}`, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      return parseApiResponse(response, 'Resources could not be loaded.');
+    },
+    async createResource(resource) {
+      const response = await fetchImpl('/api/dispatch/resources', createJsonRequest('POST', resource));
+      return parseApiResponse(response, 'The resource could not be added.');
+    },
+    async updateResource(resource) {
+      const response = await fetchImpl('/api/dispatch/resources', createJsonRequest('PATCH', resource));
+      return parseApiResponse(response, 'The resource could not be updated.');
+    },
+  };
+}
+
+function resourceStatusLabel(resource) {
+  return resource.active ? 'Active' : 'Inactive';
+}
+
+function renderResource(resource, type) {
+  const identity = type === 'driver' ? resource.licenseNo : resource.registrationNo;
+  const title = type === 'driver' ? resource.name : identity;
+  const detail = type === 'driver' ? (resource.phone || 'No phone recorded') : (resource.description || 'No description recorded');
+  const nextActive = !resource.active;
+  return `
+    <article class="resource-card${resource.active ? '' : ' is-inactive'}">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <span class="resource-identity">${escapeHtml(identity)}</span>
+        <span class="resource-detail">${escapeHtml(detail)}</span>
+      </div>
+      <div class="resource-card-actions">
+        <span class="status-badge">${resourceStatusLabel(resource)}</span>
+        <button class="secondary-button resource-toggle-button" type="button" data-resource-type="${type}" data-resource-id="${escapeHtml(resource.id)}" data-resource-active="${String(nextActive)}">${nextActive ? 'Reactivate' : 'Deactivate'}</button>
+      </div>
+    </article>`;
+}
+
+export function renderResources(root, resources) {
+  const driverList = $(root, '#driverList');
+  const lorryList = $(root, '#lorryList');
+  if (driverList) {
+    driverList.innerHTML = (resources.drivers || []).map((resource) => renderResource(resource, 'driver')).join('')
+      || '<p class="empty-resource-list">No drivers in this view.</p>';
+  }
+  if (lorryList) {
+    lorryList.innerHTML = (resources.lorries || []).map((resource) => renderResource(resource, 'lorry')).join('')
+      || '<p class="empty-resource-list">No lorries in this view.</p>';
+  }
+}
+
+export function createDispatchApp({
+  documentRef = globalThis.document,
+  transport = createFixtureTransport(),
+  sessionTransport = createSessionTransport(),
+  resourcesTransport = createResourceTransport(),
+} = {}) {
   if (!documentRef) throw new Error('a document is required');
   const root = documentRef.querySelector('#dispatchApp');
   if (!root) throw new Error('dispatch app root is required');
   let state = createDispatchState();
   let boardRequestSequence = 0;
+  let resourceRequestSequence = 0;
+  let authenticated = !$(root, '#loginView') || !$(root, '#authenticatedView');
+  let session = null;
+
+  const loginView = $(root, '#loginView');
+  const authenticatedView = $(root, '#authenticatedView');
+  const loginForm = $(root, '#dispatchLoginForm');
+  const loginMessage = $(root, '#loginMessage');
+  const loginSubmit = $(root, '#loginSubmit');
+  const clerkIdInput = $(root, '#clerkId');
+  const clerkPinInput = $(root, '#clerkPin');
+  const resourceForm = $(root, '#resourceForm');
+  const resourceType = $(root, '#resourceType');
+  const resourceStatus = $(root, '#resourceStatus');
+  const resourceSubmit = $(root, '#resourceSubmit');
+  const showInactiveResources = $(root, '#showInactiveResources');
+
+  function setAuthenticated(nextAuthenticated, nextSession = null) {
+    authenticated = nextAuthenticated;
+    session = nextAuthenticated ? nextSession : null;
+    if (loginView) loginView.hidden = nextAuthenticated;
+    if (authenticatedView) authenticatedView.hidden = !nextAuthenticated;
+    root.dataset.authenticated = String(nextAuthenticated);
+  }
+
+  function setLoginMessage(message) {
+    if (loginMessage) loginMessage.textContent = message;
+  }
+
+  function setResourceMessage(message) {
+    if (resourceStatus) resourceStatus.textContent = message;
+  }
 
   function render() {
     renderDispatchBoard(root, state);
@@ -173,6 +325,7 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
   }
 
   async function loadBoard() {
+    if (!authenticated) return state;
     $(root, '#statusMessage').textContent = 'Loading fixture board…';
     const requestSequence = ++boardRequestSequence;
     const requestedCompany = state.companyFilter;
@@ -189,6 +342,141 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
     }
   }
 
+  async function loadResources() {
+    if (!authenticated || !$(root, '#driverList')) return null;
+    const requestSequence = ++resourceRequestSequence;
+    const active = showInactiveResources?.checked ? 'all' : 'true';
+    setResourceMessage('Loading resources…');
+    try {
+      const resources = await resourcesTransport.loadResources({ active });
+      if (requestSequence !== resourceRequestSequence || !authenticated) return resources;
+      renderResources(root, resources);
+      setResourceMessage('Resources loaded.');
+      return resources;
+    } catch (error) {
+      if (requestSequence !== resourceRequestSequence || !authenticated) return null;
+      setResourceMessage(error.code === 'unauthorized'
+        ? 'Your session has expired. Sign in again.'
+        : 'Resources could not be loaded. Try again.');
+      throw error;
+    }
+  }
+
+  async function updateResource(type, id, active) {
+    setResourceMessage('Saving resource…');
+    try {
+      await resourcesTransport.updateResource({ type, id: Number(id), active });
+      setResourceMessage('Resource updated.');
+      await loadResources();
+    } catch (error) {
+      setResourceMessage(error.code === 'unauthorized'
+        ? 'Your session has expired. Sign in again.'
+        : 'Resource could not be updated. Try again.');
+      throw error;
+    }
+  }
+
+  function updateResourceTypeFields() {
+    const driverFields = $(root, '#driverResourceFields');
+    const lorryFields = $(root, '#lorryResourceFields');
+    const isDriver = resourceType?.value === 'driver';
+    if (driverFields) driverFields.hidden = !isDriver;
+    if (lorryFields) lorryFields.hidden = isDriver;
+  }
+
+  async function submitResource() {
+    if (!resourceType) return;
+    const type = resourceType.value;
+    const body = type === 'driver'
+      ? {
+        type,
+        name: $(root, '#resourceName')?.value?.trim() || '',
+        licenseNo: $(root, '#resourceLicenseNo')?.value?.trim() || '',
+        phone: $(root, '#resourcePhone')?.value?.trim() || null,
+      }
+      : {
+        type,
+        registrationNo: $(root, '#resourceRegistrationNo')?.value?.trim() || '',
+        description: $(root, '#resourceDescription')?.value?.trim() || null,
+      };
+    if (resourceSubmit) resourceSubmit.disabled = true;
+    setResourceMessage('Saving resource…');
+    try {
+      await resourcesTransport.createResource(body);
+      resourceForm?.reset?.();
+      updateResourceTypeFields();
+      setResourceMessage('Resource added.');
+      await loadResources();
+    } catch (error) {
+      setResourceMessage(error.code === 'resource_conflict'
+        ? 'A resource with that identity already exists.'
+        : error.code === 'unauthorized'
+          ? 'Your session has expired. Sign in again.'
+          : 'Resource could not be added. Try again.');
+      throw error;
+    } finally {
+      if (resourceSubmit) resourceSubmit.disabled = false;
+    }
+  }
+
+  async function login() {
+    if (!clerkIdInput || !clerkPinInput) return;
+    if (loginSubmit) loginSubmit.disabled = true;
+    setLoginMessage('Signing in…');
+    try {
+      const result = await sessionTransport.login({
+        clerkId: clerkIdInput.value.trim(),
+        pin: clerkPinInput.value,
+      });
+      if (!result?.authenticated || !result.session) throw new Error('Sign-in could not be completed.');
+      setAuthenticated(true, result.session);
+      setLoginMessage('');
+      clerkPinInput.value = '';
+      await loadBoard();
+      root.querySelector('[role="tab"]')?.focus?.();
+    } catch (error) {
+      setAuthenticated(false);
+      setLoginMessage(error.code === 'invalid_credentials'
+        ? 'Invalid clerk ID or PIN.'
+        : 'Sign-in could not be completed. Try again.');
+      clerkPinInput.value = '';
+      clerkPinInput.focus?.();
+      throw error;
+    } finally {
+      if (loginSubmit) loginSubmit.disabled = false;
+    }
+  }
+
+  async function logout() {
+    try {
+      await sessionTransport.logout();
+    } finally {
+      setAuthenticated(false);
+      state = createDispatchState();
+      render();
+      setLoginMessage('You have been signed out.');
+      clerkIdInput?.focus?.();
+    }
+  }
+
+  async function initializeSession() {
+    if (!loginView || !authenticatedView || !loginForm) return;
+    setAuthenticated(false);
+    setLoginMessage('Checking sign-in…');
+    try {
+      const result = await sessionTransport.getSession();
+      if (result?.authenticated && result.session) {
+        setAuthenticated(true, result.session);
+        setLoginMessage('');
+        await loadBoard();
+      } else {
+        setLoginMessage('Sign in to continue.');
+      }
+    } catch {
+      setLoginMessage('Sign-in is temporarily unavailable. Try again.');
+    }
+  }
+
   function activateTab(tabName, { focus = false } = {}) {
     root.querySelectorAll('[role="tab"]').forEach((tab) => {
       const active = tab.dataset.tab === tabName;
@@ -202,9 +490,23 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
     });
   }
 
-  root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => activateTab(tab.dataset.tab)));
+  root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => {
+    activateTab(tab.dataset.tab);
+    if (tab.dataset.tab === 'resources' && authenticated) loadResources().catch(() => {});
+  }));
   $(root, '#companyFilter').addEventListener('change', (event) => setState(setCompanyFilter(state, event.target.value)));
   $(root, '#refreshBoard').addEventListener('click', () => loadBoard().catch(() => {}));
+  $(root, '#logoutButton')?.addEventListener('click', () => logout().catch(() => {}));
+  loginForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    login().catch(() => {});
+  });
+  resourceForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitResource().catch(() => {});
+  });
+  resourceType?.addEventListener('change', updateResourceTypeFields);
+  showInactiveResources?.addEventListener('change', () => loadResources().catch(() => {}));
 
   root.addEventListener('click', (event) => {
     const selection = resolveDispatchClickTarget(event.target);
@@ -216,6 +518,16 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
     if (selection.kind === 'trip') {
       setState(selectTrip(state, selection.id));
     }
+  });
+
+  root.addEventListener('click', (event) => {
+    const button = event.target.closest?.('[data-resource-active]');
+    if (!button) return;
+    updateResource(
+      button.dataset.resourceType,
+      button.dataset.resourceId,
+      button.dataset.resourceActive === 'true',
+    ).catch(() => {});
   });
 
   root.addEventListener('keydown', (event) => {
@@ -232,14 +544,24 @@ export function createDispatchApp({ documentRef = globalThis.document, transport
   });
 
   activateTab('board');
+  updateResourceTypeFields();
   render();
-  return { getState: () => state, loadBoard, render, activateTab };
+  initializeSession().catch(() => {});
+  return {
+    getState: () => state,
+    getSession: () => session,
+    loadBoard,
+    loadResources,
+    render,
+    activateTab,
+    login,
+    logout,
+  };
 }
 
 if (typeof document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const app = createDispatchApp();
     window.dispatchApp = app;
-    app.loadBoard().catch(() => {});
   }, { once: true });
 }
