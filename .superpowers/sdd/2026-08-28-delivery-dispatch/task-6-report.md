@@ -360,5 +360,5 @@ exit code 0
 
 ### Fix-round commits
 
-- Fix implementation and evidence: `FIX_COMMIT_PENDING`
-- Fix-hash report update: to be recorded in the report-only follow-up commit.
+- Fix implementation and evidence: `8120ae9a9b3cd8f13ee0c873fc3cdafde494f512`
+- Fix-hash report update: recorded in the report-only follow-up commit.
