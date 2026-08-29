@@ -63,7 +63,7 @@ Status: GREEN locally; the real PostgreSQL/provider gate remains pending
 
 ## Focused implementation commit
 
-`1073374f4d6b8508296f6d4057e311eb886d0df3`
+`107337492227553b0419d6c6c765918fa68234fa`
 
 The implementation commit contains only the intended Task 5 code, tests,
 additive migration, routing/documentation updates, and compatibility assertions
