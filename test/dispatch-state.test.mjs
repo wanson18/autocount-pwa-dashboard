@@ -20,6 +20,7 @@ import {
   settleMoveResponse,
   visibleUnassignedInvoices,
 } from '../public/dispatch-state.mjs';
+import * as dispatchState from '../public/dispatch-state.mjs';
 import {
   createDispatchApp,
   createFetchTransport,
@@ -79,6 +80,44 @@ test('combined filter returns unassigned invoices from both companies', () => {
   ]);
   assert.equal(visible[0].items[0].quantity, '2.125');
   assert.equal(visible[1].items[0].quantity, '3.000');
+});
+
+test('persisted assignment snapshots keep mixed-company cards renderable when the live feed omits an assigned invoice', () => {
+  const assignment = {
+    id: 41,
+    tripId: 'trip-001',
+    companyKey: 'sdn_bhd',
+    invoiceId: 'persisted-sdn-001',
+    docNo: 'SDN-PERSISTED-001',
+    docDate: '2026-08-28',
+    header: {
+      companyKey: 'sdn_bhd',
+      invoiceId: 'persisted-sdn-001',
+      docNo: 'SDN-PERSISTED-001',
+      docDate: '2026-08-28',
+      customer: { code: 'SDN-CUSTOMER', name: 'Persisted Sdn Bhd Customer' },
+      deliveryAddress: 'Persisted Sdn Bhd Address',
+    },
+    items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '3.000', uom: 'CTN' }],
+    status: 'assigned',
+  };
+  const state = createDispatchState({
+    invoices: [invoices[0]],
+    trips: [{ ...trips[0], invoiceKeys: ['enterprise:shared-doc-001'], assignments: [assignment] }],
+    assignments: [assignment],
+  });
+
+  assert.deepEqual(getTripInvoices(state, 'trip-001').map(getInvoiceKey), [
+    'enterprise:shared-doc-001',
+    'sdn_bhd:persisted-sdn-001',
+  ]);
+  assert.equal(getTripInvoices(state, 'trip-001')[1].customer.name, 'Persisted Sdn Bhd Customer');
+  assert.equal(typeof dispatchState.getTripCompanyCounts, 'function');
+  assert.deepEqual(dispatchState.getTripCompanyCounts(state, 'trip-001'), {
+    enterprise: 1,
+    sdn_bhd: 1,
+    total: 2,
+  });
 });
 
 test('company filters narrow visibility without changing stable identity', () => {
@@ -387,7 +426,7 @@ test('refresh keeps the selected company in the control, badge, state, and trans
 
   await app.loadBoard();
 
-  assert.deepEqual(calls, [{ company: 'sdn_bhd' }]);
+  assert.deepEqual(calls, [{ startDate: '2026-08-28', endDate: '2026-08-28', company: 'sdn_bhd' }]);
   assert.equal(app.getState().companyFilter, 'sdn_bhd');
   assert.equal(fake.companyFilter.value, 'sdn_bhd');
   assert.equal(fake.queueKey.textContent, 'SDN BHD');
@@ -520,6 +559,64 @@ test('dispatch client exposes same-origin session and resource transports withou
   assert.doesNotMatch(clientSource, /DISPATCH_SESSION_SECRET|DISPATCH_USERS_JSON|AUTOCOUNT_ACCOUNT_BOOK/);
 });
 
+test('board transport reads authenticated invoices, trips, and persisted assignments together', async () => {
+  const calls = [];
+  const payloads = {
+    invoices: { success: true, dateRange: { startDate: '2026-08-28', endDate: '2026-08-28' }, company: 'all', invoices, sources: { enterprise: { status: 'ok' }, sdn_bhd: { status: 'ok' } } },
+    trips: { success: true, trips },
+    assignments: { success: true, assignments: [] },
+  };
+  const transport = createFetchTransport({
+    fetchImpl: async (url) => {
+      calls.push(url);
+      const key = url.includes('/invoices?') ? 'invoices' : url.includes('/trips?') ? 'trips' : 'assignments';
+      return { ok: true, status: 200, async json() { return payloads[key]; } };
+    },
+  });
+
+  const result = await transport.loadBoard({ startDate: '2026-08-28', endDate: '2026-08-28', company: 'all' });
+
+  assert.equal(calls.length, 3);
+  assert.ok(calls.some((url) => url.includes('/api/dispatch/invoices?')));
+  assert.ok(calls.some((url) => url.includes('/api/dispatch/trips?')));
+  assert.ok(calls.some((url) => url.includes('/api/dispatch/assignments?')));
+  assert.deepEqual(result, {
+    invoices: payloads.invoices.invoices,
+    trips: payloads.trips.trips,
+    assignments: payloads.assignments.assignments,
+    sources: payloads.invoices.sources,
+    dateRange: payloads.invoices.dateRange,
+  });
+});
+
+test('trip and assignment transports send only the approved mutation fields', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, status: 201, async json() { return { success: true }; } };
+  };
+  const tripsTransport = dispatchClient.createTripsTransport({ fetchImpl });
+  const assignmentsTransport = dispatchClient.createAssignmentsTransport({ fetchImpl });
+
+  await tripsTransport.createTrip({
+    trip_date: '2026-08-28', driver_id: 7, vehicle_id: 8, route_notes: 'North route',
+    ignored: 'must not cross the boundary',
+  });
+  await assignmentsTransport.assignInvoice({
+    trip_id: 9, company_key: 'sdn_bhd', invoice_id: 'persisted-sdn-001', doc_no: 'SDN-PERSISTED-001',
+    doc_date: '2026-08-28', expected_trip_revision: 3,
+    ignored: 'must not cross the boundary',
+  });
+
+  const tripBody = JSON.parse(calls[0].options.body);
+  const assignmentBody = JSON.parse(calls[1].options.body);
+  assert.deepEqual(Object.keys(tripBody).sort(), ['driver_id', 'request_id', 'route_notes', 'trip_date', 'vehicle_id'].sort());
+  assert.deepEqual(Object.keys(assignmentBody).sort(), ['company_key', 'doc_date', 'doc_no', 'expected_trip_revision', 'invoice_id', 'request_id', 'trip_id'].sort());
+  assert.equal(tripBody.ignored, undefined);
+  assert.equal(assignmentBody.ignored, undefined);
+  assert.notEqual(tripBody.request_id, assignmentBody.request_id);
+});
+
 test('dispatch client mutation transports send only server-owned resource fields', async () => {
   assert.equal(typeof dispatchClient.createSessionTransport, 'function');
   assert.equal(typeof dispatchClient.createResourceTransport, 'function');
@@ -589,15 +686,15 @@ test('protected-resource 401 clears resource and actor state and returns the UI 
 
 test('invoice fetch transport preserves unauthorized 401 so board load clears sensitive state', async () => {
   const fake = createFakeDispatchDocument({ protectedShell: true });
-  let boardCalls = 0;
+  let invoiceReads = 0;
   const transport = createFetchTransport({
-    fetchImpl: async () => {
-      boardCalls += 1;
-      if (boardCalls === 1) {
+    fetchImpl: async (url) => {
+      if (url.includes('/invoices?')) invoiceReads += 1;
+      if (!url.includes('/invoices?') || invoiceReads === 1) {
         return {
           ok: true,
           status: 200,
-          async json() { return { invoices, trips: [] }; },
+          async json() { return url.includes('/trips?') ? { success: true, trips: [] } : url.includes('/assignments?') ? { success: true, assignments: [] } : { invoices, trips: [] }; },
         };
       }
       return {

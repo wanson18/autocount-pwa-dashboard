@@ -6,6 +6,7 @@ export const COMPANY_FILTER_LABELS = {
   sdn_bhd: 'SDN BHD',
 };
 export const TAB_NAMES = ['board', 'trips', 'reports', 'resources'];
+export const DEFAULT_DATE_RANGE = { startDate: '2026-08-28', endDate: '2026-08-28' };
 
 export const COMPANY_NAMES = {
   enterprise: 'Wanson Enterprise',
@@ -13,85 +14,58 @@ export const COMPANY_NAMES = {
 };
 
 export const DISPATCH_FIXTURE = {
-  dateRange: { startDate: '2026-08-28', endDate: '2026-08-28' },
+  dateRange: { ...DEFAULT_DATE_RANGE },
   sources: {
     enterprise: { status: 'ok', invoiceCount: 2 },
     sdn_bhd: { status: 'ok', invoiceCount: 2 },
   },
   invoices: [
     {
-      companyKey: 'enterprise',
-      invoiceId: 'enterprise-doc-001',
-      docKey: 'enterprise-doc-001',
-      docNo: 'ENT-SI-0001',
-      docDate: '2026-08-28',
+      companyKey: 'enterprise', invoiceId: 'enterprise-doc-001', docKey: 'enterprise-doc-001',
+      docNo: 'ENT-SI-0001', docDate: '2026-08-28',
       customer: { code: 'ENT-CUST-001', name: 'Sanitized Enterprise Customer' },
-      deliveryAddress: 'Sanitized Enterprise Delivery Address',
-      cancelled: false,
-      eligibility: 'eligible',
+      deliveryAddress: 'Sanitized Enterprise Delivery Address', cancelled: false, eligibility: 'eligible',
       items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '2.125', uom: 'CTN' }],
     },
     {
-      companyKey: 'sdn_bhd',
-      invoiceId: 'sdn-bhd-doc-001',
-      docKey: 'sdn-bhd-doc-001',
-      docNo: 'SDN-SI-0001',
-      docDate: '2026-08-28',
+      companyKey: 'sdn_bhd', invoiceId: 'sdn-bhd-doc-001', docKey: 'sdn-bhd-doc-001',
+      docNo: 'SDN-SI-0001', docDate: '2026-08-28',
       customer: { code: 'SDN-CUST-001', name: 'Sanitized Sdn Bhd Customer' },
-      deliveryAddress: 'Sanitized Sdn Bhd Delivery Address',
-      cancelled: false,
-      eligibility: 'eligible',
+      deliveryAddress: 'Sanitized Sdn Bhd Delivery Address', cancelled: false, eligibility: 'eligible',
       items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '3.000', uom: 'CTN' }],
     },
     {
-      companyKey: 'enterprise',
-      invoiceId: 'enterprise-doc-002',
-      docKey: 'enterprise-doc-002',
-      docNo: 'ENT-SI-0002',
-      docDate: '2026-08-28',
+      companyKey: 'enterprise', invoiceId: 'enterprise-doc-002', docKey: 'enterprise-doc-002',
+      docNo: 'ENT-SI-0002', docDate: '2026-08-28',
       customer: { code: 'ENT-CUST-002', name: 'Second Enterprise Customer' },
-      deliveryAddress: 'Second Enterprise Delivery Address',
-      cancelled: false,
-      eligibility: 'eligible',
+      deliveryAddress: 'Second Enterprise Delivery Address', cancelled: false, eligibility: 'eligible',
       items: [{ itemCode: 'AJINOMOTO', description: 'AJINOMOTO', quantity: '1', uom: 'CTN' }],
     },
     {
-      companyKey: 'sdn_bhd',
-      invoiceId: 'sdn-bhd-doc-002',
-      docKey: 'sdn-bhd-doc-002',
-      docNo: 'SDN-SI-0002',
-      docDate: '2026-08-28',
+      companyKey: 'sdn_bhd', invoiceId: 'sdn-bhd-doc-002', docKey: 'sdn-bhd-doc-002',
+      docNo: 'SDN-SI-0002', docDate: '2026-08-28',
       customer: { code: 'SDN-CUST-002', name: 'Second Sdn Bhd Customer' },
-      deliveryAddress: 'Second Sdn Bhd Delivery Address',
-      cancelled: false,
-      eligibility: 'eligible',
+      deliveryAddress: 'Second Sdn Bhd Delivery Address', cancelled: false, eligibility: 'eligible',
       items: [{ itemCode: 'AJINOMOTO', description: 'AJINOMOTO', quantity: '2', uom: 'CTN' }],
     },
   ],
-  trips: [
-    {
-      id: 'trip-001',
-      tripDate: '2026-08-28',
-      driver: { name: 'Aiman Driver' },
-      lorry: { registrationNo: 'WXY 1001' },
-      routeNotes: 'North route',
-      status: 'planned',
-      revision: 1,
-      invoiceKeys: ['enterprise:enterprise-doc-001', 'sdn_bhd:sdn-bhd-doc-001'],
-    },
-  ],
+  trips: [{
+    id: 'trip-001', tripDate: '2026-08-28', driver: { name: 'Aiman Driver' },
+    lorry: { registrationNo: 'WXY 1001' }, routeNotes: 'North route', status: 'planned', revision: 1,
+    invoiceKeys: ['enterprise:enterprise-doc-001', 'sdn_bhd:sdn-bhd-doc-001'],
+  }],
 };
 
 function copy(value) {
   return structuredClone(value);
 }
 
-function companyKeyOf(invoice) {
-  return invoice?.companyKey ?? invoice?.company_key;
+function companyKeyOf(value) {
+  return value?.companyKey ?? value?.company_key ?? value?.header?.companyKey ?? value?.header?.company_key;
 }
 
-function invoiceIdOf(invoice) {
-  return invoice?.invoiceId ?? invoice?.invoice_id;
+function invoiceIdOf(value) {
+  return value?.invoiceId ?? value?.invoice_id ?? value?.docKey ?? value?.header?.invoiceId ?? value?.header?.invoice_id;
 }
 
 export function getInvoiceKey(invoiceOrCompanyKey, maybeInvoiceId) {
@@ -105,24 +79,106 @@ export function getInvoiceKey(invoiceOrCompanyKey, maybeInvoiceId) {
   return `${companyKey}:${invoiceId}`;
 }
 
-function normalizeTrip(trip) {
-  const invoiceKeys = trip.invoiceKeys || (trip.invoices || []).map(getInvoiceKey).filter(Boolean);
-  return { ...copy(trip), invoiceKeys: [...invoiceKeys] };
+function assignmentInvoice(assignment) {
+  const header = assignment.header || assignment.invoiceHeader || {};
+  const companyKey = companyKeyOf(assignment);
+  const invoiceId = invoiceIdOf(assignment);
+  return {
+    ...copy(header),
+    companyKey,
+    invoiceId,
+    docKey: invoiceId,
+    docNo: assignment.docNo ?? assignment.doc_no ?? header.docNo ?? header.doc_no,
+    docDate: assignment.docDate ?? assignment.doc_date ?? header.docDate ?? header.doc_date,
+    customer: header.customer ?? assignment.customer,
+    deliveryAddress: assignment.deliveryAddress ?? assignment.delivery_address ?? header.deliveryAddress ?? header.delivery_address ?? '',
+    items: copy(assignment.items ?? header.items ?? []),
+    cancelled: false,
+    eligibility: 'assigned',
+    assignmentId: assignment.id,
+    assignmentStatus: assignment.status,
+    tripId: assignment.tripId ?? assignment.trip_id ?? null,
+  };
 }
 
-function normalizeInvoice(invoice, trips) {
+function normalizeAssignment(assignment) {
+  return {
+    ...copy(assignment),
+    companyKey: companyKeyOf(assignment),
+    invoiceId: invoiceIdOf(assignment),
+    tripId: assignment.tripId ?? assignment.trip_id,
+  };
+}
+
+function normalizeTrip(trip, assignments, resources = {}) {
+  const tripAssignments = assignments.filter((assignment) => String(assignment.tripId) === String(trip.id));
+  const invoiceKeys = [
+    ...(trip.invoiceKeys || []),
+    ...(trip.invoices || []).map(getInvoiceKey),
+    ...(trip.assignments || []).map(getInvoiceKey),
+    ...tripAssignments.map(getInvoiceKey),
+  ].filter(Boolean);
+  const driver = trip.driver || resources.drivers?.find((candidate) => String(candidate.id) === String(trip.driverId));
+  const lorry = trip.lorry || resources.lorries?.find((candidate) => String(candidate.id) === String(trip.vehicleId));
+  return {
+    ...copy(trip),
+    id: trip.id,
+    tripDate: trip.tripDate ?? trip.trip_date,
+    driverId: trip.driverId ?? trip.driver_id,
+    vehicleId: trip.vehicleId ?? trip.vehicle_id,
+    driver,
+    lorry,
+    routeNotes: trip.routeNotes ?? trip.route_notes ?? '',
+    revision: Number(trip.revision || 1),
+    invoiceKeys: [...new Set(invoiceKeys)],
+  };
+}
+
+function normalizeInvoice(invoice, trips, assignedByKey) {
   const key = getInvoiceKey(invoice);
+  const assignment = assignedByKey.get(key);
   const owningTrip = trips.find((trip) => trip.invoiceKeys.includes(key));
-  return { ...copy(invoice), key, tripId: invoice.tripId ?? owningTrip?.id ?? null };
+  const normalized = { ...copy(invoice), key, tripId: owningTrip?.id ?? null };
+  if (assignment) {
+    return { ...assignmentInvoice(assignment), key, tripId: assignment.tripId ?? owningTrip?.id ?? null };
+  }
+  return normalized;
 }
 
-export function createDispatchState({ invoices = DISPATCH_FIXTURE.invoices, trips = DISPATCH_FIXTURE.trips, companyFilter = 'all' } = {}) {
+export function createDispatchState({
+  invoices = DISPATCH_FIXTURE.invoices,
+  trips = DISPATCH_FIXTURE.trips,
+  assignments = [],
+  sources = DISPATCH_FIXTURE.sources,
+  dateRange = DEFAULT_DATE_RANGE,
+  resources = {},
+  companyFilter = 'all',
+  boardStatus = 'ready',
+} = {}) {
   if (!COMPANY_FILTERS.includes(companyFilter)) throw new Error(`invalid company filter: ${companyFilter}`);
-  const normalizedTrips = trips.map(normalizeTrip);
+  const nestedAssignments = trips.flatMap((trip) => trip.assignments || []).map(normalizeAssignment);
+  const allAssignments = [...assignments.map(normalizeAssignment), ...nestedAssignments];
+  const assignedByKey = new Map();
+  allAssignments.forEach((assignment) => {
+    const key = getInvoiceKey(assignment);
+    if (key) assignedByKey.set(key, assignment);
+  });
+  const normalizedTrips = trips.map((trip) => normalizeTrip(trip, allAssignments, resources));
+  const normalizedInvoices = invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips, assignedByKey));
+  const invoiceKeys = new Set(normalizedInvoices.map((invoice) => invoice.key));
+  for (const assignment of assignedByKey.values()) {
+    const invoice = assignmentInvoice(assignment);
+    invoice.key = getInvoiceKey(invoice);
+    if (!invoiceKeys.has(invoice.key)) normalizedInvoices.push(invoice);
+  }
   return {
     companyFilter,
-    invoices: invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips)),
+    invoices: normalizedInvoices,
     trips: normalizedTrips,
+    assignments: [...assignedByKey.values()],
+    sources: copy(sources || {}),
+    dateRange: copy(dateRange || DEFAULT_DATE_RANGE),
+    boardStatus,
     selectedInvoiceKey: null,
     selectedTripId: null,
     pendingMove: null,
@@ -156,7 +212,7 @@ export function getTabNavigationIndex(currentIndex, key, tabCount = TAB_NAMES.le
 export function visibleUnassignedInvoices(state) {
   return state.invoices.filter((invoice) => (
     invoice.tripId === null
-    && (state.companyFilter === 'all' || invoice.companyKey === state.companyFilter || invoice.company_key === state.companyFilter)
+    && (state.companyFilter === 'all' || companyKeyOf(invoice) === state.companyFilter)
   ));
 }
 
@@ -166,6 +222,16 @@ export function getTripInvoices(state, tripId) {
   return trip.invoiceKeys
     .map((key) => state.invoices.find((invoice) => invoice.key === key))
     .filter(Boolean);
+}
+
+export function getTripCompanyCounts(state, tripId) {
+  const counts = { enterprise: 0, sdn_bhd: 0, total: 0 };
+  for (const invoice of getTripInvoices(state, tripId)) {
+    const companyKey = companyKeyOf(invoice);
+    if (counts[companyKey] !== undefined) counts[companyKey] += 1;
+    counts.total += 1;
+  }
+  return counts;
 }
 
 export function selectInvoice(state, invoiceKey) {
@@ -192,7 +258,6 @@ export function beginOptimisticMove(state, { invoiceKey, tripId, requestId }) {
   if (!requestId) throw new Error('requestId is required');
   if (!state.invoices.some((invoice) => invoice.key === invoiceKey)) throw new Error('invoice is not in state');
   if (!state.trips.some((trip) => String(trip.id) === String(tripId))) throw new Error('trip is not in state');
-
   const next = copy(state);
   const previous = moveSnapshot(state, invoiceKey);
   next.invoices.forEach((invoice) => {

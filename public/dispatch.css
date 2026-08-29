@@ -884,3 +884,104 @@ h2 {
     width: 100%;
   }
 }
+
+.offline-status {
+  margin-left: auto;
+  color: #fca5a5;
+  font-weight: 800;
+}
+
+.source-status,
+.board-state {
+  min-height: 20px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.source-status:not(:empty) {
+  color: var(--amber);
+}
+
+.board-state:not(:empty) {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--blue-soft);
+}
+
+.invoice-card[draggable="true"] {
+  cursor: grab;
+}
+
+.invoice-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.trip-invoices {
+  min-height: 92px;
+}
+
+.assign-selected-button,
+.assign-button {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid rgba(147, 197, 253, 0.45);
+  border-radius: 8px;
+  background: var(--blue-soft);
+  color: #dbeafe;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.assign-selected-button:disabled,
+.assign-button:disabled {
+  opacity: 0.45;
+}
+
+.trip-subtotal {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 6, 23, 0.78);
+}
+
+.dialog-backdrop[hidden] {
+  display: none;
+}
+
+.trip-dialog {
+  width: min(100%, 520px);
+  max-height: min(100%, 680px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.trip-form {
+  display: grid;
+  gap: 14px;
+}
+
+.trip-form textarea {
+  resize: vertical;
+}
+
+.dialog-message {
+  min-height: 20px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
