@@ -468,3 +468,84 @@ production, Quick Invoice, or external service was contacted.
   tests; it is non-failing and was not changed.
 - Existing untracked `output/` evidence and generated `test-results/` were not
   staged, modified, or deleted.
+
+## Fix round 3 checkpoint
+
+### Finding coverage
+
+Fix round 3 addresses the stale protected-resource generation race from
+`task-6-fix-3-findings.md`. A Board-triggered resource response that has been
+overtaken by a newer Resources-tab request now returns no payload to the Board
+join. The Board retains the latest resource set already applied by the newer
+request, so stale R1 metadata cannot overwrite R2 metadata. Existing
+IDs-only initial joins, embedded trip resources, session loss, Board/filter
+sequencing, mutation locks, partial-source/failure handling, and Resources
+rendering remain covered by the existing tests.
+
+### RED evidence
+
+The deterministic R1/R2 regression was added before the production change and
+failed for the expected stale-data reason:
+
+```text
+node --test --test-name-pattern="stale Board-triggered resource" test/dispatch-state.test.mjs
+tests 1, pass 0, fail 1
+failure: expected Current Driver, received Stale Driver
+```
+
+### GREEN evidence
+
+After the minimal change, the required verification commands passed:
+
+```text
+node --test --test-name-pattern="stale Board-triggered resource" test/dispatch-state.test.mjs
+tests 1, pass 1, fail 0
+
+node --test test/dispatch-state.test.mjs
+tests 30, pass 30, fail 0, skipped 0
+
+npx playwright test test/e2e/dispatch-board.spec.js --project=desktop --reporter=line
+16 passed, 0 failed
+
+npx playwright test test/e2e/dispatch-board.spec.js --project=mobile --reporter=line
+16 passed, 0 failed
+
+npx playwright test test/e2e/dispatch-board.spec.js --reporter=line
+32 passed, 0 failed
+
+npm test
+tests 170, pass 169, fail 0, skipped 1
+
+npm run build
+exit code 0
+
+node --check public/dispatch.js
+node --check public/dispatch-state.mjs
+node --check test/e2e/dispatch-board.spec.js
+node --check playwright.config.js
+all exit code 0
+
+git diff --check
+clean
+```
+
+All browser runs used the local static server and intercepted dispatch API
+fixtures only. No external service, real database, deployment, Quick Invoice,
+or output evidence was accessed or changed.
+
+### Fix round 3 changed files
+
+- `public/dispatch.js` — makes overtaken resource responses unusable to the
+  Board join and retains the newest applied resource generation.
+- `test/dispatch-state.test.mjs` — deterministic Board R1 versus Resources-tab
+  R2 regression.
+- `.superpowers/sdd/2026-08-28-delivery-dispatch/task-6-report.md` — this
+  checkpoint evidence.
+
+### Commit checkpoint
+
+- Starting/base commit: `74c8fd5443bdca5b1dc11752b6556bb65b4598c4`
+- Implementation/test commit: `1300fc6073255d10844d63bec30d59ec8a6334a6`
+- Evidence report: committed as the report-only follow-up immediately after
+  the implementation commit; its exact hash is returned in the final handoff.
+- Existing untracked `output/` and `test-results/` remain untouched.
