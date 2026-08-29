@@ -5,6 +5,7 @@ const { createTestDatabase } = require('../test/helpers/postgres');
 const { migrate } = require('../scripts/migrate');
 const { createRepository } = require('../lib/dispatch/repository');
 const { InvoiceAdapter } = require('../lib/dispatch/invoice-adapter');
+const { canMoveAssignment } = require('../lib/dispatch/status-machine');
 
 function optionalRequire(modulePath) {
   try {
@@ -26,8 +27,20 @@ const SESSION = Object.freeze({
 });
 
 const COMPANY_CONFIGS = Object.freeze({
-  enterprise: { companyKey: 'enterprise', name: 'Wanson Enterprise' },
-  sdn_bhd: { companyKey: 'sdn_bhd', name: 'Wanson Enterprise (M) Sdn Bhd' },
+  enterprise: Object.freeze({
+    companyKey: 'enterprise',
+    name: 'Wanson Enterprise',
+    accountBookId: 'enterprise-book-fixture',
+    keyId: 'enterprise-key-fixture',
+    apiKey: 'enterprise-api-fixture',
+  }),
+  sdn_bhd: Object.freeze({
+    companyKey: 'sdn_bhd',
+    name: 'Wanson Enterprise (M) Sdn Bhd',
+    accountBookId: 'sdn-bhd-book-fixture',
+    keyId: 'sdn-bhd-key-fixture',
+    apiKey: 'sdn-bhd-api-fixture',
+  }),
 });
 
 function responseRecorder() {
@@ -102,6 +115,14 @@ function requireService() {
   assert.ok(serviceModule, 'Task 5 transactional service should exist');
   return serviceModule;
 }
+
+test('only assigned and loaded assignments can move between trips', () => {
+  assert.equal(canMoveAssignment('assigned'), true);
+  assert.equal(canMoveAssignment('loaded'), true);
+  for (const status of ['out_for_delivery', 'delivered', 'failed', 'returned', 'removed']) {
+    assert.equal(canMoveAssignment(status), false, `${status} must not move`);
+  }
+});
 
 function createSource(invoicesByCompany, { calls = [], errorByCompany = {} } = {}) {
   return {
@@ -278,6 +299,88 @@ test('assignment source refetch is company-isolated and verifies invoice identit
     assert.deepEqual(calls.map((call) => call.company), ['enterprise']);
     assert.equal((await repository.getTrip(trip.id)).revision, 1);
     assert.equal((await repository.listEvents({ tripId: trip.id })).length, 0);
+  } finally {
+    await database.close();
+  }
+});
+
+test('assignment fails closed before source access when selected-company configuration is missing', async () => {
+  const api = requireAssignmentsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const { trip } = await seedTrip(repository, '002A');
+    const calls = [];
+    const source = createSource({
+      enterprise: [invoice({ companyKey: 'enterprise', invoiceId: 'MISSING-CONFIG', docNo: 'ENT-MISSING-CONFIG' })],
+    }, { calls });
+    const service = implementation.createDispatchService({
+      repository,
+      invoiceAdapter: source,
+      configs: { sdn_bhd: COMPANY_CONFIGS.sdn_bhd },
+    });
+    const handler = api.createDispatchAssignmentsHandler({ service, getSession: async () => SESSION });
+    const response = responseRecorder();
+    await handler(jsonRequest('POST', {
+      trip_id: trip.id, company_key: 'enterprise', invoice_id: 'MISSING-CONFIG', doc_no: 'ENT-MISSING-CONFIG',
+      doc_date: '2026-08-28', expected_trip_revision: 1, request_id: 'assignment-missing-config-001',
+    }), response);
+
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.body.error.code, 'source_unavailable');
+    assert.deepEqual(calls, []);
+    assert.equal((await repository.getTrip(trip.id)).revision, 1);
+    assert.equal((await repository.listEvents({ tripId: trip.id })).length, 0);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM delivery_assignments WHERE invoice_id = 'MISSING-CONFIG'",
+    )).rows[0].count, 0);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'assignment-missing-config-001'",
+    )).rows[0].count, 0);
+  } finally {
+    await database.close();
+  }
+});
+
+test('assignment fails closed before source access when selected-company configuration is incomplete', async () => {
+  const api = requireAssignmentsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const { trip } = await seedTrip(repository, '002B');
+    const calls = [];
+    const source = createSource({
+      enterprise: [invoice({ companyKey: 'enterprise', invoiceId: 'INCOMPLETE-CONFIG', docNo: 'ENT-INCOMPLETE-CONFIG' })],
+    }, { calls });
+    const { apiKey, ...incompleteEnterprise } = COMPANY_CONFIGS.enterprise;
+    const service = implementation.createDispatchService({
+      repository,
+      invoiceAdapter: source,
+      configs: { enterprise: incompleteEnterprise, sdn_bhd: COMPANY_CONFIGS.sdn_bhd },
+    });
+    const handler = api.createDispatchAssignmentsHandler({ service, getSession: async () => SESSION });
+    const response = responseRecorder();
+    await handler(jsonRequest('POST', {
+      trip_id: trip.id, company_key: 'enterprise', invoice_id: 'INCOMPLETE-CONFIG', doc_no: 'ENT-INCOMPLETE-CONFIG',
+      doc_date: '2026-08-28', expected_trip_revision: 1, request_id: 'assignment-incomplete-config-001',
+    }), response);
+
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.body.error.code, 'source_unavailable');
+    assert.deepEqual(calls, []);
+    assert.equal((await repository.getTrip(trip.id)).revision, 1);
+    assert.equal((await repository.listEvents({ tripId: trip.id })).length, 0);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM delivery_assignments WHERE invoice_id = 'INCOMPLETE-CONFIG'",
+    )).rows[0].count, 0);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'assignment-incomplete-config-001'",
+    )).rows[0].count, 0);
+    assert.equal(JSON.stringify(response.body).includes('enterprise-key-fixture'), false);
   } finally {
     await database.close();
   }
@@ -497,6 +600,162 @@ test('assignment snapshot line failure rolls back header, items, trip revision, 
       "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'assignment-rollback-001'",
     )).rows[0].count, 0);
     repository.insertAssignmentItem = originalInsert;
+  } finally {
+    await database.close();
+  }
+});
+
+test('out_for_delivery assignment move is rejected without mutation side effects', async () => {
+  const api = requireAssignmentsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const firstTrip = await seedTrip(repository, '006C');
+    const secondTrip = await seedTrip(repository, '006D');
+    const source = createSource({ enterprise: [
+      invoice({ companyKey: 'enterprise', invoiceId: 'MOVE-OUT', docNo: 'ENT-MOVE-OUT' }),
+    ] });
+    const service = implementation.createDispatchService({ repository, invoiceAdapter: source, configs: COMPANY_CONFIGS });
+    const handler = api.createDispatchAssignmentsHandler({ service, getSession: async () => SESSION });
+    const assigned = responseRecorder();
+    await handler(jsonRequest('POST', {
+      trip_id: firstTrip.trip.id, company_key: 'enterprise', invoice_id: 'MOVE-OUT', doc_no: 'ENT-MOVE-OUT',
+      doc_date: '2026-08-28', expected_trip_revision: 1, request_id: 'assignment-move-out-create-001',
+    }), assigned);
+    assert.equal(assigned.statusCode, 201);
+    const assignmentId = assigned.body.assignment.id;
+    for (const [status, revision, requestId] of [
+      ['loaded', 2, 'assignment-move-out-loaded-001'],
+      ['out_for_delivery', 3, 'assignment-move-out-status-001'],
+    ]) {
+      const response = responseRecorder();
+      await handler(jsonRequest('PATCH', {
+        assignment_id: assignmentId, operation: 'status', status,
+        expected_trip_revision: revision, request_id: requestId,
+      }), response);
+      assert.equal(response.statusCode, 200);
+    }
+    const assignmentBefore = await repository.getAssignment(assignmentId);
+    const eventsBefore = await repository.listEvents({ assignmentId });
+
+    const rejected = responseRecorder();
+    await handler(jsonRequest('PATCH', {
+      assignment_id: assignmentId, operation: 'move', trip_id: secondTrip.trip.id,
+      expected_trip_revision: 1, request_id: 'assignment-move-out-rejected-001',
+    }), rejected);
+
+    assert.equal(rejected.statusCode, 409);
+    assert.equal(rejected.body.error.code, 'invalid_transition');
+    const assignmentAfter = await repository.getAssignment(assignmentId);
+    assert.equal(assignmentAfter.tripId, assignmentBefore.tripId);
+    assert.equal(assignmentAfter.status, assignmentBefore.status);
+    assert.equal(String(assignmentAfter.updatedAt), String(assignmentBefore.updatedAt));
+    assert.equal((await repository.getTrip(firstTrip.trip.id)).revision, 4);
+    assert.equal((await repository.getTrip(secondTrip.trip.id)).revision, 1);
+    assert.deepEqual(await repository.listEvents({ assignmentId }), eventsBefore);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'assignment-move-out-rejected-001'",
+    )).rows[0].count, 0);
+  } finally {
+    await database.close();
+  }
+});
+
+test('move out of a dispatched trip is rejected without mutation side effects', async () => {
+  const api = requireAssignmentsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const firstTrip = await seedTrip(repository, '006E');
+    const secondTrip = await seedTrip(repository, '006F');
+    const source = createSource({ enterprise: [
+      invoice({ companyKey: 'enterprise', invoiceId: 'MOVE-FROM-DISPATCHED', docNo: 'ENT-MOVE-FROM-DISPATCHED' }),
+    ] });
+    const service = implementation.createDispatchService({ repository, invoiceAdapter: source, configs: COMPANY_CONFIGS });
+    const handler = api.createDispatchAssignmentsHandler({ service, getSession: async () => SESSION });
+    const assigned = responseRecorder();
+    await handler(jsonRequest('POST', {
+      trip_id: firstTrip.trip.id, company_key: 'enterprise', invoice_id: 'MOVE-FROM-DISPATCHED',
+      doc_no: 'ENT-MOVE-FROM-DISPATCHED', doc_date: '2026-08-28', expected_trip_revision: 1,
+      request_id: 'assignment-move-from-dispatched-create-001',
+    }), assigned);
+    assert.equal(assigned.statusCode, 201);
+    const assignmentId = assigned.body.assignment.id;
+    await repository.updateTrip(firstTrip.trip.id, 2, { status: 'loading' });
+    await repository.updateTrip(firstTrip.trip.id, 3, { status: 'dispatched' });
+    const assignmentBefore = await repository.getAssignment(assignmentId);
+    const eventsBefore = await repository.listEvents({ assignmentId });
+
+    const rejected = responseRecorder();
+    await handler(jsonRequest('PATCH', {
+      assignment_id: assignmentId, operation: 'move', trip_id: secondTrip.trip.id,
+      expected_trip_revision: 1, request_id: 'assignment-move-from-dispatched-rejected-001',
+    }), rejected);
+
+    assert.equal(rejected.statusCode, 409);
+    assert.equal(rejected.body.error.code, 'invalid_transition');
+    const assignmentAfter = await repository.getAssignment(assignmentId);
+    assert.equal(assignmentAfter.tripId, assignmentBefore.tripId);
+    assert.equal(String(assignmentAfter.updatedAt), String(assignmentBefore.updatedAt));
+    assert.equal((await repository.getTrip(firstTrip.trip.id)).revision, 4);
+    assert.equal((await repository.getTrip(secondTrip.trip.id)).revision, 1);
+    assert.deepEqual(await repository.listEvents({ assignmentId }), eventsBefore);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'assignment-move-from-dispatched-rejected-001'",
+    )).rows[0].count, 0);
+  } finally {
+    await database.close();
+  }
+});
+
+test('move into a dispatched trip is rejected without mutation side effects', async () => {
+  const api = requireAssignmentsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const firstTrip = await seedTrip(repository, '006G');
+    const secondTrip = await seedTrip(repository, '006H');
+    const source = createSource({ enterprise: [
+      invoice({ companyKey: 'enterprise', invoiceId: 'MOVE-TO-DISPATCHED', docNo: 'ENT-MOVE-TO-DISPATCHED' }),
+    ] });
+    const service = implementation.createDispatchService({ repository, invoiceAdapter: source, configs: COMPANY_CONFIGS });
+    const handler = api.createDispatchAssignmentsHandler({ service, getSession: async () => SESSION });
+    const assigned = responseRecorder();
+    await handler(jsonRequest('POST', {
+      trip_id: firstTrip.trip.id, company_key: 'enterprise', invoice_id: 'MOVE-TO-DISPATCHED',
+      doc_no: 'ENT-MOVE-TO-DISPATCHED', doc_date: '2026-08-28', expected_trip_revision: 1,
+      request_id: 'assignment-move-to-dispatched-create-001',
+    }), assigned);
+    assert.equal(assigned.statusCode, 201);
+    const assignmentId = assigned.body.assignment.id;
+    await repository.updateTrip(secondTrip.trip.id, 1, { status: 'loading' });
+    await repository.updateTrip(secondTrip.trip.id, 2, { status: 'dispatched' });
+    const assignmentBefore = await repository.getAssignment(assignmentId);
+    const eventsBefore = await repository.listEvents({ assignmentId });
+
+    const rejected = responseRecorder();
+    await handler(jsonRequest('PATCH', {
+      assignment_id: assignmentId, operation: 'move', trip_id: secondTrip.trip.id,
+      expected_trip_revision: 3, request_id: 'assignment-move-to-dispatched-rejected-001',
+    }), rejected);
+
+    assert.equal(rejected.statusCode, 409);
+    assert.equal(rejected.body.error.code, 'invalid_transition');
+    const assignmentAfter = await repository.getAssignment(assignmentId);
+    assert.equal(assignmentAfter.tripId, assignmentBefore.tripId);
+    assert.equal(String(assignmentAfter.updatedAt), String(assignmentBefore.updatedAt));
+    assert.equal((await repository.getTrip(firstTrip.trip.id)).revision, 2);
+    assert.equal((await repository.getTrip(secondTrip.trip.id)).revision, 3);
+    assert.deepEqual(await repository.listEvents({ assignmentId }), eventsBefore);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM dispatch_resource_idempotency WHERE request_id = 'assignment-move-to-dispatched-rejected-001'",
+    )).rows[0].count, 0);
   } finally {
     await database.close();
   }
