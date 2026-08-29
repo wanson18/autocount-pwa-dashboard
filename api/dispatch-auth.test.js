@@ -426,6 +426,8 @@ test('deployment configuration keeps dispatch credentials server-side and dispat
       { source: '/api/dispatch/session', destination: '/api/dispatch-session.js' },
       { source: '/api/dispatch/resources', destination: '/api/dispatch-resources.js' },
       { source: '/api/dispatch/invoices', destination: '/api/dispatch-invoices.js' },
+      { source: '/api/dispatch/trips', destination: '/api/dispatch-trips.js' },
+      { source: '/api/dispatch/assignments', destination: '/api/dispatch-assignments.js' },
       { source: '/api/dispatch/(.*)', destination: '/api/dispatch-unknown.js' },
     ],
   );

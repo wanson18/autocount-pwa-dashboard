@@ -45,6 +45,14 @@ test('dispatch namespace catch-all is before the generic sales catch-all', () =>
   assert.ok(dispatchCatchAllIndex < salesCatchAllIndex);
   assert.equal(vercel.rewrites[dispatchCatchAllIndex].destination, '/api/dispatch-unknown.js');
   assert.ok(vercel.rewrites.findIndex((rewrite) => rewrite.source === '/api/dispatch/invoices') < dispatchCatchAllIndex);
+  for (const [source, destination] of [
+    ['/api/dispatch/trips', '/api/dispatch-trips.js'],
+    ['/api/dispatch/assignments', '/api/dispatch-assignments.js'],
+  ]) {
+    const index = vercel.rewrites.findIndex((rewrite) => rewrite.source === source);
+    assert.ok(index >= 0 && index < dispatchCatchAllIndex);
+    assert.equal(vercel.rewrites[index].destination, destination);
+  }
   const dispatchRootIndex = vercel.rewrites.findIndex((rewrite) => rewrite.source === '/api/dispatch');
   assert.ok(dispatchRootIndex >= 0 && dispatchRootIndex < salesCatchAllIndex);
   assert.equal(vercel.rewrites[dispatchRootIndex].destination, '/api/dispatch-unknown.js');

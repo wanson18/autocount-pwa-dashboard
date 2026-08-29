@@ -124,6 +124,48 @@ remaining requests receive `429` with `Retry-After`, then verify expiry, success
 reset, migration, TLS, and Vercel pool attachment. This provider rehearsal was
 not run in the local security-fix pass.
 
+### Authenticated delivery dispatch API
+
+The dispatch API is protected by the same signed session cookie as the resource
+API. The server supplies the audit actor from that session; mutation bodies may
+not supply an actor or authoritative invoice data.
+
+Trips are persisted with optimistic revisions and the explicit state machine
+`planned -> loading -> dispatched -> completed`, with cancellation allowed from
+`planned` or `loading`. A trip can be dispatched only with an active driver, an
+active lorry, and at least one active assignment. Assignment outcomes are
+`assigned -> loaded -> out_for_delivery -> delivered`, with `failed` or
+`returned` from `out_for_delivery` and `removed` from `assigned` or `loaded`.
+
+The available routes are:
+
+| Endpoint | Methods | Purpose |
+| --- | --- | --- |
+| `/api/dispatch/trips` | GET, POST, PATCH | List, create, and revise trips |
+| `/api/dispatch/assignments` | GET, POST, PATCH | Read, assign, move, remove, and update assignment outcomes |
+
+Assignment creation accepts only `trip_id`, `company_key`, `invoice_id`,
+`doc_no`, `doc_date`, `expected_trip_revision`, and `request_id`. The server
+refetches the selected company's invoice, verifies its company and document
+identity, cancellation flag, complete lines, exact decimal quantity strings,
+and authoritative UOM, then stores immutable header and line snapshots. One
+physical trip may contain assignments from both companies; company ownership is
+retained on every assignment and snapshot.
+
+Every mutation uses a validated `request_id` and the durable idempotency record.
+The assignment snapshot, item rows, trip revision, audit event, and idempotency
+result commit together. A stale revision returns `409 stale_trip`; conflicting
+request reuse returns `409 idempotency_conflict`. Stable source and workflow
+errors include `invoice_cancelled`, `invoice_missing_uom`,
+`invoice_already_assigned`, `invalid_transition`, and `source_unavailable`.
+No lorry capacity or weight is inferred from arbitrary invoice UOM quantities.
+
+Before preview, run the Task 5 API and repository checks against real pooled
+PostgreSQL connections as well as the local suite. That rehearsal must cover
+multi-connection same-invoice and same-revision races, transaction rollback,
+append-only event history, migration compatibility, TLS/network behavior, and
+Vercel pool attachment. The Board remains fixture-only until its later UI task.
+
 ### Legacy non-finite quantity gate
 
 The hardening migration refuses to add the finite-quantity constraint when an
