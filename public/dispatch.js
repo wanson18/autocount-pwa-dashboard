@@ -6,6 +6,8 @@ import {
   beginOptimisticMove,
   getCompanyFilterLabel,
   getInvoiceKey,
+  getSourceMessage,
+  isCurrentEligibleUnassignedInvoice,
   getTripCompanyCounts,
   getTripInvoices,
   getTabNavigationIndex,
@@ -125,13 +127,6 @@ function selectedSummary(state) {
   return 'Select an invoice or trip to see its operational details.';
 }
 
-function sourceMessage(sources) {
-  const entries = Object.entries(sources || {});
-  const unavailable = entries.filter(([, source]) => source?.status !== 'ok').map(([key]) => `${COMPANY_BADGES[key] || key} source unavailable`);
-  if (unavailable.length) return unavailable.join(' · ');
-  return entries.length ? 'Enterprise and Sdn Bhd sources ready.' : '';
-}
-
 export function renderDispatchBoard(root, state, { writesEnabled = true } = {}) {
   const unassigned = visibleUnassignedInvoices(state);
   const unassignedList = $(root, '#unassignedList');
@@ -149,7 +144,7 @@ export function renderDispatchBoard(root, state, { writesEnabled = true } = {}) 
     : '<div class="empty-dropzone">No unassigned invoices in this company view.</div>';
   if (tripList) tripList.innerHTML = state.trips.map((trip) => renderTripCard(state, trip, { writesEnabled })).join('');
   const sourceStatus = $(root, '#sourceStatus');
-  if (sourceStatus) sourceStatus.textContent = sourceMessage(state.sources);
+  if (sourceStatus) sourceStatus.textContent = getSourceMessage(state.sources);
   const boardState = $(root, '#boardState');
   if (boardState) {
     boardState.textContent = state.boardStatus === 'loading' ? 'Loading the authenticated Board…'
@@ -170,7 +165,7 @@ async function parseApiResponse(response, fallbackMessage) {
   let payload = null;
   try { payload = await response.json(); } catch { /* Generic error below is intentional. */ }
   if (!response.ok) {
-    const code = payload?.error?.code || (response.status === 401 ? 'unauthorized' : 'request_failed');
+    const code = response.status === 401 ? 'unauthorized' : (payload?.error?.code || 'request_failed');
     const error = new Error(payload?.error?.message || (code === 'invalid_credentials' ? 'Invalid clerk ID or PIN.' : fallbackMessage));
     error.code = code;
     error.status = response.status;
@@ -289,6 +284,9 @@ export function createDispatchApp({
   let resources = { drivers: [], lorries: [] };
   let boardRequestSequence = 0;
   let resourceRequestSequence = 0;
+  let boardAuthoritative = false;
+  let mutationInFlight = false;
+  let boardLoadQueued = false;
   let authenticated = !$(root, '#loginView') || !$(root, '#authenticatedView');
   let session = null;
   let dialogInvoker = null;
@@ -301,7 +299,7 @@ export function createDispatchApp({
   const tripDialogBackdrop = $(root, '#tripDialogBackdrop'); const tripForm = $(root, '#tripForm');
 
   function online() { return globalThis.navigator?.onLine !== false; }
-  function writesEnabled() { return authenticated && online() && !state.pendingMove; }
+  function writesEnabled() { return authenticated && online() && boardAuthoritative && !mutationInFlight && !state.pendingMove; }
   function setAuthenticated(next, nextSession = null) { authenticated = next; session = next ? nextSession : null; if (loginView) loginView.hidden = next; if (authenticatedView) authenticatedView.hidden = !next; root.dataset.authenticated = String(next); }
   function setLoginMessage(message) { if (loginMessage) loginMessage.textContent = message; }
   function setResourceMessage(message) { if (resourceStatus) resourceStatus.textContent = message; }
@@ -309,24 +307,43 @@ export function createDispatchApp({
   function updateWriteControls() { const enabled = writesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
-  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; state = createDispatchState({ invoices: [], trips: [], assignments: [], sources: {}, boardStatus: 'empty' }); resources = { drivers: [], lorries: [] }; setAuthenticated(false); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
+  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; boardAuthoritative = false; state = createDispatchState({ boardStatus: 'empty' }); resources = { drivers: [], lorries: [] }; setAuthenticated(false); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
   function handleSessionLoss() { clearSensitiveState(); setLoginMessage('Your session has expired. Sign in again.'); setResourceMessage('Your session has expired. Sign in again.'); }
 
-  async function loadBoard({ preserveMessage = false } = {}) {
+  async function runMutation(operation) {
+    if (!writesEnabled()) return false;
+    mutationInFlight = true;
+    render();
+    try {
+      return await operation();
+    } finally {
+      if (boardLoadQueued && authenticated) {
+        try { await loadBoard({ allowDuringMutation: true }); } catch { /* loadBoard renders the applied failure. */ }
+      }
+      mutationInFlight = false;
+      render();
+    }
+  }
+
+  async function loadBoard({ preserveMessage = false, allowDuringMutation = false } = {}) {
     if (!authenticated) return state;
+    if (mutationInFlight && !allowDuringMutation) { boardLoadQueued = true; return state; }
+    if (allowDuringMutation) boardLoadQueued = false;
     const requestSequence = ++boardRequestSequence; const requestedCompany = state.companyFilter; const previousMessage = state.statusMessage;
-    state = { ...state, boardStatus: 'loading', statusMessage: 'Loading the authenticated Board…' }; render();
+    boardAuthoritative = false;
+    state = { ...state, boardStatus: 'loading', statusMessage: preserveMessage ? previousMessage : 'Loading the authenticated Board…' }; render();
     try {
       const board = await transport.loadBoard({ startDate: DEFAULT_DATE_RANGE.startDate, endDate: DEFAULT_DATE_RANGE.endDate, company: requestedCompany });
       if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
       state = reloadDispatchState(state, { ...board, resources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
+      boardAuthoritative = true;
       if (preserveMessage) state.statusMessage = previousMessage;
       render();
       return state;
     } catch (error) {
       if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
       if (error.code === 'unauthorized') { handleSessionLoss(); $(root, '#statusMessage').textContent = 'Your session has expired. Sign in again.'; }
-      else { state = { ...state, boardStatus: 'error', statusMessage: 'The Board could not be loaded. Use Retry board to try again.' }; render(); }
+      else { boardAuthoritative = false; state = createDispatchState({ companyFilter: requestedCompany, boardStatus: 'error' }); state.statusMessage = 'The Board could not be loaded. Use Retry board to try again.'; render(); }
       throw error;
     }
   }
@@ -338,13 +355,23 @@ export function createDispatchApp({
     catch (error) { if (requestSequence !== resourceRequestSequence || !authenticated) return null; if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resources could not be loaded. Try again.'); throw error; }
   }
 
-  async function updateResource(type, id, active) { if (!writesEnabled()) return; setResourceMessage('Saving resource…'); try { await resourcesTransport.updateResource({ type, id: Number(id), active }); setResourceMessage('Resource updated.'); await loadResources(); } catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be updated. Try again.'); throw error; } }
+  async function updateResource(type, id, active) {
+    if (!writesEnabled()) return false;
+    return runMutation(async () => {
+      setResourceMessage('Saving resource…');
+      try { await resourcesTransport.updateResource({ type, id: Number(id), active }); setResourceMessage('Resource updated.'); await loadResources(); return true; }
+      catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be updated. Try again.'); throw error; }
+    });
+  }
   function updateResourceTypeFields() { const driverFields = $(root, '#driverResourceFields'); const lorryFields = $(root, '#lorryResourceFields'); const isDriver = resourceType?.value === 'driver'; if (driverFields) driverFields.hidden = !isDriver; if (lorryFields) lorryFields.hidden = isDriver; }
   async function submitResource() {
     if (!resourceType || !writesEnabled()) return;
-    const type = resourceType.value; const body = type === 'driver' ? { type, name: $(root, '#resourceName')?.value?.trim() || '', licenseNo: $(root, '#resourceLicenseNo')?.value?.trim() || '', phone: $(root, '#resourcePhone')?.value?.trim() || null } : { type, registrationNo: $(root, '#resourceRegistrationNo')?.value?.trim() || '', description: $(root, '#resourceDescription')?.value?.trim() || null };
-    if (resourceSubmit) resourceSubmit.disabled = true; setResourceMessage('Saving resource…');
-    try { await resourcesTransport.createResource(body); resourceForm?.reset?.(); updateResourceTypeFields(); setResourceMessage('Resource added.'); await loadResources(); } catch (error) { if (error.code === 'resource_conflict') setResourceMessage('A resource with that identity already exists.'); else if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be added. Try again.'); throw error; } finally { if (resourceSubmit) resourceSubmit.disabled = false; }
+    return runMutation(async () => {
+      const type = resourceType.value; const body = type === 'driver' ? { type, name: $(root, '#resourceName')?.value?.trim() || '', licenseNo: $(root, '#resourceLicenseNo')?.value?.trim() || '', phone: $(root, '#resourcePhone')?.value?.trim() || null } : { type, registrationNo: $(root, '#resourceRegistrationNo')?.value?.trim() || '', description: $(root, '#resourceDescription')?.value?.trim() || null };
+      setResourceMessage('Saving resource…');
+      try { await resourcesTransport.createResource(body); resourceForm?.reset?.(); updateResourceTypeFields(); setResourceMessage('Resource added.'); await loadResources(); return true; }
+      catch (error) { if (error.code === 'resource_conflict') setResourceMessage('A resource with that identity already exists.'); else if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be added. Try again.'); throw error; }
+    });
   }
 
   function renderTripFormOptions() {
@@ -356,34 +383,48 @@ export function createDispatchApp({
   function closeTripDialog() { if (tripDialogBackdrop) tripDialogBackdrop.hidden = true; dialogInvoker?.focus?.(); dialogInvoker = null; }
   async function createTrip() {
     if (!writesEnabled()) return;
-    const body = { trip_date: DEFAULT_DATE_RANGE.startDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
-    const submit = $(root, '#createTripSubmit'); if (submit) submit.disabled = true; $(root, '#tripDialogMessage').textContent = 'Creating trip…';
-    try { await tripsTransport.createTrip(body); closeTripDialog(); state.statusMessage = 'Trip created.'; await loadBoard({ preserveMessage: true }); }
-    catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else $(root, '#tripDialogMessage').textContent = 'The trip could not be created. Try again.'; throw error; }
-    finally { if (submit) submit.disabled = false; }
+    return runMutation(async () => {
+      const body = { trip_date: DEFAULT_DATE_RANGE.startDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
+      const submit = $(root, '#createTripSubmit'); if (submit) submit.disabled = true; $(root, '#tripDialogMessage').textContent = 'Creating trip…';
+      try { await tripsTransport.createTrip(body); closeTripDialog(); state.statusMessage = 'Trip created.'; await loadBoard({ preserveMessage: true, allowDuringMutation: true }); return true; }
+      catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else $(root, '#tripDialogMessage').textContent = 'The trip could not be created. Try again.'; throw error; }
+      finally { if (submit) submit.disabled = false; }
+    });
+  }
+
+  function focusAssignmentReplacement({ invoiceKey, tripId, preferTrip }) {
+    const currentInvoiceControl = [...(root.querySelectorAll?.('[data-assign-invoice]') || [])]
+      .find((candidate) => candidate.dataset.assignInvoice === invoiceKey);
+    const currentTripControl = [...(root.querySelectorAll?.('[data-assign-selected]') || [])]
+      .find((candidate) => String(candidate.dataset.assignSelected) === String(tripId));
+    (preferTrip ? currentTripControl || currentInvoiceControl : currentInvoiceControl || currentTripControl)?.focus?.();
   }
 
   async function assignInvoice(invoiceKey, tripId, control = null) {
     if (!writesEnabled()) return false;
+    if (!isCurrentEligibleUnassignedInvoice(state, invoiceKey)) return false;
     const invoice = state.invoices.find((candidate) => candidate.key === invoiceKey); const trip = state.trips.find((candidate) => String(candidate.id) === String(tripId));
     if (!invoice || !trip) return false;
-    const requestId = createRequestId(); setState(beginOptimisticMove(state, { invoiceKey, tripId, requestId }));
-    try {
-      await assignmentsTransport.assignInvoice({ trip_id: trip.id, company_key: companyKeyOf(invoice), invoice_id: invoice.invoiceId, doc_no: invoice.docNo, doc_date: invoice.docDate, expected_trip_revision: trip.revision });
-      if (state.pendingMove?.requestId !== requestId) return false;
-      state = settleMoveResponse(state, { requestId, accepted: true, message: 'Assignment saved.' }); render();
-      await loadBoard({ preserveMessage: true });
-      state.statusMessage = 'Assignment saved.'; render();
-      control?.focus?.();
-      return true;
-    } catch (error) {
-      if (state.pendingMove?.requestId !== requestId) return false;
-      state = rejectMoveResponse(state, { requestId, message: error.code === 'stale_trip' ? 'Trip changed on the server. Assignment rolled back; Board refreshed.' : 'The invoice could not be assigned. It was returned to the queue.' }); render();
-      if (error.code === 'stale_trip') { try { await loadBoard({ preserveMessage: true }); state.statusMessage = 'Trip changed on the server. Assignment rolled back; Board refreshed.'; render(); } catch { /* loadBoard reports the authoritative refresh failure. */ } }
-      if (error.code === 'unauthorized') handleSessionLoss();
-      control?.focus?.();
-      return false;
-    }
+    const preferTripFocus = Boolean(control?.dataset?.assignSelected || control?.dataset?.dropTripId);
+    const accepted = await runMutation(async () => {
+      const requestId = createRequestId(); setState(beginOptimisticMove(state, { invoiceKey, tripId, requestId }));
+      try {
+        await assignmentsTransport.assignInvoice({ trip_id: trip.id, company_key: companyKeyOf(invoice), invoice_id: invoice.invoiceId, doc_no: invoice.docNo, doc_date: invoice.docDate, expected_trip_revision: trip.revision });
+        if (state.pendingMove?.requestId !== requestId) return false;
+        state = settleMoveResponse(state, { requestId, accepted: true, message: 'Assignment saved.' }); render();
+        await loadBoard({ preserveMessage: true, allowDuringMutation: true });
+        state.statusMessage = 'Assignment saved.'; render();
+        return true;
+      } catch (error) {
+        if (state.pendingMove?.requestId !== requestId) return false;
+        state = rejectMoveResponse(state, { requestId, message: error.code === 'stale_trip' ? 'Trip changed on the server. Assignment rolled back; Board refreshed.' : 'The invoice could not be assigned. It was returned to the queue.' }); render();
+        if (error.code === 'stale_trip') { try { await loadBoard({ preserveMessage: true, allowDuringMutation: true }); state.statusMessage = 'Trip changed on the server. Assignment rolled back; Board refreshed.'; render(); } catch { /* loadBoard reports the authoritative refresh failure. */ } }
+        if (error.code === 'unauthorized') handleSessionLoss();
+        return false;
+      }
+    });
+    focusAssignmentReplacement({ invoiceKey, tripId, preferTrip: accepted || preferTripFocus });
+    return accepted;
   }
 
   async function login() { if (!clerkIdInput || !clerkPinInput) return; if (loginSubmit) loginSubmit.disabled = true; setLoginMessage('Signing in…'); try { const result = await sessionTransport.login({ clerkId: clerkIdInput.value.trim(), pin: clerkPinInput.value }); if (!result?.authenticated || !result.session) throw new Error('Sign-in could not be completed.'); setAuthenticated(true, result.session); setLoginMessage(''); clerkPinInput.value = ''; await loadBoard(); root.querySelector('[role="tab"]')?.focus?.(); } catch (error) { setAuthenticated(false); setLoginMessage(error.code === 'invalid_credentials' ? 'Invalid clerk ID or PIN.' : 'Sign-in could not be completed. Try again.'); clerkPinInput.value = ''; clerkPinInput.focus?.(); throw error; } finally { if (loginSubmit) loginSubmit.disabled = false; } }
@@ -392,7 +433,7 @@ export function createDispatchApp({
   function activateTab(tabName, { focus = false } = {}) { root.querySelectorAll('[role="tab"]').forEach((tab) => { const active = tab.dataset.tab === tabName; tab.classList.toggle('is-active', active); tab.setAttribute('aria-selected', String(active)); tab.setAttribute('tabindex', active ? '0' : '-1'); if (active && focus) tab.focus(); }); root.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = panel.id !== `${tabName}View`; }); }
 
   root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => { activateTab(tab.dataset.tab); if (tab.dataset.tab === 'resources' && authenticated) loadResources().catch(() => {}); }));
-  $(root, '#companyFilter')?.addEventListener('change', (event) => { setState(setCompanyFilter(state, event.target.value)); });
+  $(root, '#companyFilter')?.addEventListener('change', (event) => { setState(setCompanyFilter(state, event.target.value)); loadBoard().catch(() => {}); });
   $(root, '#refreshBoard')?.addEventListener('click', () => loadBoard().catch(() => {}));
   $(root, '#logoutButton')?.addEventListener('click', () => logout().catch(() => {}));
   $(root, '#newTripButton')?.addEventListener('click', (event) => openTripDialog(event.currentTarget).catch((error) => { if (error.code !== 'unauthorized') $(root, '#statusMessage').textContent = 'Resources could not be loaded. Try again.'; }));
@@ -413,7 +454,7 @@ export function createDispatchApp({
   root.addEventListener('dragover', (event) => { if (event.target.closest?.('[data-drop-trip-id]')) event.preventDefault(); });
   root.addEventListener('drop', (event) => { const zone = event.target.closest?.('[data-drop-trip-id]'); if (!zone) return; event.preventDefault(); const invoiceKey = event.dataTransfer?.getData('text/plain'); if (invoiceKey) assignInvoice(invoiceKey, zone.dataset.dropTripId, zone).catch(() => {}); });
   root.addEventListener('keydown', (event) => { const tab = event.target.closest?.('[role="tab"]'); if (tab) { const tabs = [...root.querySelectorAll('[role="tab"]')]; const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length); if (nextIndex !== null) { event.preventDefault(); activateTab(tabs[nextIndex].dataset.tab, { focus: true }); } return; } const assign = event.target.closest?.('[data-assign-selected], [data-assign-invoice]'); if (assign && event.key === 'Enter') { event.preventDefault(); assign.click(); } });
-  globalThis.addEventListener?.('online', updateOfflineStatus); globalThis.addEventListener?.('offline', () => { updateOfflineStatus(); render(); });
+  globalThis.addEventListener?.('online', render); globalThis.addEventListener?.('offline', render);
   activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
   return { getState: () => state, getSession: () => session, loadBoard, loadResources, assignInvoice, render, activateTab, login, logout };
 }

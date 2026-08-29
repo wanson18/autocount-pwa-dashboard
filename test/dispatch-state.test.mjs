@@ -68,6 +68,37 @@ const trips = [
   },
 ];
 
+test('production state starts empty instead of presenting the approved fixture as authoritative', () => {
+  const state = createDispatchState();
+
+  assert.deepEqual(state.invoices, []);
+  assert.deepEqual(state.trips, []);
+  assert.deepEqual(state.sources, {});
+});
+
+test('source health treats a missing required company entry as unavailable', () => {
+  assert.equal(
+    dispatchState.getSourceMessage({ enterprise: { status: 'ok', invoiceCount: 2 } }),
+    'Sdn Bhd source unavailable',
+  );
+});
+
+test('drag validation accepts only a current eligible unassigned invoice key', () => {
+  const state = createDispatchState({
+    invoices: [
+      { ...invoices[0], eligibility: 'eligible', cancelled: false },
+      { ...invoices[1], eligibility: 'blocked_missing_uom', cancelled: false },
+      { ...invoices[2], eligibility: 'eligible', cancelled: false },
+    ],
+    trips: [{ ...trips[0], invoiceKeys: ['enterprise:enterprise-doc-002'] }],
+  });
+
+  assert.equal(dispatchState.isCurrentEligibleUnassignedInvoice(state, 'enterprise:shared-doc-001'), true);
+  assert.equal(dispatchState.isCurrentEligibleUnassignedInvoice(state, 'sdn_bhd:shared-doc-001'), false);
+  assert.equal(dispatchState.isCurrentEligibleUnassignedInvoice(state, 'enterprise:enterprise-doc-002'), false);
+  assert.equal(dispatchState.isCurrentEligibleUnassignedInvoice(state, 'enterprise:forged'), false);
+});
+
 test('combined filter returns unassigned invoices from both companies', () => {
   const state = createDispatchState({ invoices, trips });
 
@@ -424,7 +455,7 @@ test('refresh keeps the selected company in the control, badge, state, and trans
   assert.equal(fake.companyFilter.value, 'sdn_bhd');
   assert.equal(fake.queueKey.textContent, 'SDN BHD');
 
-  await app.loadBoard();
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [{ startDate: '2026-08-28', endDate: '2026-08-28', company: 'sdn_bhd' }]);
   assert.equal(app.getState().companyFilter, 'sdn_bhd');
@@ -448,16 +479,14 @@ test('late response from an old company filter cannot replace the newer visible 
 
   fake.companyFilter.value = 'enterprise';
   fake.companyFilter.dispatch('change', { target: fake.companyFilter });
-  const enterpriseRefresh = app.loadBoard();
 
   fake.companyFilter.value = 'sdn_bhd';
   fake.companyFilter.dispatch('change', { target: fake.companyFilter });
-  const sdnBhdRefresh = app.loadBoard();
 
   pending.get('sdn_bhd').resolve({ invoices: [invoices[1]], trips: [] });
-  await sdnBhdRefresh;
+  await new Promise((resolve) => setImmediate(resolve));
   pending.get('enterprise').resolve({ invoices: [invoices[0]], trips: [] });
-  await enterpriseRefresh;
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(app.getState().companyFilter, 'sdn_bhd');
   assert.deepEqual(app.getState().invoices.map((invoice) => invoice.docNo), ['SDN-001']);
@@ -481,13 +510,12 @@ test('same-filter overlapping refreshes apply only the latest response', async (
 
   fake.companyFilter.value = 'enterprise';
   fake.companyFilter.dispatch('change', { target: fake.companyFilter });
-  const olderRefresh = app.loadBoard();
   const newerRefresh = app.loadBoard();
 
   requests[1].request.resolve({ invoices: [invoices[2]], trips: [] });
   await newerRefresh;
   requests[0].request.resolve({ invoices: [invoices[0]], trips: [] });
-  await olderRefresh;
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(app.getState().invoices.map((invoice) => invoice.docNo), ['ENT-002']);
   assert.equal(fake.companyFilter.value, 'enterprise');
@@ -701,7 +729,7 @@ test('invoice fetch transport preserves unauthorized 401 so board load clears se
         ok: false,
         status: 401,
         async json() {
-          return { success: false, error: { code: 'unauthorized', message: 'Authentication is required.' } };
+          return { success: false, error: { code: 'arbitrary_gateway_body', message: 'Gateway response.' } };
         },
       };
     },

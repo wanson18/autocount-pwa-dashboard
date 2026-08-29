@@ -13,6 +13,15 @@ export const COMPANY_NAMES = {
   sdn_bhd: 'Wanson Enterprise (M) Sdn Bhd',
 };
 
+const SOURCE_LABELS = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
+
+export function getSourceMessage(sources = {}) {
+  const unavailable = COMPANY_KEYS
+    .filter((key) => sources[key]?.status !== 'ok')
+    .map((key) => `${SOURCE_LABELS[key]} source unavailable`);
+  return unavailable.length ? unavailable.join(' · ') : 'Enterprise and Sdn Bhd sources ready.';
+}
+
 export const DISPATCH_FIXTURE = {
   dateRange: { ...DEFAULT_DATE_RANGE },
   sources: {
@@ -146,10 +155,10 @@ function normalizeInvoice(invoice, trips, assignedByKey) {
 }
 
 export function createDispatchState({
-  invoices = DISPATCH_FIXTURE.invoices,
-  trips = DISPATCH_FIXTURE.trips,
+  invoices = [],
+  trips = [],
   assignments = [],
-  sources = DISPATCH_FIXTURE.sources,
+  sources = {},
   dateRange = DEFAULT_DATE_RANGE,
   resources = {},
   companyFilter = 'all',
@@ -214,6 +223,16 @@ export function visibleUnassignedInvoices(state) {
     invoice.tripId === null
     && (state.companyFilter === 'all' || companyKeyOf(invoice) === state.companyFilter)
   ));
+}
+
+export function isCurrentEligibleUnassignedInvoice(state, invoiceKey) {
+  const invoice = state.invoices.find((candidate) => candidate.key === invoiceKey);
+  return Boolean(
+    invoice
+    && invoice.tripId === null
+    && invoice.cancelled !== true
+    && invoice.eligibility === 'eligible',
+  );
 }
 
 export function getTripInvoices(state, tripId) {

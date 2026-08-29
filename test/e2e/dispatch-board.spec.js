@@ -58,13 +58,37 @@ function makeAssignment(invoice, id, tripId) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
 async function json(route, body, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installFixtureApi(page, { partialSource = false, assignmentMode = 'success', boardError = false } = {}) {
+async function installFixtureApi(page, {
+  partialSource = false,
+  assignmentMode = 'success',
+  boardError = false,
+  deferInitialBoard = false,
+  missingSource = false,
+  unauthorizedOnRefresh = false,
+  deferEnterpriseFilter = false,
+  deferAssignment = false,
+  deferStaleRefresh = false,
+  deferResourceUpdate = false,
+} = {}) {
   const state = createServerState();
   state.boardError = boardError;
+  state.initialBoardGate = deferInitialBoard ? deferred() : null;
+  state.enterpriseFilterGate = deferEnterpriseFilter ? deferred() : null;
+  state.assignmentGate = deferAssignment ? deferred() : null;
+  state.staleRefreshGate = deferStaleRefresh ? deferred() : null;
+  state.resourceUpdateGate = deferResourceUpdate ? deferred() : null;
+  state.invoiceCompanies = [];
+  state.resourceWrites = 0;
   await page.route('**/api/dispatch/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -76,19 +100,32 @@ async function installFixtureApi(page, { partialSource = false, assignmentMode =
     if (pathname === '/api/dispatch/resources' && request.method() === 'GET') {
       return json(route, { success: true, active: 'true', drivers: state.drivers, lorries: state.lorries });
     }
+    if (pathname === '/api/dispatch/resources' && request.method() === 'PATCH') {
+      state.resourceWrites += 1;
+      if (state.resourceUpdateGate) await state.resourceUpdateGate.promise;
+      return json(route, { success: true, resource: state.drivers[0] });
+    }
     if (pathname === '/api/dispatch/invoices' && request.method() === 'GET') {
       state.counts.invoiceReads += 1;
+      const requestedCompany = url.searchParams.get('company') || 'all';
+      state.invoiceCompanies.push(requestedCompany);
+      if (state.initialBoardGate && state.counts.invoiceReads === 1) await state.initialBoardGate.promise;
+      if (state.enterpriseFilterGate && requestedCompany === 'enterprise') await state.enterpriseFilterGate.promise;
+      if (unauthorizedOnRefresh && state.counts.invoiceReads === 2) {
+        return json(route, { success: false, error: { code: 'arbitrary_gateway_body' } }, 401);
+      }
       if (state.boardError && state.counts.invoiceReads === 1) return json(route, { success: false, error: { code: 'source_unavailable' } }, 503);
       return json(route, {
         success: true, dateRange: { startDate: '2026-08-28', endDate: '2026-08-28' }, company: 'all',
-        invoices: state.invoices, sources: {
+        invoices: state.invoices.filter((invoice) => requestedCompany === 'all' || invoice.companyKey === requestedCompany), sources: {
           enterprise: { status: 'ok', invoiceCount: state.invoices.filter((row) => row.companyKey === 'enterprise').length },
-          sdn_bhd: partialSource ? { status: 'unavailable', errorCode: 'source_unavailable' } : { status: 'ok', invoiceCount: 1 },
+          ...(missingSource ? {} : { sdn_bhd: partialSource ? { status: 'unavailable', errorCode: 'source_unavailable' } : { status: 'ok', invoiceCount: 1 } }),
         },
       });
     }
     if (pathname === '/api/dispatch/trips' && request.method() === 'GET') {
       state.counts.trips += 1;
+      if (state.staleRefreshGate && state.counts.trips > 1) await state.staleRefreshGate.promise;
       return json(route, { success: true, trips: state.trips });
     }
     if (pathname === '/api/dispatch/trips' && request.method() === 'POST') {
@@ -108,6 +145,7 @@ async function installFixtureApi(page, { partialSource = false, assignmentMode =
       const body = JSON.parse(request.postData() || '{}');
       state.assignmentBodies.push(body);
       state.counts.assignments += 1;
+      if (state.assignmentGate) await state.assignmentGate.promise;
       if (assignmentMode === 'rollback') return json(route, { success: false, error: { code: 'internal_error' } }, 500);
       if (assignmentMode === 'stale' && state.counts.assignments === 1) {
         state.trips[0].revision += 1;
@@ -136,6 +174,18 @@ async function openBoard(page, options) {
 
 function invoiceCard(page, docNo) {
   return page.locator('.invoice-card').filter({ hasText: docNo });
+}
+
+async function dropInvoiceKey(page, invoiceKey, tripId = '101') {
+  await page.evaluate(({ key, targetTripId }) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData('text/plain', key);
+    document.querySelector(`[data-drop-trip-id="${targetTripId}"]`).dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+    }));
+  }, { key: invoiceKey, targetTripId: tripId });
 }
 
 test('Board shows combined company feed and creates a mixed-company trip', async ({ page }) => {
@@ -188,6 +238,29 @@ test('click, touch, keyboard, and drag assignment paths share the Board assignme
   await expect(trip).toContainText(testInfo.project.name === 'desktop' ? 'Combined 3' : 'Combined 2');
 });
 
+test('forged and stale drag payloads cannot create an assignment', async ({ page }) => {
+  const state = await openBoard(page);
+
+  await dropInvoiceKey(page, 'enterprise:forged');
+  expect(state.assignmentBodies).toHaveLength(0);
+
+  await invoiceCard(page, 'ENT-E2E-001').getByRole('button', { name: /Assign invoice ENT-E2E-001/ }).click();
+  await expect(page.locator('[data-trip-id="101"]')).toContainText('Combined 1');
+  expect(state.assignmentBodies).toHaveLength(1);
+
+  await dropInvoiceKey(page, 'enterprise:enterprise-e2e-001');
+  await page.waitForTimeout(50);
+  expect(state.assignmentBodies).toHaveLength(1);
+});
+
+test('successful assignment restores focus to the stable replacement trip control', async ({ page }) => {
+  await openBoard(page);
+  await invoiceCard(page, 'ENT-E2E-001').getByRole('button', { name: /Assign invoice ENT-E2E-001/ }).click();
+
+  await expect(page.locator('[data-trip-id="101"]')).toContainText('Combined 1');
+  await expect(page.locator('[data-assign-selected="101"]')).toBeFocused();
+});
+
 test('failed assignment rolls back exactly and announces the error', async ({ page }) => {
   const state = await openBoard(page, { assignmentMode: 'rollback' });
   const card = invoiceCard(page, 'ENT-E2E-001');
@@ -197,11 +270,12 @@ test('failed assignment rolls back exactly and announces the error', async ({ pa
   await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
   await expect(page.locator('[data-trip-id="101"] .invoice-card')).toHaveCount(0);
   await expect(page.locator('[data-assign-selected="101"]')).toBeEnabled();
+  await expect(page.locator('[data-assign-selected="101"]')).toBeFocused();
   expect(state.assignmentBodies).toHaveLength(1);
 });
 
-test('stale trip conflict rolls back, refreshes authoritative trips, and then re-enables writes', async ({ page }) => {
-  const state = await openBoard(page, { assignmentMode: 'stale' });
+test('stale trip conflict stays locked through authoritative refetch and then re-enables writes', async ({ page }) => {
+  const state = await openBoard(page, { assignmentMode: 'stale', deferStaleRefresh: true });
   await invoiceCard(page, 'ENT-E2E-001').getByRole('button', { name: /Select invoice/ }).click();
   const trip = page.locator('[data-trip-id="101"]');
   const tripReadsBefore = state.counts.trips;
@@ -209,7 +283,61 @@ test('stale trip conflict rolls back, refreshes authoritative trips, and then re
   await expect(page.locator('#statusMessage')).toContainText('changed on the server');
   await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
   await expect.poll(() => state.counts.trips).toBeGreaterThan(tripReadsBefore);
+  await expect(trip.getByRole('button', { name: /Assign selected invoice/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
+  state.staleRefreshGate.resolve();
   await expect(trip.getByRole('button', { name: /Assign selected invoice/ })).toBeEnabled();
+});
+
+test('refresh cannot erase a newer pending assignment or suppress its authoritative result', async ({ page }) => {
+  const state = await openBoard(page, { deferAssignment: true });
+  await invoiceCard(page, 'ENT-E2E-001').getByRole('button', { name: /Assign invoice ENT-E2E-001/ }).click();
+  await expect.poll(() => state.assignmentBodies.length).toBe(1);
+
+  await page.locator('#refreshBoard').click();
+  await page.waitForTimeout(100);
+  expect(state.counts.invoiceReads).toBe(1);
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
+
+  state.assignmentGate.resolve();
+  await expect.poll(() => state.counts.invoiceReads).toBeGreaterThan(1);
+  await expect(page.locator('[data-trip-id="101"]')).toContainText('Combined 1');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
+});
+
+test('filter change queues behind a pending assignment and applies the newest company response', async ({ page }) => {
+  const state = await openBoard(page, { deferAssignment: true });
+  await invoiceCard(page, 'ENT-E2E-001').getByRole('button', { name: /Assign invoice ENT-E2E-001/ }).click();
+  await expect.poll(() => state.assignmentBodies.length).toBe(1);
+
+  await page.locator('#companyFilter').selectOption('sdn_bhd');
+  await page.waitForTimeout(100);
+  expect(state.invoiceCompanies).toEqual(['all']);
+
+  state.assignmentGate.resolve();
+  await expect.poll(() => state.invoiceCompanies.filter((company) => company === 'sdn_bhd').length).toBeGreaterThan(0);
+  await expect(page.locator('#statusMessage')).toContainText('Assignment saved');
+  await expect(page.locator('#companyFilter')).toHaveValue('sdn_bhd');
+  await expect(page.locator('#unassignedList')).toContainText('SDN-E2E-001');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+});
+
+test('one shared lock disables Board and resource writes until resource read-back completes', async ({ page }) => {
+  const state = await openBoard(page, { deferResourceUpdate: true });
+  await page.locator('#resourcesTab').click();
+  const resourceToggle = page.getByRole('button', { name: 'Deactivate driver Aiman Driver' });
+  await expect(resourceToggle).toBeVisible();
+  await resourceToggle.click();
+  await expect.poll(() => state.resourceWrites).toBe(1);
+
+  await expect(page.locator('#resourceSubmit')).toBeDisabled();
+  await page.locator('#boardTab').click();
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
+  await expect(page.locator('[data-assign-selected="101"]')).toBeDisabled();
+
+  state.resourceUpdateGate.resolve();
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
 });
 
 test('partial source is visible and offline state disables mutations without fixture fallback', async ({ page, context }) => {
@@ -219,6 +347,44 @@ test('partial source is visible and offline state disables mutations without fix
   await expect(page.locator('#offlineStatus')).toContainText('Offline');
   await expect(page.locator('[data-assign-selected="101"]')).toBeDisabled();
   await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
+
+  await context.setOffline(false);
+  await expect(page.locator('#offlineStatus')).toBeHidden();
+  await expect(page.locator('[data-assign-selected="101"]')).toBeEnabled();
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
+});
+
+test('a missing required source is reported as partial instead of healthy', async ({ page }) => {
+  await openBoard(page, { missingSource: true });
+
+  await expect(page.locator('#sourceStatus')).toContainText('Sdn Bhd source unavailable');
+  await expect(page.locator('#sourceStatus')).not.toContainText('sources ready');
+});
+
+test('HTTP 401 with an arbitrary body clears the Board and returns to login', async ({ page }) => {
+  await openBoard(page, { unauthorizedOnRefresh: true });
+
+  await page.locator('#refreshBoard').click();
+
+  await expect(page.locator('#loginView')).toBeVisible();
+  await expect(page.locator('#authenticatedView')).toBeHidden();
+  await expect(page.locator('#loginMessage')).toContainText('session has expired');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+});
+
+test('changing company during a load applies only the newest filter response and settles loading', async ({ page }) => {
+  const state = await openBoard(page, { deferEnterpriseFilter: true });
+
+  await page.locator('#companyFilter').selectOption('enterprise');
+  await expect.poll(() => state.invoiceCompanies.filter((company) => company === 'enterprise').length).toBe(1);
+  await page.locator('#companyFilter').selectOption('sdn_bhd');
+
+  await expect(page.locator('#unassignedList')).toContainText('SDN-E2E-001');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  state.enterpriseFilterGate.resolve();
+  await expect(page.locator('#boardState')).not.toContainText('Loading');
+  await expect(page.locator('#unassignedList')).toContainText('SDN-E2E-001');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
 });
 
 test('generic Board failure is visible and the retry control restores the authenticated feed', async ({ page }) => {
@@ -226,8 +392,24 @@ test('generic Board failure is visible and the retry control restores the authen
   await page.goto('/dispatch.html');
   await expect(page.locator('#authenticatedView')).toBeVisible();
   await expect(page.locator('#boardState')).toContainText('could not be loaded');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-SI-0001');
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
   await expect(page.locator('#refreshBoard')).toHaveText('Retry board');
   await page.locator('#refreshBoard').click();
   await expect(page.getByRole('heading', { name: 'Unassigned invoices' })).toBeVisible();
   expect(state.counts.invoiceReads).toBe(2);
+});
+
+test('loading starts with an empty non-writable Board until the first authoritative response', async ({ page }) => {
+  const state = await installFixtureApi(page, { deferInitialBoard: true });
+  await page.goto('/dispatch.html');
+
+  await expect(page.locator('#authenticatedView')).toBeVisible();
+  await expect(page.locator('#boardState')).toContainText('Loading the authenticated Board');
+  await expect(page.locator('#unassignedList')).not.toContainText('ENT-SI-0001');
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
+
+  state.initialBoardGate.resolve();
+  await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
+  await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
 });
