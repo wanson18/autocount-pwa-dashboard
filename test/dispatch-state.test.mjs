@@ -110,6 +110,54 @@ test('authenticated Board initialization joins ID-only trips from the protected 
   assert.equal(app.getState().trips[0].lorry.registrationNo, 'PROTECTED 8008');
 });
 
+test('stale Board-triggered resource response cannot overwrite newer Resources-tab metadata', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  const resourceRequests = [];
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session: { clerkId: 'clerk-1', role: 'clerk' } }),
+    },
+    transport: {
+      loadBoard: async () => ({
+        invoices: [],
+        trips: [{ id: 'trip-race', tripDate: '2026-08-28', driverId: 7, vehicleId: 8, revision: 1 }],
+        assignments: [],
+        sources: {},
+      }),
+    },
+    resourcesTransport: {
+      loadResources: async () => {
+        const request = deferred();
+        resourceRequests.push(request);
+        return request.promise;
+      },
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resourceRequests.length, 1, 'Board initialization starts R1');
+
+  const newerResourcesLoad = app.loadResources();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resourceRequests.length, 2, 'Resources tab starts newer R2');
+
+  resourceRequests[1].resolve({
+    drivers: [{ id: 7, name: 'Current Driver', licenseNo: 'D-CURRENT', active: true }],
+    lorries: [{ id: 8, registrationNo: 'CURRENT 8008', active: true }],
+  });
+  await newerResourcesLoad;
+
+  resourceRequests[0].resolve({
+    drivers: [{ id: 7, name: 'Stale Driver', licenseNo: 'D-STALE', active: true }],
+    lorries: [{ id: 8, registrationNo: 'STALE 8008', active: true }],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(app.getState().trips[0].driver.name, 'Current Driver');
+  assert.equal(app.getState().trips[0].lorry.registrationNo, 'CURRENT 8008');
+});
+
 test('source health treats a missing required company entry as unavailable', () => {
   assert.equal(
     dispatchState.getSourceMessage({ enterprise: { status: 'ok', invoiceCount: 2 } }),

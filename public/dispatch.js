@@ -347,7 +347,7 @@ export function createDispatchApp({
       let boardResources = resources;
       if ((board.trips || []).some(tripNeedsResourceJoin)) {
         const loadedResources = await loadResources({ boardSequence: requestSequence });
-        boardResources = normalizeResources(loadedResources) || resources;
+        boardResources = loadedResources ? normalizeResources(loadedResources) : resources;
       }
       if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
       state = reloadDispatchState(state, { ...board, resources: boardResources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
@@ -368,7 +368,7 @@ export function createDispatchApp({
     const requestSequence = ++resourceRequestSequence; const active = showInactiveResources?.checked ? 'all' : 'true'; setResourceMessage('Loading resources…');
     try {
       const result = await resourcesTransport.loadResources({ active });
-      if (requestSequence !== resourceRequestSequence || !authenticated || (boardSequence !== null && boardSequence !== boardRequestSequence)) return result;
+      if (requestSequence !== resourceRequestSequence || !authenticated || (boardSequence !== null && boardSequence !== boardRequestSequence)) return null;
       resources = normalizeResources(result);
       state = { ...state, trips: state.trips.map((trip) => ({ ...trip, driver: trip.driver || resources.drivers.find((row) => String(row.id) === String(trip.driverId)), lorry: trip.lorry || resources.lorries.find((row) => String(row.id) === String(trip.vehicleId)) })) };
       renderResources(root, resources); renderTripFormOptions(); render(); setResourceMessage('Resources loaded.'); return result;
