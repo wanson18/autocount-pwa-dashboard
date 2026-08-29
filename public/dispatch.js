@@ -52,6 +52,15 @@ function companyKeyOf(invoice) {
   return invoice?.companyKey ?? invoice?.company_key;
 }
 
+function normalizeResources(result) {
+  return { drivers: result?.drivers || [], lorries: result?.lorries || [] };
+}
+
+function tripNeedsResourceJoin(trip) {
+  return (trip?.driverId != null || trip?.driver_id != null) && !trip.driver
+    || (trip?.vehicleId != null || trip?.vehicle_id != null) && !trip.lorry;
+}
+
 export function resolveDispatchClickTarget(target) {
   if (target?.closest?.('button:disabled')) return null;
   const invoiceSelect = target?.closest?.('[data-select-invoice]');
@@ -335,7 +344,13 @@ export function createDispatchApp({
     try {
       const board = await transport.loadBoard({ startDate: DEFAULT_DATE_RANGE.startDate, endDate: DEFAULT_DATE_RANGE.endDate, company: requestedCompany });
       if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
-      state = reloadDispatchState(state, { ...board, resources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
+      let boardResources = resources;
+      if ((board.trips || []).some(tripNeedsResourceJoin)) {
+        const loadedResources = await loadResources({ boardSequence: requestSequence });
+        boardResources = normalizeResources(loadedResources) || resources;
+      }
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
+      state = reloadDispatchState(state, { ...board, resources: boardResources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
       boardAuthoritative = true;
       if (preserveMessage) state.statusMessage = previousMessage;
       render();
@@ -348,11 +363,19 @@ export function createDispatchApp({
     }
   }
 
-  async function loadResources() {
+  async function loadResources({ boardSequence = null } = {}) {
     if (!authenticated || !$(root, '#driverList')) return null;
     const requestSequence = ++resourceRequestSequence; const active = showInactiveResources?.checked ? 'all' : 'true'; setResourceMessage('Loading resources…');
-    try { const result = await resourcesTransport.loadResources({ active }); if (requestSequence !== resourceRequestSequence || !authenticated) return result; resources = { drivers: result.drivers || [], lorries: result.lorries || [] }; state = { ...state, trips: state.trips.map((trip) => ({ ...trip, driver: trip.driver || resources.drivers.find((row) => String(row.id) === String(trip.driverId)), lorry: trip.lorry || resources.lorries.find((row) => String(row.id) === String(trip.vehicleId)) })) }; renderResources(root, resources); renderTripFormOptions(); render(); setResourceMessage('Resources loaded.'); return result; }
-    catch (error) { if (requestSequence !== resourceRequestSequence || !authenticated) return null; if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resources could not be loaded. Try again.'); throw error; }
+    try {
+      const result = await resourcesTransport.loadResources({ active });
+      if (requestSequence !== resourceRequestSequence || !authenticated || (boardSequence !== null && boardSequence !== boardRequestSequence)) return result;
+      resources = normalizeResources(result);
+      state = { ...state, trips: state.trips.map((trip) => ({ ...trip, driver: trip.driver || resources.drivers.find((row) => String(row.id) === String(trip.driverId)), lorry: trip.lorry || resources.lorries.find((row) => String(row.id) === String(trip.vehicleId)) })) };
+      renderResources(root, resources); renderTripFormOptions(); render(); setResourceMessage('Resources loaded.'); return result;
+    } catch (error) {
+      if (requestSequence !== resourceRequestSequence || !authenticated || (boardSequence !== null && boardSequence !== boardRequestSequence)) return null;
+      if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resources could not be loaded. Try again.'); throw error;
+    }
   }
 
   async function updateResource(type, id, active) {

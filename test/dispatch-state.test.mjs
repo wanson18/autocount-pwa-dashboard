@@ -76,6 +76,40 @@ test('production state starts empty instead of presenting the approved fixture a
   assert.deepEqual(state.sources, {});
 });
 
+test('authenticated Board initialization joins ID-only trips from the protected resource response', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  let resourceReads = 0;
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session: { clerkId: 'clerk-1', role: 'clerk' } }),
+    },
+    transport: {
+      loadBoard: async () => ({
+        invoices: [],
+        trips: [{ id: 'trip-ids-only', tripDate: '2026-08-28', driverId: 7, vehicleId: 8, revision: 1 }],
+        assignments: [],
+        sources: {},
+      }),
+    },
+    resourcesTransport: {
+      async loadResources() {
+        resourceReads += 1;
+        return {
+          drivers: [{ id: 7, name: 'Protected Driver', licenseNo: 'D-7007', active: true }],
+          lorries: [{ id: 8, registrationNo: 'PROTECTED 8008', active: true }],
+        };
+      },
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(resourceReads, 1);
+  assert.equal(app.getState().trips[0].driver.name, 'Protected Driver');
+  assert.equal(app.getState().trips[0].lorry.registrationNo, 'PROTECTED 8008');
+});
+
 test('source health treats a missing required company entry as unavailable', () => {
   assert.equal(
     dispatchState.getSourceMessage({ enterprise: { status: 'ok', invoiceCount: 2 } }),
@@ -575,6 +609,15 @@ test('dispatch shell provides a keyboard-accessible login boundary and resource 
   assert.match(html, /id="resourceForm"/);
   assert.match(html, /id="driverList"/);
   assert.match(html, /id="lorryList"/);
+});
+
+test('dispatch shell describes persisted dispatch records without stale preview claims', () => {
+  const html = fs.readFileSync(path.join(process.cwd(), 'public', 'dispatch.html'), 'utf8');
+
+  assert.doesNotMatch(html, /Assignment is not active in this preview\./);
+  assert.doesNotMatch(html, /Dispatch preview · no invoice records are changed/);
+  assert.match(html, /Assignments are saved as dispatch records; accounting invoices stay unchanged\./);
+  assert.match(html, /Dispatch records persist here · accounting invoice records are unchanged/);
 });
 
 test('dispatch client exposes same-origin session and resource transports without browser secrets', async () => {

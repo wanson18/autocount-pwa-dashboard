@@ -44,7 +44,7 @@ function createServerState() {
     assignments: [],
     drivers: [{ type: 'driver', id: 1, name: 'Aiman Driver', licenseNo: 'D-1001', active: true }],
     lorries: [{ type: 'lorry', id: 2, registrationNo: 'WXY 1001', description: '10-ton lorry', active: true }],
-    assignmentBodies: [], tripBodies: [], counts: { trips: 0, assignments: 0, invoiceReads: 0 },
+    assignmentBodies: [], tripBodies: [], counts: { trips: 0, assignments: 0, invoiceReads: 0, resources: 0 },
   };
 }
 
@@ -79,8 +79,13 @@ async function installFixtureApi(page, {
   deferAssignment = false,
   deferStaleRefresh = false,
   deferResourceUpdate = false,
+  idsOnlyTrip = false,
 } = {}) {
   const state = createServerState();
+  if (idsOnlyTrip) {
+    delete state.trips[0].driver;
+    delete state.trips[0].lorry;
+  }
   state.boardError = boardError;
   state.initialBoardGate = deferInitialBoard ? deferred() : null;
   state.enterpriseFilterGate = deferEnterpriseFilter ? deferred() : null;
@@ -98,6 +103,7 @@ async function installFixtureApi(page, {
     }
     if (pathname === '/api/dispatch/session') return json(route, { success: true, authenticated: false, session: null });
     if (pathname === '/api/dispatch/resources' && request.method() === 'GET') {
+      state.counts.resources += 1;
       return json(route, { success: true, active: 'true', drivers: state.drivers, lorries: state.lorries });
     }
     if (pathname === '/api/dispatch/resources' && request.method() === 'PATCH') {
@@ -214,6 +220,17 @@ test('Board shows combined company feed and creates a mixed-company trip', async
   await expect(trip).toContainText('Combined 2');
   await expect(trip.locator('.company-badge', { hasText: 'Enterprise' })).toHaveCount(1);
   await expect(trip.locator('.company-badge', { hasText: 'Sdn Bhd' })).toHaveCount(1);
+});
+
+test('authenticated Board joins an IDs-only trip from the protected resources response', async ({ page }) => {
+  const state = await openBoard(page, { idsOnlyTrip: true });
+  await expect.poll(() => state.counts.resources).toBe(1);
+
+  const trip = page.locator('[data-trip-id="101"]');
+  await expect(trip).toContainText('Aiman Driver');
+  await expect(trip).toContainText('WXY 1001');
+  await expect(trip).not.toContainText('Driver not set');
+  await expect(trip).not.toContainText('Lorry not set');
 });
 
 test('click, touch, keyboard, and drag assignment paths share the Board assignment action', async ({ page }, testInfo) => {
