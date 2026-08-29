@@ -362,3 +362,109 @@ exit code 0
 
 - Fix implementation and evidence: `8120ae9a9b3cd8f13ee0c873fc3cdafde494f512`
 - Fix-hash report update: recorded in the report-only follow-up commit.
+
+## Fix round 2 closeout
+
+### Finding coverage
+
+Fix round 2 closes both findings in `task-6-fix-2-findings.md`:
+
+1. **Important — Board initialization did not join protected resources:** the
+   authenticated Board now inspects the authoritative trip response and reads
+   `/api/dispatch/resources` when a trip has an ID without its embedded driver
+   or lorry. The existing embedded trip resource objects remain supported and
+   do not trigger a duplicate resource read merely to overwrite them. The
+   joined resource data is passed through the existing state normalization path,
+   preserving stale-response sequencing, session-loss handling, mutation locks,
+   partial invoice-source health, and failure behavior.
+2. **Important — stale preview copy:** the Board now tells clerks that
+   assignments persist as dispatch records while accounting invoice records
+   remain unchanged. The old inactive-preview and no-record-change claims are
+   covered by a client regression assertion.
+
+### RED evidence
+
+The new tests were added before the production change and failed for the
+expected missing-behavior reasons:
+
+```text
+node --test --test-name-pattern="authenticated Board initialization joins|dispatch shell describes persisted" test/dispatch-state.test.mjs
+tests 2, pass 0, fail 2
+failures: protected resource reads were 0 instead of 1; stale preview copy was still present
+
+npx playwright test test/e2e/dispatch-board.spec.js --project=desktop --grep="IDs-only trip" --reporter=line
+1 failed
+failure: protected resource reads were 0 instead of 1
+```
+
+### GREEN evidence
+
+The exact focused and repository verification commands on the committed fix
+tree produced:
+
+```text
+node --test --test-name-pattern="authenticated Board initialization joins|dispatch shell describes persisted" test/dispatch-state.test.mjs
+tests 2, pass 2, fail 0
+
+node --test test/dispatch-state.test.mjs
+tests 29, pass 29, fail 0, skipped 0
+
+npx playwright test test/e2e/dispatch-board.spec.js --project=desktop --reporter=line
+16 passed, 0 failed
+
+npx playwright test test/e2e/dispatch-board.spec.js --project=mobile --reporter=line
+16 passed, 0 failed
+
+npx playwright test test/e2e/dispatch-board.spec.js --reporter=line
+32 passed, 0 failed
+
+npm test
+tests 169, pass 168, fail 0, skipped 1
+
+npm run build
+exit code 0
+
+node --check public/dispatch.js
+node --check public/dispatch-state.mjs
+node --check test/e2e/dispatch-board.spec.js
+node --check playwright.config.js
+all exit code 0
+
+git diff --check
+clean
+```
+
+The first attempt to run desktop and mobile as two simultaneous Playwright
+processes hit `EADDRINUSE 127.0.0.1:4173`; the required serial mobile rerun and
+the configured combined single-worker run both passed. Browser coverage remains
+local and route-intercepted; no AutoCount, Vercel, provider database,
+production, Quick Invoice, or external service was contacted.
+
+### Fix round 2 changed files
+
+- `public/dispatch.js` — conditionally loads authenticated resources during
+  Board initialization/recovery when trip IDs need metadata, with resource and
+  Board request sequencing preserved.
+- `public/dispatch.html` — replaces stale preview wording with persisted
+  dispatch-record guidance.
+- `test/dispatch-state.test.mjs` — client initialization and stale-copy
+  regressions.
+- `test/e2e/dispatch-board.spec.js` — desktop/mobile IDs-only trip fixture and
+  rendered protected-resource join regression.
+- `.superpowers/sdd/2026-08-28-delivery-dispatch/task-6-report.md` — this
+  evidence section.
+
+### Fix round 2 commit hashes
+
+- Implementation and tests: `d398e1a4ec63a463fd0725ba56af68bf1200ed99`
+- Evidence report: committed as the report-only follow-up immediately after
+  this implementation commit; its exact hash is returned in the final handoff.
+
+### Concerns and boundaries
+
+- The Board date remains the Task 6 fixed `2026-08-28` range; date navigation is
+  outside this task.
+- The repository emits the existing Node typeless-module warning during state
+  tests; it is non-failing and was not changed.
+- Existing untracked `output/` evidence and generated `test-results/` were not
+  staged, modified, or deleted.
