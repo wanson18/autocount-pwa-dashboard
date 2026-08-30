@@ -140,16 +140,39 @@
             </section>
           </div>
 
-          <section class="view panel placeholder-view" id="tripsView" role="tabpanel" aria-labelledby="tripsTab" hidden>
-            <p class="eyebrow">Trips</p>
-            <h2>Trip overview</h2>
-            <p>Trip history and status controls will be connected after the dispatch API is available.</p>
+          <section class="view panel trips-view" id="tripsView" role="tabpanel" aria-labelledby="tripsTab" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Trips</p>
+                <h2>Trip overview</h2>
+              </div>
+              <button class="secondary-button" type="button" id="refreshTrips">Refresh trips</button>
+            </div>
+            <p class="section-help">Open a persisted trip detail and print its company-tagged item loading sheet.</p>
+            <div class="trip-list" id="tripsOverviewList"></div>
+            <p class="view-state" id="tripsViewState" role="status" aria-live="polite"></p>
           </section>
 
-          <section class="view panel placeholder-view" id="reportsView" role="tabpanel" aria-labelledby="reportsTab" hidden>
-            <p class="eyebrow">Reports</p>
-            <h2>Delivery reports</h2>
-            <p>Period filters and export will use persisted assignment snapshots in a later task.</p>
+          <section class="view panel reports-view" id="reportsView" role="tabpanel" aria-labelledby="reportsTab" hidden>
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Reports</p>
+                <h2>Delivery reports</h2>
+              </div>
+              <span class="report-boundary">Persisted dispatch records</span>
+            </div>
+            <p class="section-help">Filter by inclusive trip dates, company, resource, and persisted trip or assignment status.</p>
+            <form class="report-form" id="reportForm" novalidate>
+              <label class="field-group" for="reportStartDate"><span>Start date</span><input class="field-control" id="reportStartDate" name="startDate" type="date" value="2026-08-28" required /></label>
+              <label class="field-group" for="reportEndDate"><span>End date</span><input class="field-control" id="reportEndDate" name="endDate" type="date" value="2026-08-28" required /></label>
+              <label class="field-group" for="reportCompany"><span>Company</span><select class="field-control" id="reportCompany" name="company"><option value="all">Combined · both companies</option><option value="enterprise">Enterprise only</option><option value="sdn_bhd">Sdn Bhd only</option></select></label>
+              <label class="field-group" for="reportDriver"><span>Driver</span><select class="field-control" id="reportDriver" name="driver_id"><option value="">All drivers</option></select></label>
+              <label class="field-group" for="reportLorry"><span>Lorry</span><select class="field-control" id="reportLorry" name="lorry_id"><option value="">All lorries</option></select></label>
+              <label class="field-group" for="reportStatus"><span>Status</span><select class="field-control" id="reportStatus" name="status"><option value="">All statuses</option><option value="planned">Trip · Planned</option><option value="loading">Trip · Loading</option><option value="dispatched">Trip · Dispatched</option><option value="completed">Trip · Completed</option><option value="cancelled">Trip · Cancelled</option><option value="assigned">Assignment · Assigned</option><option value="loaded">Assignment · Loaded</option><option value="out_for_delivery">Assignment · Out for delivery</option><option value="delivered">Assignment · Delivered</option><option value="failed">Assignment · Failed</option><option value="returned">Assignment · Returned</option><option value="removed">Assignment · Removed</option></select></label>
+              <div class="report-actions"><button class="primary-button" type="submit" id="loadReportButton">Load report</button><button class="secondary-button" type="button" id="exportReportButton">Export CSV</button></div>
+            </form>
+            <p class="report-state" id="reportState" role="status" aria-live="polite">Choose filters and load a report.</p>
+            <div class="report-table-wrap" id="reportTableWrap"><table class="report-table" id="reportTable"><caption class="sr-only">Delivery report records</caption><thead><tr><th scope="col">Trip</th><th scope="col">Date</th><th scope="col">Company</th><th scope="col">Invoice</th><th scope="col">Customer</th><th scope="col">Driver / lorry</th><th scope="col">Status</th></tr></thead><tbody><tr><td colspan="7">No report loaded.</td></tr></tbody></table></div>
           </section>
 
           <section class="view panel resources-view" id="resourcesView" role="tabpanel" aria-labelledby="resourcesTab" hidden>
@@ -218,7 +241,7 @@
 
         <footer class="page-footer">
           <span>Dispatch records persist here · accounting invoice records are unchanged</span>
-          <span class="future-action">Print Items area reserved for Task 7</span>
+          <span class="future-action">Loading sheets and reports use persisted snapshots</span>
         </footer>
       </div>
     </div>

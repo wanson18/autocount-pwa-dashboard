@@ -22,6 +22,14 @@
       "destination": "/api/dispatch-assignments.js"
     },
     {
+      "source": "/api/dispatch/loading-sheet",
+      "destination": "/api/dispatch-loading-sheet.js"
+    },
+    {
+      "source": "/api/dispatch/reports",
+      "destination": "/api/dispatch-reports.js"
+    },
+    {
       "source": "/api/dispatch",
       "destination": "/api/dispatch-unknown.js"
     },

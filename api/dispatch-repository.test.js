@@ -1126,6 +1126,44 @@ test('assignment transaction rolls back assignment, prior items, and events afte
   assert.equal(eventRows.rows[0].count, 0);
 });
 
+test('report reads keep inclusive trip dates and company/resource/status filters while retaining removed history', async () => {
+  const { trip, driver, vehicle } = await seedTrip();
+  const enterprise = invoiceSnapshot(`REPORT-ENTERPRISE-${resourceSequence}`, 'enterprise');
+  const sdnBhd = invoiceSnapshot(`REPORT-SDN-${resourceSequence}`, 'sdn_bhd');
+  const first = await repository.assignInvoice({ tripId: trip.id, ...enterprise });
+  const second = await repository.assignInvoice({ tripId: trip.id, ...sdnBhd });
+  await repository.updateAssignment(second.id, { status: 'removed' });
+
+  const rows = await repository.listReportRecords({
+    startDate: '2026-08-28',
+    endDate: '2026-08-28',
+    driverId: driver.id,
+    vehicleId: vehicle.id,
+  });
+  assert.deepEqual(rows.map((row) => [row.companyKey, row.invoiceId, row.assignmentStatus]), [
+    ['enterprise', first.invoiceId, 'assigned'],
+    ['sdn_bhd', second.invoiceId, 'removed'],
+  ]);
+
+  const enterpriseRows = await repository.listReportRecords({
+    startDate: '2026-08-28',
+    endDate: '2026-08-28',
+    company: 'enterprise',
+    driverId: driver.id,
+    vehicleId: vehicle.id,
+  });
+  assert.deepEqual(enterpriseRows.map((row) => row.companyKey), ['enterprise']);
+
+  const removedRows = await repository.listReportRecords({
+    startDate: '2026-08-28',
+    endDate: '2026-08-28',
+    status: 'removed',
+    driverId: driver.id,
+    vehicleId: vehicle.id,
+  });
+  assert.deepEqual(removedRows.map((row) => row.invoiceId), [second.invoiceId]);
+});
+
 test('idempotent driver mutations replay one durable resource and event for the same actor and request', async () => {
   const requestId = 'repository-idempotent-driver-001';
   const first = await repository.createDriver({

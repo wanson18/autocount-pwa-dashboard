@@ -82,6 +82,10 @@ function itemSummary(invoice) {
   )).join(' · ') || 'No item lines';
 }
 
+function loadingSheetHref(tripId) {
+  return `/loading-sheet.html?trip_id=${encodeURIComponent(String(tripId))}`;
+}
+
 export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true } = {}) {
   const key = getInvoiceKey(invoice);
   const selectedClass = selected ? ' is-selected' : '';
@@ -118,7 +122,7 @@ export function renderTripCard(state, trip, { writesEnabled = true } = {}) {
         ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key, pending })).join('') : '<div class="empty-dropzone">Select an invoice above, then assign it here.</div>'}
       </div>
       <div class="trip-actions"><span class="trip-subtotal"><strong>Enterprise ${counts.enterprise}</strong> · <strong>Sdn Bhd ${counts.sdn_bhd}</strong> · Combined ${counts.total}</span>
-        <button class="assign-selected-button" type="button" data-assign-selected="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Assign selected invoice to trip ${escapeHtml(trip.id)}">Assign selected invoice</button></div>
+        <span class="trip-action-buttons"><a class="future-print-button" data-print-items-trip="${escapeHtml(trip.id)}" href="${escapeHtml(loadingSheetHref(trip.id))}">Print Items</a><button class="assign-selected-button" type="button" data-assign-selected="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Assign selected invoice to trip ${escapeHtml(trip.id)}">Assign selected invoice</button></span></div>
     </article>`;
 }
 
@@ -191,6 +195,59 @@ async function getJson(fetchImpl, url, fallbackMessage) {
   return parseApiResponse(await fetchImpl(url, { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } }), fallbackMessage);
 }
 
+function businessDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date('invalid');
+  return new Date(`${value}T00:00:00+08:00`);
+}
+
+const REPORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-MY', {
+  timeZone: 'Asia/Kuala_Lumpur', day: '2-digit', month: 'short', year: 'numeric',
+});
+const REPORT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-MY', {
+  timeZone: 'Asia/Kuala_Lumpur', day: '2-digit', month: 'short', year: 'numeric',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+
+export function formatKualaLumpurDate(value) {
+  const date = businessDate(value);
+  return Number.isNaN(date.getTime()) ? '' : REPORT_DATE_FORMATTER.format(date);
+}
+
+export function formatKualaLumpurDateTime(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : REPORT_DATE_TIME_FORMATTER.format(date);
+}
+
+function reportQuery(filters, format) {
+  const params = new URLSearchParams({
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    company: filters.company || 'all',
+    format,
+  });
+  if (filters.driverId !== undefined && filters.driverId !== null && filters.driverId !== '') params.set('driver_id', String(filters.driverId));
+  if (filters.vehicleId !== undefined && filters.vehicleId !== null && filters.vehicleId !== '') params.set('lorry_id', String(filters.vehicleId));
+  if (filters.status) params.set('status', filters.status);
+  return params;
+}
+
+async function getCsv(fetchImpl, url, fallbackMessage) {
+  const response = await fetchImpl(url, { method: 'GET', credentials: 'same-origin', headers: { Accept: 'text/csv' } });
+  if (!response.ok) {
+    let payload = null;
+    try { payload = await response.json(); } catch { /* Generic error below is intentional. */ }
+    const code = response.status === 401 ? 'unauthorized' : (payload?.error?.code || 'request_failed');
+    const error = new Error(payload?.error?.message || fallbackMessage);
+    error.code = code;
+    error.status = response.status;
+    throw error;
+  }
+  return {
+    csv: await response.text(),
+    filename: response.headers?.get?.('Content-Disposition')?.match(/filename="?([^";]+)"?/i)?.[1] || 'dispatch-report.csv',
+  };
+}
+
 export function createFetchTransport({ fetchImpl = globalThis.fetch } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('a fetch implementation is required');
   return {
@@ -260,6 +317,20 @@ export function createAssignmentsTransport({ fetchImpl = globalThis.fetch } = {}
   };
 }
 
+export function createReportsTransport({ fetchImpl = globalThis.fetch } = {}) {
+  if (typeof fetchImpl !== 'function') throw new Error('a fetch implementation is required');
+  return {
+    async loadReport(filters) {
+      const params = reportQuery(filters, 'json');
+      return getJson(fetchImpl, `/api/dispatch/reports?${params.toString()}`, 'The report could not be loaded.');
+    },
+    async exportReport(filters) {
+      const params = reportQuery(filters, 'csv');
+      return getCsv(fetchImpl, `/api/dispatch/reports?${params.toString()}`, 'The report could not be exported.');
+    },
+  };
+}
+
 function resourceStatusLabel(resource) { return resource.active ? 'Active' : 'Inactive'; }
 
 function renderResource(resource, type) {
@@ -278,6 +349,58 @@ export function renderResources(root, resources) {
   if (lorryList) lorryList.innerHTML = (resources.lorries || []).map((resource) => renderResource(resource, 'lorry')).join('') || '<p class="empty-resource-list">No lorries in this view.</p>';
 }
 
+function renderTripOverview(root, state) {
+  const list = $(root, '#tripsOverviewList');
+  if (!list) return;
+  list.innerHTML = state.trips.length ? state.trips.map((trip) => {
+    const counts = getTripCompanyCounts(state, trip.id);
+    const driverName = trip.driver?.name || trip.driverName || 'Driver not set';
+    const lorryNumber = trip.lorry?.registrationNo || trip.registrationNo || 'Lorry not set';
+    return `<article class="trip-detail-card" data-trip-detail-id="${escapeHtml(trip.id)}">
+      <div class="trip-detail-heading"><div><p class="eyebrow">Trip ${escapeHtml(trip.id)}</p><h3>${escapeHtml(formatKualaLumpurDate(trip.tripDate) || trip.tripDate || 'Date not set')}</h3></div><span class="status-badge">${escapeHtml(trip.status || 'planned')}</span></div>
+      <dl class="trip-detail-meta"><div><dt>Driver</dt><dd>${escapeHtml(driverName)}</dd></div><div><dt>Lorry</dt><dd>${escapeHtml(lorryNumber)}</dd></div><div><dt>Invoices</dt><dd>Enterprise ${counts.enterprise} · Sdn Bhd ${counts.sdn_bhd} · Combined ${counts.total}</dd></div></dl>
+      <p class="trip-route">${escapeHtml(trip.routeNotes || 'Route notes not set')}</p>
+      <a class="future-print-button" data-print-items-trip="${escapeHtml(trip.id)}" href="${escapeHtml(loadingSheetHref(trip.id))}">Print Items</a>
+    </article>`;
+  }).join('') : '<div class="empty-dropzone">No persisted trips in this date view.</div>';
+}
+
+function reportCompanyBadge(companyKey) {
+  const className = companyKey === 'enterprise' ? 'enterprise' : 'sdn-bhd';
+  return `<span class="company-badge ${className}">${escapeHtml(COMPANY_BADGES[companyKey] || companyKey)}</span>`;
+}
+
+export function renderReportTable(root, reportRecords = []) {
+  const table = $(root, '#reportTable');
+  if (!table) return;
+  const body = table.querySelector('tbody');
+  if (!body) return;
+  body.innerHTML = reportRecords.length ? reportRecords.map((record) => `<tr>
+    <td><strong>Trip ${escapeHtml(record.tripId)}</strong><span class="report-secondary">${escapeHtml(record.tripStatus)}</span></td>
+    <td>${escapeHtml(formatKualaLumpurDate(record.tripDate) || record.tripDate)}</td>
+    <td>${reportCompanyBadge(record.companyKey)}</td>
+    <td><strong>${escapeHtml(record.docNo)}</strong><span class="report-secondary">${escapeHtml(record.invoiceId)}</span></td>
+    <td><strong>${escapeHtml(record.customer?.name)}</strong><span class="report-secondary">${escapeHtml(record.customer?.code)}</span></td>
+    <td>${escapeHtml(record.driver?.name)}<span class="report-secondary">${escapeHtml(record.lorry?.registrationNo)}</span></td>
+    <td><strong>${escapeHtml(record.assignmentStatus)}</strong><span class="report-secondary">Updated ${escapeHtml(formatKualaLumpurDateTime(record.updatedAt))}</span></td>
+  </tr>`).join('') : '<tr><td colspan="7">No persisted records match these filters.</td></tr>';
+}
+
+function renderReportView(root, reportState) {
+  const state = $(root, '#reportState');
+  if (state) {
+    state.textContent = reportState.status === 'loading' ? 'Loading persisted report records…'
+      : reportState.status === 'error' ? 'The report could not be loaded. Check the filters and retry.'
+        : reportState.status === 'ready' ? `${reportState.records.length} persisted record${reportState.records.length === 1 ? '' : 's'} loaded.`
+          : 'Choose filters and load a report.';
+  }
+  renderReportTable(root, reportState.records);
+  const loadButton = $(root, '#loadReportButton');
+  const exportButton = $(root, '#exportReportButton');
+  if (loadButton) loadButton.disabled = reportState.status === 'loading';
+  if (exportButton) exportButton.disabled = reportState.status === 'loading';
+}
+
 export function createDispatchApp({
   documentRef = globalThis.document,
   transport = createFetchTransport(),
@@ -285,6 +408,7 @@ export function createDispatchApp({
   resourcesTransport = createResourceTransport(),
   tripsTransport = createTripsTransport(),
   assignmentsTransport = createAssignmentsTransport(),
+  reportsTransport = createReportsTransport(),
 } = {}) {
   if (!documentRef) throw new Error('a document is required');
   const root = documentRef.querySelector('#dispatchApp');
@@ -296,6 +420,8 @@ export function createDispatchApp({
   let boardAuthoritative = false;
   let mutationInFlight = false;
   let boardLoadQueued = false;
+  let reportRequestSequence = 0;
+  let reportState = { status: 'idle', records: [] };
   let authenticated = !$(root, '#loginView') || !$(root, '#authenticatedView');
   let session = null;
   let dialogInvoker = null;
@@ -306,17 +432,18 @@ export function createDispatchApp({
   const resourceForm = $(root, '#resourceForm'); const resourceType = $(root, '#resourceType'); const resourceStatus = $(root, '#resourceStatus');
   const resourceSubmit = $(root, '#resourceSubmit'); const showInactiveResources = $(root, '#showInactiveResources');
   const tripDialogBackdrop = $(root, '#tripDialogBackdrop'); const tripForm = $(root, '#tripForm');
+  const reportForm = $(root, '#reportForm'); const exportReportButton = $(root, '#exportReportButton');
 
   function online() { return globalThis.navigator?.onLine !== false; }
   function writesEnabled() { return authenticated && online() && boardAuthoritative && !mutationInFlight && !state.pendingMove; }
   function setAuthenticated(next, nextSession = null) { authenticated = next; session = next ? nextSession : null; if (loginView) loginView.hidden = next; if (authenticatedView) authenticatedView.hidden = !next; root.dataset.authenticated = String(next); }
   function setLoginMessage(message) { if (loginMessage) loginMessage.textContent = message; }
   function setResourceMessage(message) { if (resourceStatus) resourceStatus.textContent = message; }
-  function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled() }); updateWriteControls(); updateOfflineStatus(); }
+  function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled() }); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
   function updateWriteControls() { const enabled = writesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
-  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; boardAuthoritative = false; state = createDispatchState({ boardStatus: 'empty' }); resources = { drivers: [], lorries: [] }; setAuthenticated(false); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
+  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; state = createDispatchState({ boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; setAuthenticated(false); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
   function handleSessionLoss() { clearSensitiveState(); setLoginMessage('Your session has expired. Sign in again.'); setResourceMessage('Your session has expired. Sign in again.'); }
 
   async function runMutation(operation) {
@@ -369,9 +496,9 @@ export function createDispatchApp({
     try {
       const result = await resourcesTransport.loadResources({ active });
       if (requestSequence !== resourceRequestSequence || !authenticated || (boardSequence !== null && boardSequence !== boardRequestSequence)) return null;
-      resources = normalizeResources(result);
-      state = { ...state, trips: state.trips.map((trip) => ({ ...trip, driver: trip.driver || resources.drivers.find((row) => String(row.id) === String(trip.driverId)), lorry: trip.lorry || resources.lorries.find((row) => String(row.id) === String(trip.vehicleId)) })) };
-      renderResources(root, resources); renderTripFormOptions(); render(); setResourceMessage('Resources loaded.'); return result;
+       resources = normalizeResources(result);
+       state = { ...state, trips: state.trips.map((trip) => ({ ...trip, driver: trip.driver || resources.drivers.find((row) => String(row.id) === String(trip.driverId)), lorry: trip.lorry || resources.lorries.find((row) => String(row.id) === String(trip.vehicleId)) })) };
+       renderResources(root, resources); renderTripFormOptions(); renderReportFilterOptions(); render(); setResourceMessage('Resources loaded.'); return result;
     } catch (error) {
       if (requestSequence !== resourceRequestSequence || !authenticated || (boardSequence !== null && boardSequence !== boardRequestSequence)) return null;
       if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resources could not be loaded. Try again.'); throw error;
@@ -402,6 +529,19 @@ export function createDispatchApp({
     if (driverSelect) driverSelect.innerHTML = resources.drivers.filter((row) => row.active !== false).map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)} · ${escapeHtml(row.licenseNo)}</option>`).join('');
     if (vehicleSelect) vehicleSelect.innerHTML = resources.lorries.filter((row) => row.active !== false).map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.registrationNo)}</option>`).join('');
   }
+  function renderReportFilterOptions() {
+    const driverSelect = $(root, '#reportDriver'); const lorrySelect = $(root, '#reportLorry');
+    if (driverSelect) {
+      const selected = driverSelect.value;
+      driverSelect.innerHTML = `<option value="">All drivers</option>${resources.drivers.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)} · ${escapeHtml(row.licenseNo)}</option>`).join('')}`;
+      driverSelect.value = selected;
+    }
+    if (lorrySelect) {
+      const selected = lorrySelect.value;
+      lorrySelect.innerHTML = `<option value="">All lorries</option>${resources.lorries.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.registrationNo)}</option>`).join('')}`;
+      lorrySelect.value = selected;
+    }
+  }
   async function openTripDialog(button) { if (!writesEnabled()) return; dialogInvoker = button; if (!resources.drivers.length || !resources.lorries.length) await loadResources(); renderTripFormOptions(); $(root, '#tripDialogMessage').textContent = ''; if (tripDialogBackdrop) tripDialogBackdrop.hidden = false; $(root, '#tripDriver')?.focus?.(); }
   function closeTripDialog() { if (tripDialogBackdrop) tripDialogBackdrop.hidden = true; dialogInvoker?.focus?.(); dialogInvoker = null; }
   async function createTrip() {
@@ -413,6 +553,77 @@ export function createDispatchApp({
       catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else $(root, '#tripDialogMessage').textContent = 'The trip could not be created. Try again.'; throw error; }
       finally { if (submit) submit.disabled = false; }
     });
+  }
+
+  function currentReportFilters() {
+    return {
+      startDate: $(root, '#reportStartDate')?.value || '',
+      endDate: $(root, '#reportEndDate')?.value || '',
+      company: $(root, '#reportCompany')?.value || 'all',
+      driverId: $(root, '#reportDriver')?.value || null,
+      vehicleId: $(root, '#reportLorry')?.value || null,
+      status: $(root, '#reportStatus')?.value || null,
+    };
+  }
+
+  async function loadReports() {
+    if (!authenticated || typeof reportsTransport?.loadReport !== 'function') return null;
+    const requestSequence = ++reportRequestSequence;
+    const filters = currentReportFilters();
+    const filterKey = JSON.stringify(filters);
+    reportState = { status: 'loading', records: [], filters, filterKey };
+    render();
+    try {
+      const result = await reportsTransport.loadReport(filters);
+      if (requestSequence !== reportRequestSequence || !authenticated) return null;
+      const records = Array.isArray(result?.records) ? result.records : [];
+      reportState = { status: 'ready', records, filters, filterKey };
+      render();
+      return result;
+    } catch (error) {
+      if (requestSequence !== reportRequestSequence || !authenticated) return null;
+      if (error.code === 'unauthorized') handleSessionLoss();
+      else { reportState = { status: 'error', records: [], filters, filterKey }; render(); }
+      throw error;
+    }
+  }
+
+  async function openReports() {
+    if (!authenticated) return null;
+    try {
+      if (!resources.drivers.length && !resources.lorries.length) {
+        try { await loadResources(); } catch (error) { if (error.code === 'unauthorized') throw error; }
+      }
+      return await loadReports();
+    } catch (error) {
+      if (error.code !== 'unauthorized') {
+        reportState = { status: 'error', records: [], filters: currentReportFilters(), filterKey: '' };
+        render();
+      }
+      throw error;
+    }
+  }
+
+  async function exportReport() {
+    if (!authenticated || typeof reportsTransport?.exportReport !== 'function') return null;
+    const filters = currentReportFilters();
+    const filterKey = JSON.stringify(filters);
+    if (reportState.status !== 'ready' || reportState.filterKey !== filterKey) await loadReports();
+    const result = await reportsTransport.exportReport(filters);
+    const BlobConstructor = globalThis.Blob;
+    const URLConstructor = globalThis.URL;
+    if (!BlobConstructor || !URLConstructor?.createObjectURL || !documentRef.createElement) return result;
+    const url = URLConstructor.createObjectURL(new BlobConstructor([result.csv], { type: 'text/csv;charset=utf-8' }));
+    const link = documentRef.createElement('a');
+    link.href = url;
+    link.download = result.filename || 'dispatch-report.csv';
+    link.className = 'report-download-link';
+    link.hidden = true;
+    documentRef.body?.appendChild?.(link);
+    link.click();
+    link.remove?.();
+    globalThis.setTimeout?.(() => URLConstructor.revokeObjectURL?.(url), 0);
+    return result;
   }
 
   function focusAssignmentReplacement({ invoiceKey, tripId, preferTrip }) {
@@ -455,9 +666,10 @@ export function createDispatchApp({
   async function initializeSession() { if (!loginView || !authenticatedView || !loginForm) return; setAuthenticated(false); setLoginMessage('Checking sign-in…'); try { const result = await sessionTransport.getSession(); if (result?.authenticated && result.session) { setAuthenticated(true, result.session); setLoginMessage(''); await loadBoard(); } else setLoginMessage('Sign in to continue.'); } catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setLoginMessage('Sign-in is temporarily unavailable. Try again.'); } }
   function activateTab(tabName, { focus = false } = {}) { root.querySelectorAll('[role="tab"]').forEach((tab) => { const active = tab.dataset.tab === tabName; tab.classList.toggle('is-active', active); tab.setAttribute('aria-selected', String(active)); tab.setAttribute('tabindex', active ? '0' : '-1'); if (active && focus) tab.focus(); }); root.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = panel.id !== `${tabName}View`; }); }
 
-  root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => { activateTab(tab.dataset.tab); if (tab.dataset.tab === 'resources' && authenticated) loadResources().catch(() => {}); }));
+  root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => { activateTab(tab.dataset.tab); if (tab.dataset.tab === 'resources' && authenticated) loadResources().catch(() => {}); if (tab.dataset.tab === 'reports' && authenticated) openReports().catch(() => {}); }));
   $(root, '#companyFilter')?.addEventListener('change', (event) => { setState(setCompanyFilter(state, event.target.value)); loadBoard().catch(() => {}); });
   $(root, '#refreshBoard')?.addEventListener('click', () => loadBoard().catch(() => {}));
+  $(root, '#refreshTrips')?.addEventListener('click', () => loadBoard().catch(() => {}));
   $(root, '#logoutButton')?.addEventListener('click', () => logout().catch(() => {}));
   $(root, '#newTripButton')?.addEventListener('click', (event) => openTripDialog(event.currentTarget).catch((error) => { if (error.code !== 'unauthorized') $(root, '#statusMessage').textContent = 'Resources could not be loaded. Try again.'; }));
   $(root, '#closeTripDialog')?.addEventListener('click', closeTripDialog);
@@ -465,6 +677,8 @@ export function createDispatchApp({
   loginForm?.addEventListener('submit', (event) => { event.preventDefault(); login().catch(() => {}); });
   resourceForm?.addEventListener('submit', (event) => { event.preventDefault(); submitResource().catch(() => {}); });
   tripForm?.addEventListener('submit', (event) => { event.preventDefault(); createTrip().catch(() => {}); });
+  reportForm?.addEventListener('submit', (event) => { event.preventDefault(); loadReports().catch(() => {}); });
+  exportReportButton?.addEventListener('click', () => exportReport().catch((error) => { if (error.code === 'unauthorized') handleSessionLoss(); else { const status = $(root, '#reportState'); if (status) status.textContent = 'The report could not be exported. Try again.'; } }));
   resourceType?.addEventListener('change', updateResourceTypeFields); showInactiveResources?.addEventListener('change', () => loadResources().catch(() => {}));
 
   root.addEventListener('click', (event) => {
@@ -479,7 +693,7 @@ export function createDispatchApp({
   root.addEventListener('keydown', (event) => { const tab = event.target.closest?.('[role="tab"]'); if (tab) { const tabs = [...root.querySelectorAll('[role="tab"]')]; const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length); if (nextIndex !== null) { event.preventDefault(); activateTab(tabs[nextIndex].dataset.tab, { focus: true }); } return; } const assign = event.target.closest?.('[data-assign-selected], [data-assign-invoice]'); if (assign && event.key === 'Enter') { event.preventDefault(); assign.click(); } });
   globalThis.addEventListener?.('online', render); globalThis.addEventListener?.('offline', render);
   activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
-  return { getState: () => state, getSession: () => session, loadBoard, loadResources, assignInvoice, render, activateTab, login, logout };
+  return { getState: () => state, getSession: () => session, loadBoard, loadResources, loadReports, exportReport, assignInvoice, render, activateTab, login, logout };
 }
 
 if (typeof document !== 'undefined') window.addEventListener('DOMContentLoaded', () => { window.dispatchApp = createDispatchApp(); }, { once: true });
