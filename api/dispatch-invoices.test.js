@@ -139,6 +139,25 @@ test('adapter consumes all pages, excludes cancelled invoices, and keeps exact i
   );
 });
 
+test('adapter accepts AutoCount isCancelled and uom aliases while keeping authoritative validation', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const source = enterpriseFixture.data[0];
+  const aliasRow = {
+    ...source,
+    master: { ...source.master, cancelled: undefined, isCancelled: false },
+    details: source.details.map((detail) => ({ ...detail, unit: undefined, uom: 'CTN' })),
+  };
+  const client = fakeClient({
+    enterprise: [{ data: [aliasRow], totalCount: 1 }],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+
+  const [invoice] = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+  assert.equal(invoice.cancelled, false);
+  assert.equal(invoice.items[0].uom, 'CTN');
+});
+
 test('adapter follows pagination until totalCount is reached', async () => {
   const configs = loadCompanyConfigs(ENV);
   const first = enterpriseFixture.data[0];
