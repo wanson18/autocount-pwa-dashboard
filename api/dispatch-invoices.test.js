@@ -158,6 +158,25 @@ test('adapter accepts AutoCount isCancelled and uom aliases while keeping author
   assert.equal(invoice.items[0].uom, 'CTN');
 });
 
+test('adapter accepts numeric AutoCount cancellation flags preserved by the lossless client', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const source = enterpriseFixture.data[0];
+  const numericFlagRow = {
+    ...source,
+    master: { ...source.master, cancelled: undefined, isCancelled: 0 },
+    details: source.details.map((detail) => ({ ...detail, unit: undefined, uom: 'CTN' })),
+  };
+  const client = fakeClient({
+    enterprise: [{ data: [numericFlagRow], totalCount: 1 }],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+
+  const [invoice] = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+  assert.equal(invoice.cancelled, false);
+  assert.equal(invoice.items[0].uom, 'CTN');
+});
+
 test('adapter follows pagination until totalCount is reached', async () => {
   const configs = loadCompanyConfigs(ENV);
   const first = enterpriseFixture.data[0];
