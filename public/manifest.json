@@ -1,6 +1,6 @@
 {
-  "name": "AutoCount Sales Dashboard",
-  "short_name": "Sales Dashboard",
+  "name": "Wanson Companies AutoCount Sales Dashboard",
+  "short_name": "Wanson Companies",
   "description": "AutoCount Sales Invoice Dashboard - iPhone PWA",
   "start_url": "/",
   "display": "standalone",

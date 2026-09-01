@@ -51,21 +51,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.url.includes('/api/')) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, clone);
-            });
-          }
-          return response;
-        })
-        .catch(() => {
-          return caches.match(request);
-        }),
-    );
+    // Sales data must never fall back to an unlabelled stale response.
+    // Static assets remain offline-capable below; API failures stay visible.
+    event.respondWith(fetch(request, { cache: 'no-store' }));
   } else {
     event.respondWith(
       caches.match(request).then((cached) => {

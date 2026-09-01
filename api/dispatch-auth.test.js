@@ -441,6 +441,10 @@ test('deployment configuration keeps dispatch credentials server-side and dispat
   assert.ok(dispatchHeaders.some((entry) => entry.headers.some((header) => (
     header.key === 'Cache-Control' && header.value === 'no-store'
   ))));
+  const salesHeaders = vercel.headers.filter((entry) => entry.source === '/api/sales');
+  assert.ok(salesHeaders.some((entry) => entry.headers.some((header) => (
+    header.key === 'Cache-Control' && header.value.includes('no-store')
+  ))));
 });
 
 test('service worker never caches or replays protected dispatch API responses', () => {

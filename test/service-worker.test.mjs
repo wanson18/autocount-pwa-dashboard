@@ -24,8 +24,8 @@ function loadServiceWorker() {
     Request,
     Response,
     Promise,
-    fetch: async (request) => {
-      fetchedRequests.push(request);
+    fetch: async (request, options) => {
+      fetchedRequests.push({ request, options });
       return { ok: true, clone: () => ({}) };
     },
     caches: {
@@ -78,6 +78,20 @@ test('dispatch API requests stay network-only and never enter the static/API cac
   });
   await responsePromise;
   assert.equal(worker.fetchedRequests.length, 1);
+  assert.equal(worker.putRequests.length, 0);
+  assert.equal(worker.openedCaches.length, 0);
+});
+
+test('sales API requests stay network-only and do not replay cached invoice data', async () => {
+  const worker = loadServiceWorker();
+  let responsePromise;
+  worker.listeners.get('fetch')({
+    request: new Request('https://dispatch.example/api/sales?startDate=2026-09-01&endDate=2026-09-01', { method: 'GET' }),
+    respondWith(promise) { responsePromise = promise; },
+  });
+  await responsePromise;
+  assert.equal(worker.fetchedRequests.length, 1);
+  assert.equal(worker.fetchedRequests[0].options.cache, 'no-store');
   assert.equal(worker.putRequests.length, 0);
   assert.equal(worker.openedCaches.length, 0);
 });
