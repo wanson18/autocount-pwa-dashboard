@@ -25,7 +25,7 @@ function requestError(res, message) {
   return sendError(res, 400, 'invalid_request', message);
 }
 
-function createDispatchInvoicesHandler({ adapter, configs, getSession, env = process.env, now } = {}) {
+function createDispatchInvoicesHandler({ adapter, configs, getSession, env = process.env, now, logger = console } = {}) {
   return async function dispatchInvoices(req, res) {
     if (req.method === 'OPTIONS') {
       if (typeof res.setHeader === 'function') res.setHeader('Allow', 'GET, OPTIONS');
@@ -59,6 +59,13 @@ function createDispatchInvoicesHandler({ adapter, configs, getSession, env = pro
           return [key, { status: 'ok', invoiceCount: invoices.length }, invoices];
         } catch (error) {
           const integrityError = error && ['duplicate_doc_key', 'invalid_source_data'].includes(error.code);
+          if (integrityError) {
+            logger?.warn?.('Dispatch invoice source rejected', {
+              company: key,
+              code: error.code,
+              reason: error.message,
+            });
+          }
           return [
             key,
             integrityError

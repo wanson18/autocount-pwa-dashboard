@@ -384,6 +384,31 @@ test('endpoint preserves integrity error health separately from source outage he
   });
 });
 
+test('endpoint logs only redacted source rejection diagnostics', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const logs = [];
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({
+    adapter: {
+      async listInvoices() {
+        const error = new Error('debtorCode is missing or invalid');
+        error.code = 'invalid_source_data';
+        throw error;
+      },
+    },
+    configs,
+    logger: { warn: (...args) => logs.push(args) },
+  }));
+  const res = responseRecorder();
+
+  await handler({ method: 'GET', query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'enterprise' } }, res);
+
+  assert.deepEqual(logs, [[
+    'Dispatch invoice source rejected',
+    { company: 'enterprise', code: 'invalid_source_data', reason: 'debtorCode is missing or invalid' },
+  ]]);
+  assert.equal(JSON.stringify(res.body).includes('debtorCode'), false);
+});
+
 test('single-company endpoint does not fetch the other company', async () => {
   const configs = loadCompanyConfigs(ENV);
   const seen = [];
