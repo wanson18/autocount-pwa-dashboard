@@ -177,6 +177,23 @@ test('adapter accepts numeric AutoCount cancellation flags preserved by the loss
   assert.equal(invoice.items[0].uom, 'CTN');
 });
 
+test('adapter normalizes an AutoCount timestamp document date to the business date', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const source = enterpriseFixture.data[0];
+  const timestampRow = {
+    ...source,
+    master: { ...source.master, docDate: '2026-08-28T00:00:00' },
+  };
+  const client = fakeClient({
+    enterprise: [{ data: [timestampRow], totalCount: 1 }],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+
+  const [invoice] = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+  assert.equal(invoice.docDate, '2026-08-28');
+});
+
 test('adapter follows pagination until totalCount is reached', async () => {
   const configs = loadCompanyConfigs(ENV);
   const first = enterpriseFixture.data[0];
