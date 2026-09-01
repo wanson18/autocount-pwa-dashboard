@@ -1,10 +1,10 @@
 import {
   COMPANY_NAMES,
   COMPANY_FILTERS,
-  DEFAULT_DATE_RANGE,
   createDispatchState,
   beginOptimisticMove,
   getCompanyFilterLabel,
+  getDefaultDateRange,
   getInvoiceKey,
   getSourceMessage,
   isCurrentEligibleUnassignedInvoice,
@@ -156,6 +156,10 @@ export function renderDispatchBoard(root, state, { writesEnabled = true } = {}) 
     ? unassigned.map((invoice) => renderInvoiceCard(invoice, { selected: state.selectedInvoiceKey === invoice.key, pending: Boolean(state.pendingMove), writesEnabled })).join('')
     : '<div class="empty-dropzone">No unassigned invoices in this company view.</div>';
   if (tripList) tripList.innerHTML = state.trips.map((trip) => renderTripCard(state, trip, { writesEnabled })).join('');
+  const boardDateLabel = $(root, '#boardDateLabel');
+  if (boardDateLabel && state.dateRange?.startDate) {
+    boardDateLabel.textContent = formatKualaLumpurDate(state.dateRange.startDate) || state.dateRange.startDate;
+  }
   const sourceStatus = $(root, '#sourceStatus');
   if (sourceStatus) sourceStatus.textContent = getSourceMessage(state.sources);
   const boardState = $(root, '#boardState');
@@ -251,7 +255,13 @@ async function getCsv(fetchImpl, url, fallbackMessage) {
 export function createFetchTransport({ fetchImpl = globalThis.fetch } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('a fetch implementation is required');
   return {
-    async loadBoard({ startDate = DEFAULT_DATE_RANGE.startDate, endDate = DEFAULT_DATE_RANGE.endDate, company = 'all' } = {}) {
+    async loadBoard(options = {}) {
+      const defaultDateRange = getDefaultDateRange();
+      const {
+        startDate = defaultDateRange.startDate,
+        endDate = defaultDateRange.endDate,
+        company = 'all',
+      } = options;
       if (!COMPANY_FILTERS.includes(company)) throw new Error(`invalid company filter: ${company}`);
       const invoiceQuery = new URLSearchParams({ startDate, endDate, company });
       const tripQuery = new URLSearchParams({ startDate, endDate });
@@ -401,6 +411,21 @@ function renderReportView(root, reportState) {
   if (exportButton) exportButton.disabled = reportState.status === 'loading';
 }
 
+function syncDefaultDateControls(root, dateRange = getDefaultDateRange()) {
+  const formattedDate = formatKualaLumpurDate(dateRange.startDate) || dateRange.startDate;
+  const updatedAt = $(root, '#updatedAt');
+  if (updatedAt) {
+    updatedAt.setAttribute('datetime', dateRange.startDate);
+    updatedAt.textContent = formattedDate;
+  }
+  const reportStartDate = $(root, '#reportStartDate');
+  const reportEndDate = $(root, '#reportEndDate');
+  if (reportStartDate) reportStartDate.value = dateRange.startDate;
+  if (reportEndDate) reportEndDate.value = dateRange.endDate;
+  const tripDialogHelp = $(root, '#tripDialogHelp');
+  if (tripDialogHelp) tripDialogHelp.textContent = `Choose an active driver and lorry for ${formattedDate}.`;
+}
+
 export function createDispatchApp({
   documentRef = globalThis.document,
   transport = createFetchTransport(),
@@ -413,7 +438,8 @@ export function createDispatchApp({
   if (!documentRef) throw new Error('a document is required');
   const root = documentRef.querySelector('#dispatchApp');
   if (!root) throw new Error('dispatch app root is required');
-  let state = createDispatchState();
+  const initialDateRange = getDefaultDateRange();
+  let state = createDispatchState({ dateRange: initialDateRange });
   let resources = { drivers: [], lorries: [] };
   let boardRequestSequence = 0;
   let resourceRequestSequence = 0;
@@ -469,7 +495,8 @@ export function createDispatchApp({
     boardAuthoritative = false;
     state = { ...state, boardStatus: 'loading', statusMessage: preserveMessage ? previousMessage : 'Loading the authenticated Board…' }; render();
     try {
-      const board = await transport.loadBoard({ startDate: DEFAULT_DATE_RANGE.startDate, endDate: DEFAULT_DATE_RANGE.endDate, company: requestedCompany });
+      const dateRange = getDefaultDateRange();
+      const board = await transport.loadBoard({ startDate: dateRange.startDate, endDate: dateRange.endDate, company: requestedCompany });
       if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
       let boardResources = resources;
       if ((board.trips || []).some(tripNeedsResourceJoin)) {
@@ -547,7 +574,7 @@ export function createDispatchApp({
   async function createTrip() {
     if (!writesEnabled()) return;
     return runMutation(async () => {
-      const body = { trip_date: DEFAULT_DATE_RANGE.startDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
+      const body = { trip_date: getDefaultDateRange().startDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
       const submit = $(root, '#createTripSubmit'); if (submit) submit.disabled = true; $(root, '#tripDialogMessage').textContent = 'Creating trip…';
       try { await tripsTransport.createTrip(body); closeTripDialog(); state.statusMessage = 'Trip created.'; await loadBoard({ preserveMessage: true, allowDuringMutation: true }); return true; }
       catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else $(root, '#tripDialogMessage').textContent = 'The trip could not be created. Try again.'; throw error; }
@@ -692,7 +719,7 @@ export function createDispatchApp({
   root.addEventListener('drop', (event) => { const zone = event.target.closest?.('[data-drop-trip-id]'); if (!zone) return; event.preventDefault(); const invoiceKey = event.dataTransfer?.getData('text/plain'); if (invoiceKey) assignInvoice(invoiceKey, zone.dataset.dropTripId, zone).catch(() => {}); });
   root.addEventListener('keydown', (event) => { const tab = event.target.closest?.('[role="tab"]'); if (tab) { const tabs = [...root.querySelectorAll('[role="tab"]')]; const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length); if (nextIndex !== null) { event.preventDefault(); activateTab(tabs[nextIndex].dataset.tab, { focus: true }); } return; } const assign = event.target.closest?.('[data-assign-selected], [data-assign-invoice]'); if (assign && event.key === 'Enter') { event.preventDefault(); assign.click(); } });
   globalThis.addEventListener?.('online', render); globalThis.addEventListener?.('offline', render);
-  activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
+  syncDefaultDateControls(root, initialDateRange); activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
   return { getState: () => state, getSession: () => session, loadBoard, loadResources, loadReports, exportReport, assignInvoice, render, activateTab, login, logout };
 }
 

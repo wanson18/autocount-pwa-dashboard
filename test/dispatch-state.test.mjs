@@ -76,6 +76,31 @@ test('production state starts empty instead of presenting the approved fixture a
   assert.deepEqual(state.sources, {});
 });
 
+test('Dispatch default date follows the Kuala Lumpur business date across UTC midnight', () => {
+  assert.equal(typeof dispatchState.getDefaultDateRange, 'function');
+  assert.deepEqual(
+    dispatchState.getDefaultDateRange(new Date('2026-08-31T15:59:59.000Z')),
+    { startDate: '2026-08-31', endDate: '2026-08-31' },
+  );
+  assert.deepEqual(
+    dispatchState.getDefaultDateRange(new Date('2026-08-31T16:00:00.000Z')),
+    { startDate: '2026-09-01', endDate: '2026-09-01' },
+  );
+});
+
+test('Sales Dashboard provides a same-origin route back to Dispatch', () => {
+  const salesHtml = fs.readFileSync(path.resolve('public/index.html'), 'utf8');
+
+  assert.match(salesHtml, /href="\/dispatch\.html"/);
+  assert.match(salesHtml, /Delivery Dispatch/);
+});
+
+test('Dispatch report date inputs are populated at runtime instead of the fixture date', () => {
+  const dispatchHtml = fs.readFileSync(path.resolve('public/dispatch.html'), 'utf8');
+
+  assert.doesNotMatch(dispatchHtml, /value="2026-08-28"/);
+});
+
 test('authenticated Board initialization joins ID-only trips from the protected resource response', async () => {
   const fake = createFakeDispatchDocument({ protectedShell: true });
   let resourceReads = 0;
@@ -539,7 +564,8 @@ test('refresh keeps the selected company in the control, badge, state, and trans
 
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(calls, [{ startDate: '2026-08-28', endDate: '2026-08-28', company: 'sdn_bhd' }]);
+  const expectedDate = dispatchState.getDefaultDateRange().startDate;
+  assert.deepEqual(calls, [{ startDate: expectedDate, endDate: expectedDate, company: 'sdn_bhd' }]);
   assert.equal(app.getState().companyFilter, 'sdn_bhd');
   assert.equal(fake.companyFilter.value, 'sdn_bhd');
   assert.equal(fake.queueKey.textContent, 'SDN BHD');

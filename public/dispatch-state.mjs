@@ -6,7 +6,25 @@ export const COMPANY_FILTER_LABELS = {
   sdn_bhd: 'SDN BHD',
 };
 export const TAB_NAMES = ['board', 'trips', 'reports', 'resources'];
-export const DEFAULT_DATE_RANGE = { startDate: '2026-08-28', endDate: '2026-08-28' };
+
+const KUALA_LUMPUR_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kuala_Lumpur',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function formatDateParts(parts) {
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function getDefaultDateRange(now = new Date()) {
+  const date = formatDateParts(KUALA_LUMPUR_DATE_FORMATTER.formatToParts(now));
+  return { startDate: date, endDate: date };
+}
+
+export const DEFAULT_DATE_RANGE = getDefaultDateRange();
 
 export const COMPANY_NAMES = {
   enterprise: 'Wanson Enterprise',
