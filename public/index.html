@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#3b82f6" />
-    <title>AutoCount Sales Dashboard</title>
+    <title>Wanson Companies — AutoCount Sales Dashboard</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -116,7 +116,7 @@
               d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
             />
           </svg>
-          <h1 class="text-lg font-bold">Sales Dashboard</h1>
+          <h1 class="text-lg font-bold">Wanson Companies</h1>
         </div>
         <div class="flex items-center gap-3">
           <div id="statusIndicator" class="flex items-center gap-1 text-xs text-slate-400">
@@ -142,6 +142,7 @@
       </header>
 
       <div id="lastUpdated" class="text-xs text-slate-500 mt-2 text-right">Last updated: --</div>
+      <div id="companyCoverage" class="text-[10px] text-slate-400 mt-2" aria-live="polite">Loading both company books…</div>
 
       <!-- ===== Today's Payments ===== -->
       <section class="panel mt-4 p-3">
@@ -154,7 +155,7 @@
               d="M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14l-3-2-3 2-3-2-3 2-3-2-3 2V5a2 2 0 012-2z"
             />
           </svg>
-          <span class="text-xs font-semibold text-slate-300">Today's Payments</span>
+          <span class="text-xs font-semibold text-slate-300">Today's Payments · Both Books</span>
         </div>
 
         <div id="paymentSkeleton" class="space-y-2">
@@ -338,6 +339,7 @@
       let allSKUData = [];
       let currentStartDate = '';
       let currentEndDate = '';
+      let requestSequence = 0;
 
       /* ------------------------------ Utils ---------------------------------- */
 
@@ -376,6 +378,13 @@
 
       function formatTime(date = new Date()) {
         return date.toLocaleTimeString();
+      }
+
+      function formatSourceTimestamp(timestamp) {
+        if (!timestamp) return 'unknown';
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return 'unknown';
+        return date.toLocaleString('en-MY', { dateStyle: 'medium', timeStyle: 'short' });
       }
 
       const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -441,23 +450,46 @@
 
       /* ------------------------------ Network -------------------------------- */
 
+      async function requestSales(startDate, endDate) {
+        const res = await fetch(`/api/sales?startDate=${startDate}&endDate=${endDate}`, { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          const error = new Error(data.error || `Request failed with status ${res.status}`);
+          error.responseData = data;
+          throw error;
+        }
+        return data;
+      }
+
       async function fetchData(startDate, endDate) {
         const btn = $('refreshBtn');
         const start = startDate || todayISO();
         const end = endDate || todayISO();
+        const requestId = ++requestSequence;
+        const today = todayISO();
 
         btn.classList.add('animate-spin');
         try {
-          const res = await fetch(`/api/sales?startDate=${start}&endDate=${end}`);
-          if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+          const rangeRequest = requestSales(start, end);
+          const todayRequest = start === today && end === today ? rangeRequest : requestSales(today, today);
+          const [rangeResult, todayResult] = await Promise.allSettled([rangeRequest, todayRequest]);
 
-          const data = await res.json();
-          if (!data.success) throw new Error(data.error || 'Request was not successful');
+          if (requestId !== requestSequence) return;
 
-          renderDashboard(data);
-        } catch (error) {
-          console.error('Fetch error:', error);
-          $('lastUpdated').textContent = `Update failed at ${formatTime()} — showing last known data`;
+          if (rangeResult.status === 'fulfilled') {
+            renderDashboard(rangeResult.value);
+          } else {
+            console.error('Fetch error:', rangeResult.reason);
+            renderCompanyCoverage(rangeResult.reason.responseData);
+            $('lastUpdated').textContent = `Update failed at ${formatTime()} — no combined data loaded`;
+          }
+
+          if (todayResult.status === 'fulfilled') {
+            renderTodayPayments(todayResult.value.invoices || [], todayResult.value.paymentSummary);
+          } else {
+            console.error('Today payments fetch error:', todayResult.reason);
+            renderTodayPaymentsError();
+          }
         } finally {
           btn.classList.remove('animate-spin');
         }
@@ -468,7 +500,8 @@
       function renderDashboard(data) {
         const breakdown = data.skuBreakdown || [];
 
-        renderTimestamp(data.dateRange);
+        renderTimestamp(data.dateRange, data.timestamp, data.complete);
+        renderCompanyCoverage(data);
         renderKPIs(data.kpis || {});
         renderTable(breakdown);
 
@@ -482,14 +515,42 @@
         }
       }
 
-      function renderTimestamp(dateRange) {
+      function renderTimestamp(dateRange, timestamp, complete = true) {
         if (!dateRange) {
           $('lastUpdated').textContent = `Last updated: ${formatTime()}`;
           return;
         }
         const { startDate, endDate } = dateRange;
         const label = startDate === endDate ? startDate : `${startDate} to ${endDate}`;
-        $('lastUpdated').textContent = `Viewing: ${label} | Updated: ${formatTime()}`;
+        const coverage = complete ? '' : 'PARTIAL · ';
+        $('lastUpdated').textContent = `${coverage}Viewing: ${label} | Source updated: ${formatSourceTimestamp(timestamp)}`;
+      }
+
+      function renderCompanyCoverage(data) {
+        const coverageEl = $('companyCoverage');
+        if (!coverageEl) return;
+
+        const companies = Array.isArray(data?.companies) ? data.companies : [];
+        if (companies.length === 0) {
+          coverageEl.className = 'text-[10px] text-red-400 mt-2';
+          coverageEl.textContent = data?.error || 'Both company books are unavailable';
+          return;
+        }
+
+        const allUnavailable = companies.every((company) => company.status !== 'ok');
+        coverageEl.className = `${data.complete ? 'text-slate-400' : 'text-red-400'} text-[10px] mt-2`;
+        const label = data.complete
+          ? 'Both books loaded'
+          : allUnavailable
+            ? 'NO DATA — both books unavailable'
+            : 'PARTIAL DATA — check the unavailable book';
+        const details = companies
+          .map((company) => {
+            const value = company.status === 'ok' ? `${formatNumber(company.invoiceCount)} invoices` : company.error;
+            return `${escapeHtml(company.name)}: ${escapeHtml(value)}`;
+          })
+          .join(' · ');
+        coverageEl.innerHTML = `<span class="font-semibold">${label}</span> · ${details}`;
       }
 
       function renderKPIs(kpis) {
@@ -655,18 +716,18 @@
         stillUnpaidTotal: 0,
       };
 
-      async function fetchTodayPayments() {
-        try {
-          const res = await fetch('/api/sales');
-          if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-
-          const data = await res.json();
-          if (!data.success) throw new Error(data.error || 'Request was not successful');
-
-          renderTodayPayments(data.invoices || [], data.paymentSummary);
-        } catch (error) {
-          console.error('Today payments fetch error:', error);
-        }
+      function renderTodayPaymentsError() {
+        $('paymentSkeleton').classList.add('hidden');
+        $('paymentContent').classList.remove('hidden');
+        $('paymentPaidCount').textContent = '--';
+        $('paymentPaidTotal').textContent = '--';
+        $('paymentPartialCount').textContent = '--';
+        $('paymentPartialTotal').textContent = '--';
+        $('paymentUnpaidCount').textContent = '--';
+        $('paymentUnpaidTotal').textContent = '--';
+        $('stillUnpaidTotal').textContent = '--';
+        $('paymentInvoiceList').innerHTML =
+          '<div class="text-amber-400 text-xs px-1 py-2">Today\'s payments could not be loaded for both books</div>';
       }
 
       function sortByOutstandingDesc(invoices) {
@@ -679,7 +740,7 @@
         <div class="flex items-center justify-between px-1 py-1.5 text-xs">
           <div class="min-w-0">
             <div class="text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</div>
-            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.docNo)}</div>
+            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
@@ -731,7 +792,6 @@
       function bindEvents() {
         $('refreshBtn').addEventListener('click', () => {
           fetchData(currentStartDate, currentEndDate);
-          fetchTodayPayments();
         });
         $('applyDateBtn').addEventListener('click', applyCustomDate);
         $('searchInput').addEventListener('input', filterTable);
@@ -761,7 +821,6 @@
         bindEvents();
         updateOnlineStatus();
         setPreset('today');
-        fetchTodayPayments();
       });
     </script>
   </body>

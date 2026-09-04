@@ -1,10 +1,37 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-require('dotenv').config();
+// Vercel dev does not consistently inject `.env.local` into plain Node
+// serverless functions, so load the local override explicitly before `.env`.
+require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const cacheStore = Object.create(null);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DEFAULT_API_URL = 'https://accounting-api.autocountcloud.com';
+const COMPANY_DEFINITIONS = Object.freeze([
+  {
+    id: 'enterprise',
+    name: 'Wanson Enterprise',
+    accountBookId: '63750',
+    apiKeyEnv: 'AUTOCOUNT_ENTERPRISE_API_KEY',
+    keyIdEnv: 'AUTOCOUNT_ENTERPRISE_KEY_ID',
+    apiUrlEnv: 'AUTOCOUNT_ENTERPRISE_API_URL',
+    apiKeyAliases: ['AUTOCOUNT_API_KEY_WANSON_ENTERPRISE'],
+    keyIdAliases: ['AUTOCOUNT_KEY_ID_WANSON_ENTERPRISE'],
+    legacyApiKeyEnv: 'AUTOCOUNT_API_KEY',
+    legacyKeyIdEnv: 'AUTOCOUNT_KEY_ID',
+  },
+  {
+    id: 'sdnBhd',
+    name: 'Wanson Sdn Bhd',
+    accountBookId: '63688',
+    apiKeyEnv: 'AUTOCOUNT_SDN_BHD_API_KEY',
+    keyIdEnv: 'AUTOCOUNT_SDN_BHD_KEY_ID',
+    apiUrlEnv: 'AUTOCOUNT_SDN_BHD_API_URL',
+    apiKeyAliases: ['AUTOCOUNT_API_KEY_WANSON_SDN_BHD'],
+    keyIdAliases: ['AUTOCOUNT_KEY_ID_WANSON_SDN_BHD'],
+  },
+]);
 
 // Serverless runtimes (Vercel) run with TZ=UTC, so `new Date()` local time is
 // NOT the business's local time. The reporting timezone must be explicit,
@@ -40,60 +67,79 @@ function getLocalToday(timeZone = getReportingTimeZone(), now = new Date()) {
   return now.toISOString().slice(0, 10);
 }
 
-function getCacheTTL() {
-  const parsed = parseInt(process.env.CACHE_TTL_MINUTES, 10);
-  const minutes = Number.isNaN(parsed) ? 10 : parsed;
-  return minutes * 60 * 1000;
-}
-
-function getCacheKey(startDate, endDate) {
-  return `${startDate}_${endDate}`;
-}
-
 function isValidDate(value) {
   return typeof value === 'string' && DATE_RE.test(value);
 }
 
-function isCacheValid(key) {
-  const entry = cacheStore[key];
-  return entry && Date.now() - entry.timestamp < getCacheTTL();
-}
-
-function getHeaders() {
+function getHeaders(company) {
   return {
-    'API-Key': process.env.AUTOCOUNT_API_KEY,
-    'Key-ID': process.env.AUTOCOUNT_KEY_ID,
+    'API-Key': company.apiKey,
+    'Key-ID': company.keyId,
     'Content-Type': 'application/json',
   };
 }
 
-async function fetchAllInvoices(startDate, endDate) {
-  const baseUrl = process.env.AUTOCOUNT_API_URL || 'https://accounting-api.autocountcloud.com';
-  const accountBookId = process.env.AUTOCOUNT_ACCOUNT_BOOK_ID;
+function getCompanyConfigs(env = process.env) {
+  return COMPANY_DEFINITIONS.map((definition) => {
+    const firstConfigured = (names) => names.map((name) => env[name]).find(Boolean) || null;
+    const apiKey = firstConfigured([
+      definition.apiKeyEnv,
+      ...(definition.apiKeyAliases || []),
+      ...(definition.legacyApiKeyEnv ? [definition.legacyApiKeyEnv] : []),
+    ]);
+    const keyId = firstConfigured([
+      definition.keyIdEnv,
+      ...(definition.keyIdAliases || []),
+      ...(definition.legacyKeyIdEnv ? [definition.legacyKeyIdEnv] : []),
+    ]);
 
-  if (!accountBookId || !process.env.AUTOCOUNT_API_KEY || !process.env.AUTOCOUNT_KEY_ID) {
-    console.error('Missing AutoCount credentials');
+    return {
+      id: definition.id,
+      name: definition.name,
+      accountBookId: definition.accountBookId,
+      apiUrl: env[definition.apiUrlEnv] || env.AUTOCOUNT_API_URL || DEFAULT_API_URL,
+      apiKey,
+      keyId,
+      credentialsConfigured: Boolean(apiKey && keyId),
+    };
+  });
+}
+
+async function fetchAllInvoices(startDate, endDate, company, httpClient = axios) {
+  const baseUrl = (company?.apiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
+  const accountBookId = company?.accountBookId;
+
+  if (!accountBookId || !company?.apiKey || !company?.keyId) {
+    console.error(`Missing AutoCount credentials for ${company?.name || 'unknown company'}`);
     return null;
   }
 
   const allInvoices = [];
   let page = 1;
-  let totalCount = 0;
-  const headers = getHeaders();
 
   try {
     while (true) {
       const url = `${baseUrl}/${accountBookId}/invoice/listing`;
-      const response = await axios.get(url, { headers, timeout: 15000, params: { page, startDate, endDate } });
+      const response = await httpClient.get(url, {
+        headers: getHeaders(company),
+        timeout: 15000,
+        params: { page, startDate, endDate },
+      });
+      const pageData = Array.isArray(response.data?.data) ? response.data.data : null;
 
-      if (response.status === 200 && response.data?.data) {
-        allInvoices.push(...response.data.data);
-        totalCount = response.data.totalCount || response.data.data.length;
-        if (allInvoices.length >= totalCount || response.data.data.length === 0) break;
-        page++;
-      } else {
-        break;
-      }
+      if (response.status !== 200 || !pageData) return null;
+
+      allInvoices.push(...pageData);
+      if (pageData.length === 0) break;
+
+      const totalCount = Number(response.data.totalCount);
+      if (Number.isFinite(totalCount) && allInvoices.length >= totalCount) break;
+
+      const pageSize = Number(response.data.pageSize || response.data.page_size || response.data.limit);
+      if (!Number.isFinite(totalCount) && Number.isFinite(pageSize) && pageData.length < pageSize) break;
+
+      page += 1;
+      if (page > 100) throw new Error(`AutoCount pagination exceeded 100 pages for ${company.name}`);
     }
 
     console.log(`Fetched ${allInvoices.length} invoices for ${startDate} to ${endDate}`);
@@ -111,12 +157,12 @@ function parseOutstandingAmount(rawValue) {
   return Math.round(parsed * 100) / 100;
 }
 
-function normalizeInvoices(rawInvoices) {
+function normalizeInvoices(rawInvoices, company = null) {
   return rawInvoices.map((inv) => {
     const master = inv.master || inv;
     const details = inv.details || [];
 
-    return {
+    const normalized = {
       docNo: master.docNo || '',
       docDate: master.docDate || '',
       customerName: master.debtorName || master.customerName || '',
@@ -130,10 +176,22 @@ function normalizeInvoices(rawInvoices) {
         total: parseFloat(d.subTotal || d.total || 0),
       })),
     };
+
+    if (company) {
+      normalized.companyId = company.id;
+      normalized.companyName = company.name;
+      normalized.accountBookId = company.accountBookId;
+    }
+
+    return normalized;
   });
 }
 
-function loadMockData() {
+function loadMockData(company) {
+  if (company.id !== 'enterprise') {
+    throw new Error(`Mock data is not configured for ${company.name}`);
+  }
+
   const mockPath = path.join(__dirname, 'mock-sales.json');
   const raw = fs.readFileSync(mockPath, 'utf8');
   return JSON.parse(raw);
@@ -160,8 +218,16 @@ function aggregateBySKU(invoices) {
       skuMap[item.sku].orderCount += 1;
       skuMap[item.sku].totalCost =
         Math.round((skuMap[item.sku].totalCost + item.unitPrice * item.quantity) * 100) / 100;
-      skuMap[item.sku].customerQuantities[invoice.customerName] =
-        (skuMap[item.sku].customerQuantities[invoice.customerName] || 0) + item.quantity;
+      const customerKey = invoice.companyId ? `${invoice.companyId}\u0000${invoice.customerName}` : invoice.customerName;
+      if (!skuMap[item.sku].customerQuantities[customerKey]) {
+        skuMap[item.sku].customerQuantities[customerKey] = {
+          name: invoice.customerName,
+          quantity: 0,
+          companyId: invoice.companyId,
+          companyName: invoice.companyName,
+        };
+      }
+      skuMap[item.sku].customerQuantities[customerKey].quantity += item.quantity;
     }
   }
 
@@ -170,8 +236,15 @@ function aggregateBySKU(invoices) {
       ...sku,
       totalRevenue: Math.round(sku.totalRevenue * 100) / 100,
       avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0,
-      customers: Object.entries(customerQuantities)
-        .map(([name, quantity]) => ({ name, quantity: Math.round(quantity * 100) / 100 }))
+      customers: Object.values(customerQuantities)
+        .map((customer) => {
+          const result = { name: customer.name, quantity: Math.round(customer.quantity * 100) / 100 };
+          if (customer.companyId) {
+            result.companyId = customer.companyId;
+            result.companyName = customer.companyName;
+          }
+          return result;
+        })
         .sort((a, b) => b.quantity - a.quantity),
     }))
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
@@ -187,18 +260,36 @@ function computeKPIs(invoices) {
     for (const item of invoice.lineItems || []) {
       totalItems += item.quantity;
     }
-    customerMap[invoice.customerName] = (customerMap[invoice.customerName] || 0) + invoice.grandTotal;
+    const customerKey = invoice.companyId ? `${invoice.companyId}\u0000${invoice.customerName}` : invoice.customerName;
+    if (!customerMap[customerKey]) {
+      customerMap[customerKey] = {
+        name: invoice.customerName,
+        revenue: 0,
+        companyId: invoice.companyId,
+        companyName: invoice.companyName,
+      };
+    }
+    customerMap[customerKey].revenue += invoice.grandTotal;
   }
 
-  const topCustomer = Object.entries(customerMap).sort((a, b) => b[1] - a[1])[0];
+  const topCustomer = Object.values(customerMap).sort((a, b) => b.revenue - a.revenue)[0];
 
-  return {
+  const result = {
     totalRevenue,
     totalInvoices: invoices.length,
     totalItemsSold: totalItems,
     avgOrderValue: invoices.length ? Math.round((totalRevenue / invoices.length) * 100) / 100 : 0,
-    topCustomer: topCustomer ? { name: topCustomer[0], revenue: Math.round(topCustomer[1] * 100) / 100 } : null,
+    topCustomer: topCustomer
+      ? { name: topCustomer.name, revenue: Math.round(topCustomer.revenue * 100) / 100 }
+      : null,
   };
+
+  if (topCustomer?.companyId) {
+    result.topCustomer.companyId = topCustomer.companyId;
+    result.topCustomer.companyName = topCustomer.companyName;
+  }
+
+  return result;
 }
 
 function classifyPaymentStatus(grandTotal, outstandingAmount) {
@@ -240,10 +331,124 @@ function computePaymentSummary(invoices) {
   return summary;
 }
 
+async function loadCompanyInvoices(startDate, endDate, company, useMock) {
+  if (!useMock && !company.credentialsConfigured) {
+    return {
+      company,
+      status: 'error',
+      error: 'Credentials not configured',
+      invoices: [],
+    };
+  }
+
+  try {
+    const rawInvoices = useMock ? loadMockData(company) : await fetchAllInvoices(startDate, endDate, company);
+    if (!rawInvoices) {
+      return {
+        company,
+        status: 'error',
+        error: 'AutoCount API unavailable',
+        invoices: [],
+      };
+    }
+
+    return {
+      company,
+      status: 'ok',
+      dataSource: useMock ? 'mock' : 'live',
+      invoices: normalizeInvoices(rawInvoices, company),
+    };
+  } catch (error) {
+    console.error(`AutoCount ${company.name} load error:`, error.message);
+    return {
+      company,
+      status: 'error',
+      error: useMock ? 'Mock data unavailable' : 'AutoCount API unavailable',
+      invoices: [],
+    };
+  }
+}
+
+function publicCompanySummary(result) {
+  const { company } = result;
+  if (result.status !== 'ok') {
+    return {
+      id: company.id,
+      name: company.name,
+      accountBookId: company.accountBookId,
+      status: 'error',
+      invoiceCount: 0,
+      totalRevenue: 0,
+      totalItemsSold: 0,
+      error: result.error,
+    };
+  }
+
+  const kpis = computeKPIs(result.invoices);
+  return {
+    id: company.id,
+    name: company.name,
+    accountBookId: company.accountBookId,
+    status: 'ok',
+    invoiceCount: kpis.totalInvoices,
+    totalRevenue: kpis.totalRevenue,
+    totalItemsSold: kpis.totalItemsSold,
+  };
+}
+
+function combineCompanyResults(companyResults, startDate, endDate, timestamp = new Date().toISOString()) {
+  const companies = companyResults.map(publicCompanySummary);
+  const successfulResults = companyResults.filter((result) => result.status === 'ok');
+  const invoices = successfulResults.flatMap((result) =>
+    result.invoices.map((invoice) => ({
+      ...invoice,
+      companyId: invoice.companyId || result.company.id,
+      companyName: invoice.companyName || result.company.name,
+      accountBookId: invoice.accountBookId || result.company.accountBookId,
+    })),
+  );
+  const classifiedInvoices = invoices.map((invoice) => ({
+    ...invoice,
+    paymentStatus: classifyPaymentStatus(invoice.grandTotal, invoice.outstandingAmount),
+  }));
+  const aggregated = aggregateBySKU(classifiedInvoices);
+  const failedCompanies = companies.filter((company) => company.status !== 'ok');
+  const sources = new Set(successfulResults.map((result) => result.dataSource));
+
+  return {
+    success: successfulResults.length > 0,
+    complete: failedCompanies.length === 0,
+    dataSource: sources.size === 1 ? [...sources][0] : sources.size > 1 ? 'mixed' : null,
+    company: 'Wanson Companies',
+    accountBooks: companies.map(({ id, name, accountBookId }) => ({ id, name, accountBookId })),
+    companies,
+    warnings: failedCompanies.map((company) => `${company.name}: ${company.error}`),
+    cached: false,
+    timestamp,
+    dateRange: { startDate, endDate },
+    kpis: computeKPIs(classifiedInvoices),
+    topSKUs: aggregated.slice(0, 5),
+    skuBreakdown: aggregated,
+    invoices: classifiedInvoices.map((invoice) => ({
+      docNo: invoice.docNo,
+      docDate: invoice.docDate,
+      customerName: invoice.customerName,
+      grandTotal: invoice.grandTotal,
+      outstandingAmount: invoice.outstandingAmount,
+      paymentStatus: invoice.paymentStatus,
+      companyId: invoice.companyId,
+      companyName: invoice.companyName,
+      accountBookId: invoice.accountBookId,
+    })),
+    paymentSummary: computePaymentSummary(classifiedInvoices),
+  };
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store, max-age=0, must-revalidate');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -261,58 +466,19 @@ module.exports = async (req, res) => {
       });
     }
 
-    const cacheKey = getCacheKey(startDate, endDate);
-    if (isCacheValid(cacheKey)) {
-      return res.status(200).json({ ...cacheStore[cacheKey].data, cached: true });
-    }
-
-    let invoices;
-    let dataSource = 'live';
+    const companies = getCompanyConfigs();
     const useMock = process.env.USE_MOCK_DATA === 'true';
+    const companyResults = await Promise.all(
+      companies.map((company) => loadCompanyInvoices(startDate, endDate, company, useMock)),
+    );
+    const result = combineCompanyResults(companyResults, startDate, endDate);
 
-    if (!useMock) {
-      const rawInvoices = await fetchAllInvoices(startDate, endDate);
-      if (rawInvoices && rawInvoices.length > 0) {
-        invoices = normalizeInvoices(rawInvoices);
-      }
+    if (!result.success) {
+      return res.status(502).json({
+        ...result,
+        error: 'No company data could be loaded',
+      });
     }
-
-    if (!invoices) {
-      const mockData = loadMockData();
-      invoices = mockData.invoices || mockData;
-      dataSource = 'mock';
-    }
-
-    invoices = invoices.map((invoice) => ({
-      ...invoice,
-      paymentStatus: classifyPaymentStatus(invoice.grandTotal, invoice.outstandingAmount),
-    }));
-
-    const aggregated = aggregateBySKU(invoices);
-    const kpis = computeKPIs(invoices);
-    const paymentSummary = computePaymentSummary(invoices);
-
-    const result = {
-      success: true,
-      cached: false,
-      dataSource,
-      timestamp: new Date().toISOString(),
-      dateRange: { startDate, endDate },
-      kpis,
-      topSKUs: aggregated.slice(0, 5),
-      skuBreakdown: aggregated,
-      invoices: invoices.map((invoice) => ({
-        docNo: invoice.docNo,
-        docDate: invoice.docDate,
-        customerName: invoice.customerName,
-        grandTotal: invoice.grandTotal,
-        outstandingAmount: invoice.outstandingAmount,
-        paymentStatus: invoice.paymentStatus,
-      })),
-      paymentSummary,
-    };
-
-    cacheStore[cacheKey] = { data: result, timestamp: Date.now() };
 
     return res.status(200).json(result);
   } catch (error) {
@@ -326,6 +492,10 @@ module.exports = async (req, res) => {
 
 module.exports.aggregateBySKU = aggregateBySKU;
 module.exports.getLocalToday = getLocalToday;
+module.exports.fetchAllInvoices = fetchAllInvoices;
+module.exports.getCompanyConfigs = getCompanyConfigs;
+module.exports.loadCompanyInvoices = loadCompanyInvoices;
+module.exports.combineCompanyResults = combineCompanyResults;
 module.exports.normalizeInvoices = normalizeInvoices;
 module.exports.parseOutstandingAmount = parseOutstandingAmount;
 module.exports.classifyPaymentStatus = classifyPaymentStatus;

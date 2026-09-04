@@ -1,4 +1,4 @@
-# AutoCount Sales Dashboard (iPhone PWA)
+# Wanson Companies AutoCount Sales Dashboard (iPhone PWA)
 
 A lightweight mobile-first sales dashboard that fetches real-time invoice data from AutoCount Cloud API, aggregates by product, and displays clean KPI cards, charts, and tables. Designed as an iPhone PWA (Progressive Web App) for Home Screen access.
 
@@ -10,7 +10,7 @@ A lightweight mobile-first sales dashboard that fetches real-time invoice data f
 - **Bar chart** — Top 5 products by revenue
 - **Doughnut chart** — Units distribution by product
 - **Product breakdown table** — Searchable, sorted by revenue
-- **Offline support** — Service Worker caches static assets for offline viewing
+- **Offline support** — Service Worker caches static assets for offline viewing; sales API failures stay visible instead of showing stale data
 - **iPhone PWA** — Add to Home Screen for standalone app experience
 
 ## Tech Stack
@@ -62,15 +62,18 @@ Required variables:
 | Variable                    | Description                                 |
 | --------------------------- | ------------------------------------------- |
 | `AUTOCOUNT_API_URL`         | `https://accounting-api.autocountcloud.com` |
-| `AUTOCOUNT_API_KEY`         | Your AutoCount API key                      |
-| `AUTOCOUNT_KEY_ID`          | Your AutoCount Key ID                       |
-| `AUTOCOUNT_ACCOUNT_BOOK_ID` | Your account book ID (e.g., `63688`)        |
+| `AUTOCOUNT_ENTERPRISE_API_KEY` | Credential for Enterprise book `63750`   |
+| `AUTOCOUNT_ENTERPRISE_KEY_ID`  | Key ID for Enterprise book `63750`       |
+| `AUTOCOUNT_SDN_BHD_API_KEY`    | Credential for Sdn Bhd book `63688`      |
+| `AUTOCOUNT_SDN_BHD_KEY_ID`     | Key ID for Sdn Bhd book `63688`          |
 | `USE_MOCK_DATA`             | `false` for live data, `true` for mock      |
+
+The old single-book `AUTOCOUNT_COMPANY_ID` setting does not select a book in this integration. Both book-scoped credential pairs must be present for a complete live result; otherwise the dashboard reports which book is unavailable.
 
 ### 3. Run Locally
 
 ```bash
-npx vercel dev
+npm run local
 ```
 
 ## Deploy to Vercel
@@ -82,9 +85,10 @@ npx vercel --prod
 Set environment variables on Vercel:
 
 ```bash
-npx vercel env add AUTOCOUNT_API_KEY production,preview --value "your-key"
-npx vercel env add AUTOCOUNT_KEY_ID production,preview --value "your-key-id"
-npx vercel env add AUTOCOUNT_ACCOUNT_BOOK_ID production,preview --value "63688"
+npx vercel env add AUTOCOUNT_ENTERPRISE_API_KEY production,preview --value "your-enterprise-key"
+npx vercel env add AUTOCOUNT_ENTERPRISE_KEY_ID production,preview --value "your-enterprise-key-id"
+npx vercel env add AUTOCOUNT_SDN_BHD_API_KEY production,preview --value "your-sdn-bhd-key"
+npx vercel env add AUTOCOUNT_SDN_BHD_KEY_ID production,preview --value "your-sdn-bhd-key-id"
 npx vercel env add AUTOCOUNT_API_URL production,preview --value "https://accounting-api.autocountcloud.com"
 npx vercel env add USE_MOCK_DATA production,preview --value "false"
 ```
@@ -98,9 +102,17 @@ npx vercel env add USE_MOCK_DATA production,preview --value "false"
 
 Response:
 
+The response is `complete: true` only when both books load successfully. If one book is unavailable, the API returns the available data with `complete: false`, a per-company error, and a warning so the dashboard cannot mistake one book's count for the combined total.
+
 ```json
 {
   "success": true,
+  "complete": true,
+  "company": "Wanson Companies",
+  "companies": [
+    { "id": "enterprise", "name": "Wanson Enterprise", "accountBookId": "63750", "status": "ok", "invoiceCount": 12 },
+    { "id": "sdnBhd", "name": "Wanson Sdn Bhd", "accountBookId": "63688", "status": "ok", "invoiceCount": 45 }
+  ],
   "dateRange": { "startDate": "2026-08-03", "endDate": "2026-08-03" },
   "kpis": {
     "totalRevenue": 40773.3,
@@ -112,7 +124,7 @@ Response:
   "topSKUs": [...],
   "skuBreakdown": [...],
   "invoices": [
-    { "docNo": "SI-00123", "docDate": "2026-08-03", "customerName": "Customer A", "grandTotal": 12000, "outstandingAmount": 0, "paymentStatus": "paid" }
+    { "docNo": "SI-00123", "docDate": "2026-08-03", "customerName": "Customer A", "grandTotal": 12000, "outstandingAmount": 0, "paymentStatus": "paid", "companyId": "enterprise", "companyName": "Wanson Enterprise", "accountBookId": "63750" }
   ],
   "paymentSummary": {
     "paid": { "count": 20, "total": 28000 },
@@ -126,10 +138,12 @@ Response:
 
 ## AutoCount Cloud API Reference
 
-This project uses the AutoCount Cloud Accounting API:
+This project uses the AutoCount Cloud Accounting API for both Wanson companies:
 
 - **Base URL**: `https://accounting-api.autocountcloud.com`
 - **Auth headers**: `API-Key` and `Key-ID` (not Bearer token)
+- **Cloud books**: `63750` (`Wanson Enterprise`) and `63688` (`Wanson Sdn Bhd`)
+- **Credentials**: each book uses its own matching API-Key and Key-ID pair
 - **Invoice listing**: `/{accountBookId}/invoice/listing?page={page}&startDate={start}&endDate={end}`
 - **Response format**: `{ data: [{ master: {...}, details: [...] }] }`
 

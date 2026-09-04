@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#3b82f6" />
-    <title>Today's Invoices — AutoCount Sales Dashboard</title>
+    <title>Today's Invoices — Wanson Companies</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -63,7 +63,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
           </svg>
         </a>
-        <h1 class="text-lg font-bold">Today's Invoices</h1>
+        <h1 class="text-lg font-bold">Wanson Companies · Today's Invoices</h1>
       </header>
 
       <!-- ===== Status tabs ===== -->
@@ -75,6 +75,7 @@
       </div>
 
       <div id="summaryLine" class="text-xs text-slate-400 mt-3 mb-2">Loading…</div>
+      <div id="coverageLine" class="text-[10px] text-slate-400 mb-2" aria-live="polite">Loading both company books…</div>
 
       <div class="panel overflow-hidden">
         <div id="listSkeleton" class="p-4 space-y-2">
@@ -111,6 +112,30 @@
         return Number(value || 0).toLocaleString();
       }
 
+      function renderCoverage(data) {
+        const companies = Array.isArray(data?.companies) ? data.companies : [];
+        if (companies.length === 0) {
+          $('coverageLine').className = 'text-[10px] text-red-400 mb-2';
+          $('coverageLine').textContent = data?.error || 'Both company books are unavailable';
+          return;
+        }
+
+        const allUnavailable = companies.every((company) => company.status !== 'ok');
+        $('coverageLine').className = `${data.complete ? 'text-slate-400' : 'text-red-400'} text-[10px] mb-2`;
+        const label = data.complete
+          ? 'Both books loaded'
+          : allUnavailable
+            ? 'NO DATA — both books unavailable'
+            : 'PARTIAL DATA — check the unavailable book';
+        const details = companies
+          .map((company) => {
+            const value = company.status === 'ok' ? `${formatNumber(company.invoiceCount)} invoices` : company.error;
+            return `${escapeHtml(company.name)}: ${escapeHtml(value)}`;
+          })
+          .join(' · ');
+        $('coverageLine').innerHTML = `<span class="font-semibold">${label}</span> · ${details}`;
+      }
+
       let allInvoices = [];
       let activeStatus = 'all';
 
@@ -136,7 +161,7 @@
         <div class="flex items-center justify-between px-3 py-2.5 text-xs">
           <div class="min-w-0">
             <div class="text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</div>
-            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.docNo)}</div>
+            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</div>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
@@ -170,17 +195,21 @@
 
       async function fetchTodayInvoices() {
         try {
-          const res = await fetch('/api/sales');
-          if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-
-          const data = await res.json();
-          if (!data.success) throw new Error(data.error || 'Request was not successful');
+          const res = await fetch('/api/sales', { cache: 'no-store' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) {
+            const error = new Error(data.error || `Request failed with status ${res.status}`);
+            error.responseData = data;
+            throw error;
+          }
 
           allInvoices = data.invoices || [];
+          renderCoverage(data);
           renderList();
         } catch (error) {
           console.error('Today invoices fetch error:', error);
           $('summaryLine').textContent = 'Failed to load invoices';
+          renderCoverage(error.responseData || { error: error.message });
         }
       }
 

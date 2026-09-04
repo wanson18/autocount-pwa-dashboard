@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "description": "AutoCount Sales Dashboard - iPhone PWA",
   "scripts": {
-    "dev": "vercel dev",
-    "start": "vercel dev",
+    "local": "npx vercel dev",
     "build": "echo 'No build step required - static frontend'",
     "test": "node --test api/*.test.js",
     "format:check": "prettier --check ."
