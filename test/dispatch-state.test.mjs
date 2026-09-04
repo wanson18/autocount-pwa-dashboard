@@ -258,6 +258,28 @@ test('persisted assignment snapshots keep mixed-company cards renderable when th
   });
 });
 
+test('removed persisted assignments return the invoice to the unassigned queue and leave the trip lane empty', () => {
+  const assignment = {
+    id: 42,
+    tripId: 'trip-001',
+    companyKey: 'enterprise',
+    invoiceId: 'removed-enterprise-001',
+    docNo: 'ENT-REMOVED-001',
+    docDate: '2026-08-28',
+    header: { customer: { name: 'Removed Customer' }, deliveryAddress: 'Removed Address' },
+    items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '2.000', uom: 'CTN' }],
+    status: 'removed',
+  };
+  const state = createDispatchState({
+    invoices: [{ ...invoices[0], invoiceId: assignment.invoiceId, docKey: assignment.invoiceId, docNo: assignment.docNo }],
+    trips: [{ ...trips[0], invoiceKeys: [getInvoiceKey(assignment)], assignments: [assignment] }],
+    assignments: [assignment],
+  });
+
+  assert.equal(visibleUnassignedInvoices(state).some((invoice) => getInvoiceKey(invoice) === getInvoiceKey(assignment)), true);
+  assert.deepEqual(getTripInvoices(state, 'trip-001'), []);
+});
+
 test('company filters narrow visibility without changing stable identity', () => {
   const state = createDispatchState({ invoices, trips });
 
@@ -293,6 +315,39 @@ test('optimistic move changes one invoice and rollback restores exact prior stat
   assert.deepEqual(getTripInvoices(rolledBack, 'trip-001'), []);
   assert.equal(visibleUnassignedInvoices(rolledBack).some((invoice) => getInvoiceKey(invoice) === 'sdn_bhd:shared-doc-001'), true);
   assert.equal(rolledBack.statusMessage, 'Assignment was not saved.');
+});
+
+test('optimistic removal returns an assigned invoice to the queue and rollback restores its assignment', () => {
+  const assignment = {
+    id: 43,
+    tripId: 'trip-001',
+    companyKey: 'enterprise',
+    invoiceId: 'enterprise-removal-001',
+    docNo: 'ENT-REMOVAL-001',
+    docDate: '2026-08-28',
+    header: { customer: { name: 'Removal Customer' }, deliveryAddress: 'Removal Address' },
+    items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '2.000', uom: 'CTN' }],
+    status: 'assigned',
+  };
+  const key = getInvoiceKey(assignment);
+  const state = createDispatchState({
+    invoices: [{ ...invoices[0], invoiceId: assignment.invoiceId, docKey: assignment.invoiceId, docNo: assignment.docNo }],
+    trips: [{ ...trips[0], invoiceKeys: [key], assignments: [assignment] }],
+    assignments: [assignment],
+  });
+  const removed = dispatchState.beginOptimisticRemoval(state, { invoiceKey: key, requestId: 'remove-request-1' });
+
+  assert.equal(removed.invoices[0].tripId, null);
+  assert.equal(removed.invoices[0].eligibility, 'eligible');
+  assert.deepEqual(getTripInvoices(removed, 'trip-001'), []);
+  assert.equal(visibleUnassignedInvoices(removed).some((invoice) => invoice.key === key), true);
+
+  const rolledBack = rejectMoveResponse(removed, { requestId: 'remove-request-1', message: 'Removal failed.' });
+  assert.equal(rolledBack.invoices[0].tripId, 'trip-001');
+  assert.equal(rolledBack.invoices[0].eligibility, 'assigned');
+  assert.equal(rolledBack.invoices[0].assignmentStatus, 'assigned');
+  assert.equal(rolledBack.invoices[0].assignmentId, 43);
+  assert.deepEqual(getTripInvoices(rolledBack, 'trip-001').map(getInvoiceKey), [key]);
 });
 
 test('stale move response is rejected without overwriting the newest optimistic move', () => {
@@ -485,7 +540,8 @@ function createFakeDispatchDocument({ protectedShell = false } = {}) {
       'loginView', 'authenticatedView', 'dispatchLoginForm', 'loginMessage', 'loginSubmit',
       'clerkId', 'clerkPin', 'logoutButton', 'resourceStatus', 'driverList', 'lorryList',
       'resourceForm', 'resourceType', 'resourceSubmit', 'showInactiveResources',
-      'driverResourceFields', 'lorryResourceFields',
+      'driverResourceFields', 'lorryResourceFields', 'resourceName', 'resourceLicenseNo',
+      'resourcePhone', 'resourceRegistrationNo', 'resourceDescription',
     ]) {
       elements.set(id, new FakeElement({ id }));
     }
@@ -730,6 +786,7 @@ test('board transport reads authenticated invoices, trips, and persisted assignm
     trips: payloads.trips.trips,
     assignments: payloads.assignments.assignments,
     sources: payloads.invoices.sources,
+    quarantinedCount: 0,
     dateRange: payloads.invoices.dateRange,
   });
 });
@@ -752,14 +809,25 @@ test('trip and assignment transports send only the approved mutation fields', as
     doc_date: '2026-08-28', expected_trip_revision: 3,
     ignored: 'must not cross the boundary',
   });
+  await assignmentsTransport.removeAssignment({
+    assignment_id: 17, expected_trip_revision: 4, ignored: 'must not cross the boundary',
+  });
 
   const tripBody = JSON.parse(calls[0].options.body);
   const assignmentBody = JSON.parse(calls[1].options.body);
+  const removalBody = JSON.parse(calls[2].options.body);
   assert.deepEqual(Object.keys(tripBody).sort(), ['driver_id', 'request_id', 'route_notes', 'trip_date', 'vehicle_id'].sort());
   assert.deepEqual(Object.keys(assignmentBody).sort(), ['company_key', 'doc_date', 'doc_no', 'expected_trip_revision', 'invoice_id', 'request_id', 'trip_id'].sort());
   assert.equal(tripBody.ignored, undefined);
   assert.equal(assignmentBody.ignored, undefined);
+  assert.equal(calls[2].options.method, 'PATCH');
+  assert.deepEqual(Object.keys(removalBody).sort(), ['assignment_id', 'expected_trip_revision', 'operation', 'request_id'].sort());
+  assert.equal(removalBody.assignment_id, 17);
+  assert.equal(removalBody.expected_trip_revision, 4);
+  assert.equal(removalBody.operation, 'remove');
+  assert.equal(removalBody.ignored, undefined);
   assert.notEqual(tripBody.request_id, assignmentBody.request_id);
+  assert.notEqual(assignmentBody.request_id, removalBody.request_id);
 });
 
 test('dispatch client mutation transports send only server-owned resource fields', async () => {
@@ -923,4 +991,167 @@ test('resource action buttons have contextual accessible labels', () => {
 
   assert.match(fake.elements.get('driverList').innerHTML, /aria-label="Deactivate driver Aiman Driver"/);
   assert.match(fake.elements.get('lorryList').innerHTML, /aria-label="Reactivate lorry WXY 1001"/);
+});
+
+test('resource registration stays available when the invoice Board is temporarily unavailable', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: {
+      loadBoard: async () => {
+        const error = new Error('invoice source unavailable');
+        error.code = 'source_unavailable';
+        throw error;
+      },
+    },
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session: { clerkId: 'admin', role: 'admin' } }),
+      logout: async () => ({ authenticated: false }),
+    },
+    resourcesTransport: {
+      loadResources: async () => ({ drivers: [], lorries: [] }),
+      createResource: async () => ({ success: true }),
+      updateResource: async () => null,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(app.getState().boardStatus, 'error');
+  assert.equal(fake.elements.get('resourceSubmit').disabled, false);
+});
+
+test('incomplete lorry submissions are stopped with a field-specific message before the API call', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  let createCalls = 0;
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: { loadBoard: async () => ({ invoices: [], trips: [], assignments: [] }) },
+    sessionTransport: {
+      getSession: async () => ({ authenticated: true, session: { clerkId: 'admin', role: 'admin' } }),
+      logout: async () => ({ authenticated: false }),
+    },
+    resourcesTransport: {
+      loadResources: async () => ({ drivers: [], lorries: [] }),
+      createResource: async () => { createCalls += 1; return { success: true }; },
+      updateResource: async () => null,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  fake.elements.get('resourceType').value = 'lorry';
+  fake.elements.get('resourceRegistrationNo').value = '';
+  fake.elements.get('resourceForm').dispatch('submit', {
+    target: fake.elements.get('resourceForm'),
+    preventDefault() {},
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(createCalls, 0);
+  assert.match(fake.elements.get('resourceStatus').textContent, /registration number/i);
+  assert.equal(app.getSession().clerkId, 'admin');
+});
+
+test('assignment transports forward the caller request id for idempotent retries', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, status: 201, async json() { return { success: true }; } };
+  };
+  const tripsTransport = dispatchClient.createTripsTransport({ fetchImpl });
+  const assignmentsTransport = dispatchClient.createAssignmentsTransport({ fetchImpl });
+
+  await assignmentsTransport.assignInvoice({
+    trip_id: 9, company_key: 'sdn_bhd', invoice_id: 'persisted-sdn-001', doc_no: 'SDN-PERSISTED-001',
+    doc_date: '2026-08-28', expected_trip_revision: 3, request_id: 'optimistic-request-001',
+  });
+  await assignmentsTransport.removeAssignment({
+    assignment_id: 17, expected_trip_revision: 4, request_id: 'optimistic-request-002',
+  });
+  await tripsTransport.updateTrip({
+    trip_id: 5, driver_id: 7, expected_revision: 2, request_id: 'optimistic-request-003',
+  });
+
+  assert.equal(JSON.parse(calls[0].options.body).request_id, 'optimistic-request-001');
+  assert.equal(JSON.parse(calls[1].options.body).request_id, 'optimistic-request-002');
+  assert.equal(JSON.parse(calls[2].options.body).request_id, 'optimistic-request-003');
+});
+
+test('unassigned queue hides cancelled and blocked invoices instead of showing dead assign buttons', () => {
+  const state = createDispatchState({
+    invoices: [
+      { ...invoices[0], eligibility: 'eligible', cancelled: false },
+      { ...invoices[1], eligibility: 'blocked_missing_uom', cancelled: false },
+      { ...invoices[2], eligibility: 'eligible', cancelled: true },
+    ],
+    trips,
+  });
+
+  assert.deepEqual(visibleUnassignedInvoices(state).map(getInvoiceKey), ['enterprise:shared-doc-001']);
+});
+
+test('snake-case trips join the protected driver and lorry catalog', () => {
+  const state = createDispatchState({
+    invoices: [],
+    trips: [{ id: 'trip-snake-001', tripDate: '2026-08-28', driver_id: 7, vehicle_id: 8, revision: 1, invoiceKeys: [] }],
+    resources: {
+      drivers: [{ id: 7, name: 'Snake Driver' }],
+      lorries: [{ id: 8, registrationNo: 'SNAKE 8008' }],
+    },
+  });
+
+  assert.equal(state.trips[0].driver?.name, 'Snake Driver');
+  assert.equal(state.trips[0].lorry?.registrationNo, 'SNAKE 8008');
+});
+
+test('invoice search matches customer, document, and item text case-insensitively', () => {
+  const state = createDispatchState({
+    invoices: [
+      { companyKey: 'enterprise', invoiceId: 'naina-001', docKey: 'naina-001', docNo: 'ENT-101', customer: { name: 'Naina Trading' }, items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '2', uom: 'CTN' }] },
+      { companyKey: 'sdn_bhd', invoiceId: 'other-001', docKey: 'other-001', docNo: 'SDN-202', customer: { name: 'Other Mart' }, items: [{ itemCode: 'SUGAR-1KG', description: 'Sugar', quantity: '1', uom: 'PKT' }] },
+    ],
+    trips,
+  });
+
+  assert.deepEqual(
+    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'naina')).map(getInvoiceKey),
+    ['enterprise:naina-001'],
+  );
+  assert.deepEqual(
+    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'NAINA')).map(getInvoiceKey),
+    ['enterprise:naina-001'],
+  );
+  assert.deepEqual(
+    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'sdn-202')).map(getInvoiceKey),
+    ['sdn_bhd:other-001'],
+  );
+  assert.deepEqual(
+    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'sugar')).map(getInvoiceKey),
+    ['sdn_bhd:other-001'],
+  );
+  assert.equal(visibleUnassignedInvoices(dispatchState.setSearchQuery(state, '')).length, 2);
+  assert.equal(visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'no-such-customer')).length, 0);
+});
+
+test('invoice search narrows trip lanes and survives board reload', () => {
+  const state = createDispatchState({
+    invoices: [
+      { companyKey: 'enterprise', invoiceId: 'naina-001', docKey: 'naina-001', docNo: 'ENT-101', customer: { name: 'Naina Trading' }, items: [] },
+      { companyKey: 'enterprise', invoiceId: 'other-001', docKey: 'other-001', docNo: 'ENT-102', customer: { name: 'Other Mart' }, items: [] },
+    ],
+    trips: [{ ...trips[0], invoiceKeys: ['enterprise:naina-001', 'enterprise:other-001'] }],
+  });
+  const searched = dispatchState.setSearchQuery(state, 'naina');
+
+  assert.deepEqual(getTripInvoices(searched, 'trip-001').map(getInvoiceKey), ['enterprise:naina-001']);
+
+  const reloaded = reloadDispatchState(searched, { invoices: state.invoices, trips: state.trips, assignments: [] });
+  assert.equal(reloaded.searchQuery, 'naina');
+  assert.deepEqual(getTripInvoices(reloaded, 'trip-001').map(getInvoiceKey), ['enterprise:naina-001']);
+});
+
+test('quarantined source rows are counted in state for the board notice', () => {
+  assert.equal(createDispatchState().quarantinedCount, 0);
+  const state = createDispatchState({ invoices: [], trips: [], quarantinedCount: 3 });
+
+  assert.equal(state.quarantinedCount, 3);
 });

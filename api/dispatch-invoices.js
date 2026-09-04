@@ -56,7 +56,15 @@ function createDispatchInvoicesHandler({ adapter, configs, getSession, env = pro
       const sourceResults = await Promise.all(keys.map(async (key) => {
         try {
           const invoices = await resolvedAdapter.listInvoices(resolvedConfigs[key], startDate, endDate);
-          return [key, { status: 'ok', invoiceCount: invoices.length }, invoices];
+          const quarantined = Array.isArray(invoices.quarantined) ? invoices.quarantined : [];
+          if (quarantined.length) {
+            logger?.warn?.('Dispatch invoice rows quarantined', {
+              company: key,
+              quarantinedCount: quarantined.length,
+              reasons: [...new Set(quarantined.map((row) => row.reason))],
+            });
+          }
+          return [key, { status: 'ok', invoiceCount: invoices.length, quarantinedCount: quarantined.length }, invoices];
         } catch (error) {
           const integrityError = error && ['duplicate_doc_key', 'invalid_source_data'].includes(error.code);
           if (integrityError) {
@@ -78,8 +86,10 @@ function createDispatchInvoicesHandler({ adapter, configs, getSession, env = pro
 
       const sources = {};
       const invoices = [];
+      let quarantinedCount = 0;
       for (const [key, health, rows] of sourceResults) {
         sources[key] = health;
+        quarantinedCount += health.quarantinedCount || 0;
         invoices.push(...rows);
       }
       return sendJson(res, 200, {
@@ -88,6 +98,7 @@ function createDispatchInvoicesHandler({ adapter, configs, getSession, env = pro
         company,
         invoices,
         sources,
+        quarantinedCount,
       });
     } catch (error) {
       if (error && error.name === 'CompanyConfigError') {

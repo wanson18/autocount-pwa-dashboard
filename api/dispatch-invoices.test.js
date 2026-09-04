@@ -247,7 +247,7 @@ test('adapter marks a non-cancelled invoice without authoritative UOM as blocked
   assert.equal(invoice.items[0].uom, null);
 });
 
-test('adapter rejects invoices without an authoritative boolean cancellation state', async () => {
+test('adapter quarantines invoices without an authoritative boolean cancellation state', async () => {
   const configs = loadCompanyConfigs(ENV);
   for (const cancellationState of [undefined, null, 'false']) {
     const row = structuredClone(enterpriseFixture.data[0]);
@@ -258,11 +258,28 @@ test('adapter rejects invoices without an authoritative boolean cancellation sta
       sdn_bhd: [{ data: [], totalCount: 0 }],
     });
 
-    await assert.rejects(
-      () => new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28'),
-      (error) => error.code === 'invalid_source_data',
-    );
+    const invoices = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+    assert.equal(invoices.length, 0);
+    assert.equal(invoices.quarantined.length, 1);
+    assert.match(invoices.quarantined[0].reason, /cancelled/i);
   }
+});
+
+test('adapter keeps valid invoices when a sibling row is malformed', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const badRow = structuredClone(enterpriseFixture.data[0]);
+  delete badRow.master.debtorCode;
+  const client = fakeClient({
+    enterprise: [{ data: [enterpriseFixture.data[0], badRow], totalCount: 2 }],
+    sdn_bhd: [{ data: [], totalCount: 0 }],
+  });
+
+  const invoices = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+  assert.equal(invoices.length, 1);
+  assert.equal(invoices.quarantined.length, 1);
+  assert.match(invoices.quarantined[0].reason, /debtorCode/);
 });
 
 test('adapter reports an incomplete source when a page ends before totalCount', async () => {
@@ -281,7 +298,7 @@ test('adapter reports an incomplete source when a page ends before totalCount', 
   );
 });
 
-test('adapter rejects an invoice with an invalid calendar date as source data', async () => {
+test('adapter quarantines an invoice with an invalid calendar date as source data', async () => {
   const configs = loadCompanyConfigs(ENV);
   const row = structuredClone(enterpriseFixture.data[0]);
   row.master.docDate = '2026-13-01';
@@ -290,10 +307,11 @@ test('adapter rejects an invoice with an invalid calendar date as source data', 
     sdn_bhd: [{ data: [], totalCount: 0 }],
   });
 
-  await assert.rejects(
-    () => new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28'),
-    (error) => error.code === 'invalid_source_data',
-  );
+  const invoices = await new InvoiceAdapter(client).listInvoices(configs.enterprise, '2026-08-28', '2026-08-28');
+
+  assert.equal(invoices.length, 0);
+  assert.equal(invoices.quarantined.length, 1);
+  assert.match(invoices.quarantined[0].reason, /docDate/);
 });
 
 test('adapter keeps a mismatched product-master identity blocked', async () => {
@@ -374,7 +392,7 @@ test('all endpoint returns mixed company invoices and source health', async () =
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.invoices.length, 1);
   assert.equal(res.body.invoices[0].companyKey, 'enterprise');
-  assert.deepEqual(res.body.sources.enterprise, { status: 'ok', invoiceCount: 1 });
+  assert.deepEqual(res.body.sources.enterprise, { status: 'ok', invoiceCount: 1, quarantinedCount: 0 });
   assert.deepEqual(res.body.sources.sdn_bhd, { status: 'unavailable', errorCode: 'source_unavailable' });
   assert.equal(JSON.stringify(res.body).includes('source unavailable'), false);
   assert.equal(JSON.stringify(res.body).includes('enterprise-book-fixture'), false);
@@ -426,6 +444,24 @@ test('endpoint logs only redacted source rejection diagnostics', async () => {
   assert.equal(JSON.stringify(res.body).includes('debtorCode'), false);
 });
 
+test('endpoint surfaces quarantined row counts without row details', async () => {
+  const configs = loadCompanyConfigs(ENV);
+  const rows = [{ companyKey: 'enterprise', docKey: 'enterprise-doc-001' }];
+  rows.quarantined = [{ companyKey: 'enterprise', docNo: null, reason: 'debtorCode is missing or invalid' }];
+  const handler = createDispatchInvoicesHandler(withAuthenticatedSession({
+    adapter: { async listInvoices() { return rows; } },
+    configs,
+  }));
+  const res = responseRecorder();
+
+  await handler({ method: 'GET', query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'enterprise' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.quarantinedCount, 1);
+  assert.deepEqual(res.body.sources.enterprise, { status: 'ok', invoiceCount: 1, quarantinedCount: 1 });
+  assert.equal(JSON.stringify(res.body).includes('debtorCode'), false);
+});
+
 test('single-company endpoint does not fetch the other company', async () => {
   const configs = loadCompanyConfigs(ENV);
   const seen = [];
@@ -444,7 +480,7 @@ test('single-company endpoint does not fetch the other company', async () => {
 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(seen, ['sdn_bhd']);
-  assert.deepEqual(res.body.sources, { sdn_bhd: { status: 'ok', invoiceCount: 0 } });
+  assert.deepEqual(res.body.sources, { sdn_bhd: { status: 'ok', invoiceCount: 0, quarantinedCount: 0 } });
 });
 
 test('AutoCount client preserves a decimal quantity lexeme at the HTTP boundary', async () => {

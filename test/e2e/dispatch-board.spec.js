@@ -182,6 +182,13 @@ function invoiceCard(page, docNo) {
   return page.locator('.invoice-card').filter({ hasText: docNo });
 }
 
+function currentKualaLumpurDate() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 async function dropInvoiceKey(page, invoiceKey, tripId = '101') {
   await page.evaluate(({ key, targetTripId }) => {
     const dataTransfer = new DataTransfer();
@@ -205,7 +212,7 @@ test('Board shows combined company feed and creates a mixed-company trip', async
   await page.getByRole('button', { name: 'Create trip' }).click();
   await expect(page.locator('[data-trip-id="102"]')).toBeVisible();
   expect(state.tripBodies[0]).toEqual(expect.objectContaining({
-    trip_date: '2026-08-28', driver_id: 1, vehicle_id: 2, route_notes: 'South route',
+    trip_date: currentKualaLumpurDate(), driver_id: 1, vehicle_id: 2, route_notes: 'South route',
   }));
   expect(Object.keys(state.tripBodies[0]).sort()).toEqual(['driver_id', 'request_id', 'route_notes', 'trip_date', 'vehicle_id'].sort());
 
@@ -246,7 +253,9 @@ test('click, touch, keyboard, and drag assignment paths share the Board assignme
   await invoiceCard(page, 'SDN-E2E-001').getByRole('button', { name: /Select invoice/ }).click();
   await trip.getByRole('button', { name: /Assign selected invoice/ }).focus();
   await page.keyboard.press('Enter');
-  if (testInfo.project.name === 'desktop') await invoiceCard(page, 'ENT-E2E-002').dragTo(trip);
+  await expect(trip).toContainText('Combined 2');
+  await expect(page.locator('#statusMessage')).toContainText('Assignment saved');
+  if (testInfo.project.name === 'desktop') await dropInvoiceKey(page, 'enterprise:enterprise-e2e-002');
 
   expect(state.assignmentBodies).toHaveLength(testInfo.project.name === 'desktop' ? 3 : 2);
   for (const body of state.assignmentBodies) {

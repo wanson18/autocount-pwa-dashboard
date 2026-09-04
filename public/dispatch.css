@@ -346,17 +346,131 @@ h2 {
   opacity: 0.8;
 }
 
-.board-grid {
+.board-layout {
   display: grid;
-  grid-template-columns: minmax(290px, 0.85fr) minmax(0, 1.5fr);
   align-items: start;
   gap: 16px;
 }
 
 .queue-panel,
-.trips-panel {
+.trips-panel,
+.lorry-board-section {
   min-width: 0;
   padding: 17px;
+}
+
+.invoice-rail {
+  display: flex;
+  gap: 10px;
+  min-height: 112px;
+  padding-bottom: 6px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+}
+
+.invoice-rail[data-drop-unassigned] {
+  padding: 8px;
+  border: 1px dashed var(--border-light);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.invoice-rail .invoice-card {
+  flex: 0 0 230px;
+  scroll-snap-align: start;
+}
+
+.invoice-card--rail {
+  padding: 11px;
+}
+
+.invoice-card--rail .invoice-customer {
+  font-size: 0.76rem;
+}
+
+.invoice-card--rail .invoice-address {
+  margin-bottom: 9px;
+  font-size: 0.66rem;
+}
+
+.invoice-card--rail .invoice-items,
+.invoice-card--rail .invoice-date,
+.invoice-card--rail .invoice-address {
+  font-size: 0.66rem;
+}
+
+.invoice-card--rail .drag-affordance {
+  font-size: 0.6rem;
+}
+
+.lorry-board-section {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.16);
+}
+
+.lorry-board-heading {
+  align-items: flex-start;
+}
+
+.lorry-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.lorry-lane {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.lorry-lane-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lorry-lane-title h3 {
+  margin: 0;
+  font-size: clamp(0.98rem, 1.4vw, 1.1rem);
+}
+
+.lorry-driver-field {
+  display: grid;
+  gap: 4px;
+  min-width: min(100%, 200px);
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.lorry-driver-field .field-control {
+  min-height: 38px;
+  font-size: 0.72rem;
+}
+
+.lorry-trips {
+  display: grid;
+  gap: 10px;
+}
+
+.empty-lane {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--border-light);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.empty-lane .section-help {
+  margin: 0;
 }
 
 .section-heading {
@@ -567,6 +681,28 @@ h2 {
 
 .trip-meta strong {
   color: white;
+}
+
+.trip-driver-field {
+  display: inline-grid;
+  gap: 4px;
+  min-width: min(100%, 200px);
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.trip-driver-field .field-control {
+  min-height: 32px;
+  font-size: 0.72rem;
+}
+
+.lorry-driver-note {
+  max-width: 210px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .status-badge {
@@ -942,13 +1078,17 @@ h2 {
 }
 
 @media (max-width: 860px) {
-  .board-grid {
-    grid-template-columns: 1fr;
+  .queue-panel,
+  .lorry-board-section {
+    padding: 15px;
   }
 
-  .queue-panel,
-  .trips-panel {
-    padding: 15px;
+  .invoice-rail .invoice-card {
+    flex-basis: 200px;
+  }
+
+  .lorry-board {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1040,7 +1180,8 @@ h2 {
   }
 
   .queue-panel,
-  .trips-panel {
+  .trips-panel,
+  .lorry-board-section {
     padding: 12px;
   }
 
@@ -1109,7 +1250,8 @@ h2 {
 }
 
 .assign-selected-button,
-.assign-button {
+.assign-button,
+.remove-assignment-button {
   min-height: 38px;
   padding: 7px 10px;
   border: 1px solid rgba(147, 197, 253, 0.45);
@@ -1120,8 +1262,15 @@ h2 {
   font-weight: 800;
 }
 
+.remove-assignment-button {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+}
+
 .assign-selected-button:disabled,
-.assign-button:disabled {
+.assign-button:disabled,
+.remove-assignment-button:disabled {
   opacity: 0.45;
 }
 

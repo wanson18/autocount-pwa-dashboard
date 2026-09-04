@@ -32,6 +32,7 @@ export const COMPANY_NAMES = {
 };
 
 const SOURCE_LABELS = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
+const NON_ACTIVE_ASSIGNMENT_STATUSES = new Set(['removed']);
 
 export function getSourceMessage(sources = {}) {
   const unavailable = COMPANY_KEYS
@@ -95,6 +96,14 @@ function invoiceIdOf(value) {
   return value?.invoiceId ?? value?.invoice_id ?? value?.docKey ?? value?.header?.invoiceId ?? value?.header?.invoice_id;
 }
 
+function assignmentStatusOf(assignment) {
+  return assignment?.status ?? assignment?.assignmentStatus ?? assignment?.assignment_status;
+}
+
+function isActiveAssignment(assignment) {
+  return !NON_ACTIVE_ASSIGNMENT_STATUSES.has(assignmentStatusOf(assignment));
+}
+
 export function getInvoiceKey(invoiceOrCompanyKey, maybeInvoiceId) {
   const companyKey = typeof invoiceOrCompanyKey === 'object'
     ? companyKeyOf(invoiceOrCompanyKey)
@@ -142,11 +151,11 @@ function normalizeTrip(trip, assignments, resources = {}) {
   const invoiceKeys = [
     ...(trip.invoiceKeys || []),
     ...(trip.invoices || []).map(getInvoiceKey),
-    ...(trip.assignments || []).map(getInvoiceKey),
+    ...(trip.assignments || []).filter(isActiveAssignment).map(getInvoiceKey),
     ...tripAssignments.map(getInvoiceKey),
   ].filter(Boolean);
-  const driver = trip.driver || resources.drivers?.find((candidate) => String(candidate.id) === String(trip.driverId));
-  const lorry = trip.lorry || resources.lorries?.find((candidate) => String(candidate.id) === String(trip.vehicleId));
+  const driver = trip.driver || resources.drivers?.find((candidate) => String(candidate.id) === String(trip.driverId ?? trip.driver_id));
+  const lorry = trip.lorry || resources.lorries?.find((candidate) => String(candidate.id) === String(trip.vehicleId ?? trip.vehicle_id));
   return {
     ...copy(trip),
     id: trip.id,
@@ -177,20 +186,29 @@ export function createDispatchState({
   trips = [],
   assignments = [],
   sources = {},
+  quarantinedCount = 0,
   dateRange = DEFAULT_DATE_RANGE,
   resources = {},
   companyFilter = 'all',
+  searchQuery = '',
   boardStatus = 'ready',
 } = {}) {
   if (!COMPANY_FILTERS.includes(companyFilter)) throw new Error(`invalid company filter: ${companyFilter}`);
   const nestedAssignments = trips.flatMap((trip) => trip.assignments || []).map(normalizeAssignment);
   const allAssignments = [...assignments.map(normalizeAssignment), ...nestedAssignments];
+  const activeAssignments = allAssignments.filter(isActiveAssignment);
+  const activeAssignmentKeys = new Set(activeAssignments.map(getInvoiceKey).filter(Boolean));
+  const removedAssignmentKeys = new Set(allAssignments
+    .filter((assignment) => !isActiveAssignment(assignment))
+    .map(getInvoiceKey)
+    .filter((key) => key && !activeAssignmentKeys.has(key)));
   const assignedByKey = new Map();
-  allAssignments.forEach((assignment) => {
+  activeAssignments.forEach((assignment) => {
     const key = getInvoiceKey(assignment);
     if (key) assignedByKey.set(key, assignment);
   });
-  const normalizedTrips = trips.map((trip) => normalizeTrip(trip, allAssignments, resources));
+  const normalizedTrips = trips.map((trip) => normalizeTrip(trip, activeAssignments, resources))
+    .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }));
   const normalizedInvoices = invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips, assignedByKey));
   const invoiceKeys = new Set(normalizedInvoices.map((invoice) => invoice.key));
   for (const assignment of assignedByKey.values()) {
@@ -200,10 +218,12 @@ export function createDispatchState({
   }
   return {
     companyFilter,
+    searchQuery: typeof searchQuery === 'string' ? searchQuery : '',
     invoices: normalizedInvoices,
     trips: normalizedTrips,
     assignments: [...assignedByKey.values()],
     sources: copy(sources || {}),
+    quarantinedCount: Number(quarantinedCount) || 0,
     dateRange: copy(dateRange || DEFAULT_DATE_RANGE),
     boardStatus,
     selectedInvoiceKey: null,
@@ -223,8 +243,37 @@ export function getCompanyFilterLabel(companyFilter) {
   return COMPANY_FILTER_LABELS[companyFilter] || '';
 }
 
+export function setSearchQuery(state, searchQuery) {
+  const next = copy(state);
+  next.searchQuery = typeof searchQuery === 'string' ? searchQuery : '';
+  return next;
+}
+
+export function invoiceMatchesSearch(invoice, query) {
+  const text = String(query ?? '').trim().toLowerCase();
+  if (!text) return true;
+  const haystacks = [
+    invoice?.customer?.name,
+    invoice?.customerName,
+    invoice?.customer?.code,
+    invoice?.docNo,
+    invoice?.doc_no,
+    invoice?.invoiceId,
+    invoice?.invoice_id,
+    invoice?.docKey,
+  ];
+  for (const item of invoice?.items || []) {
+    haystacks.push(item?.itemCode, item?.item_code, item?.description);
+  }
+  return haystacks.some((field) => typeof field === 'string' && field.toLowerCase().includes(text));
+}
+
 export function reloadDispatchState(previousState, board) {
-  return createDispatchState({ ...board, companyFilter: previousState.companyFilter });
+  return createDispatchState({
+    ...board,
+    companyFilter: previousState.companyFilter,
+    searchQuery: previousState.searchQuery,
+  });
 }
 
 export function getTabNavigationIndex(currentIndex, key, tabCount = TAB_NAMES.length) {
@@ -240,6 +289,9 @@ export function visibleUnassignedInvoices(state) {
   return state.invoices.filter((invoice) => (
     invoice.tripId === null
     && (state.companyFilter === 'all' || companyKeyOf(invoice) === state.companyFilter)
+    && invoice.cancelled !== true
+    && invoice.eligibility !== 'blocked_missing_uom'
+    && invoiceMatchesSearch(invoice, state.searchQuery)
   ));
 }
 
@@ -258,7 +310,8 @@ export function getTripInvoices(state, tripId) {
   if (!trip) return [];
   return trip.invoiceKeys
     .map((key) => state.invoices.find((invoice) => invoice.key === key))
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((invoice) => invoiceMatchesSearch(invoice, state.searchQuery));
 }
 
 export function getTripCompanyCounts(state, tripId) {
@@ -269,6 +322,43 @@ export function getTripCompanyCounts(state, tripId) {
     counts.total += 1;
   }
   return counts;
+}
+
+export function lorryIdOf(trip) {
+  if (trip?.lorry?.id != null) return trip.lorry.id;
+  if (trip?.vehicleId != null) return trip.vehicleId;
+  return null;
+}
+
+export function getLorryLanes(state, resources = {}) {
+  const lanes = new Map();
+  const lorriesByRegistration = new Map((resources.lorries || [])
+    .filter((lorry) => lorry?.id != null && lorry.registrationNo)
+    .map((lorry) => [String(lorry.registrationNo).trim().toLowerCase(), lorry]));
+  const registerLorry = (lorry) => {
+    if (!lorry || lorry.id == null) return null;
+    const key = String(lorry.id);
+    if (!lanes.has(key)) lanes.set(key, { lorry, trips: [] });
+    return lanes.get(key);
+  };
+  for (const lorry of resources.lorries || []) registerLorry(lorry);
+  for (const trip of state.trips) {
+    const tripLorryId = lorryIdOf(trip);
+    const tripRegistrationNo = trip.lorry?.registrationNo || trip.registrationNo || '';
+    const matchedLorry = tripLorryId == null
+      ? lorriesByRegistration.get(String(tripRegistrationNo).trim().toLowerCase())
+      : null;
+    const lane = registerLorry(matchedLorry || {
+      id: tripLorryId ?? `trip:${trip.id}`,
+      registrationNo: tripRegistrationNo || 'Lorry',
+    });
+    if (lane) lane.trips.push(trip);
+  }
+  return [...lanes.values()].sort((left, right) => {
+    const leftReg = left.lorry?.registrationNo || '';
+    const rightReg = right.lorry?.registrationNo || '';
+    return leftReg.localeCompare(rightReg);
+  });
 }
 
 export function selectInvoice(state, invoiceKey) {
@@ -291,6 +381,20 @@ function moveSnapshot(state, invoiceKey) {
   };
 }
 
+function removalSnapshot(state, invoiceKey) {
+  const invoice = state.invoices.find((candidate) => candidate.key === invoiceKey);
+  return {
+    invoice: invoice ? {
+      tripId: invoice.tripId ?? null,
+      eligibility: invoice.eligibility,
+      assignmentStatus: invoice.assignmentStatus,
+      assignmentId: invoice.assignmentId,
+    } : null,
+    trips: state.trips.map((trip) => ({ id: trip.id, invoiceKeys: [...trip.invoiceKeys] })),
+    assignments: copy(state.assignments),
+  };
+}
+
 export function beginOptimisticMove(state, { invoiceKey, tripId, requestId }) {
   if (!requestId) throw new Error('requestId is required');
   if (!state.invoices.some((invoice) => invoice.key === invoiceKey)) throw new Error('invoice is not in state');
@@ -307,6 +411,29 @@ export function beginOptimisticMove(state, { invoiceKey, tripId, requestId }) {
   next.pendingMove = { invoiceKey, tripId, requestId, previous };
   next.lastMove = { status: 'pending', requestId };
   next.statusMessage = 'Assignment is being saved.';
+  return next;
+}
+
+export function beginOptimisticRemoval(state, { invoiceKey, requestId }) {
+  if (!requestId) throw new Error('requestId is required');
+  const invoice = state.invoices.find((candidate) => candidate.key === invoiceKey);
+  if (!invoice || invoice.tripId == null || invoice.assignmentId == null) throw new Error('invoice is not assigned');
+  const previous = removalSnapshot(state, invoiceKey);
+  const next = copy(state);
+  next.invoices.forEach((candidate) => {
+    if (candidate.key === invoiceKey) {
+      candidate.tripId = null;
+      candidate.eligibility = 'eligible';
+      candidate.assignmentStatus = 'removed';
+    }
+  });
+  next.trips.forEach((trip) => { trip.invoiceKeys = trip.invoiceKeys.filter((key) => key !== invoiceKey); });
+  next.assignments = next.assignments.map((assignment) => (
+    String(assignment.id) === String(invoice.assignmentId) ? { ...assignment, status: 'removed' } : assignment
+  ));
+  next.pendingMove = { kind: 'remove', invoiceKey, tripId: null, requestId, previous };
+  next.lastMove = { status: 'pending', requestId };
+  next.statusMessage = 'Invoice is being returned to the queue.';
   return next;
 }
 
@@ -331,11 +458,13 @@ export function rejectMoveResponse(state, { requestId, message }) {
   const next = copy(state);
   const { previous } = next.pendingMove;
   const invoice = next.invoices.find((candidate) => candidate.key === next.pendingMove.invoiceKey);
-  if (invoice) invoice.tripId = previous.invoiceTripId;
+  if (invoice && next.pendingMove.kind === 'remove' && previous.invoice) Object.assign(invoice, previous.invoice);
+  else if (invoice) invoice.tripId = previous.invoiceTripId;
   next.trips.forEach((trip) => {
     const prior = previous.trips.find((candidate) => String(candidate.id) === String(trip.id));
     if (prior) trip.invoiceKeys = [...prior.invoiceKeys];
   });
+  if (next.pendingMove.kind === 'remove' && previous.assignments) next.assignments = copy(previous.assignments);
   next.pendingMove = null;
   next.lastMove = { status: 'rejected', requestId };
   next.statusMessage = message || 'Assignment was not saved.';

@@ -78,11 +78,15 @@
                   <option value="sdn_bhd">Sdn Bhd only</option>
                 </select>
               </label>
+              <label class="field-group" for="invoiceSearch">
+                <span>Search invoices</span>
+                <input id="invoiceSearch" class="field-control" type="search" placeholder="Customer, doc no, or item…" autocomplete="off" aria-label="Search invoices by customer, document number, or item">
+              </label>
               <button class="secondary-button" type="button" id="refreshBoard">Refresh board</button>
             </div>
           </div>
 
-          <div class="board-grid" aria-label="Dispatch board">
+          <div class="board-layout">
             <section class="queue-panel panel" aria-labelledby="unassignedTitle">
               <div class="section-heading">
                 <div>
@@ -91,20 +95,20 @@
                 </div>
                 <span class="queue-key" id="queueKey" aria-label="ALL company queue">ALL</span>
               </div>
-              <p class="section-help">Drag on desktop, or select an invoice and trip on mobile. Assignments are saved as dispatch records; accounting invoices stay unchanged.</p>
-              <div class="invoice-list" id="unassignedList" aria-live="polite"></div>
+              <p class="section-help">Drag on desktop, or select an invoice and tap a lorry on mobile. Assignments are saved as dispatch records; accounting invoices stay unchanged. Drag an assigned invoice back here or use Remove to return it to this queue.</p>
+              <div class="invoice-rail" id="unassignedList" data-drop-unassigned="true" aria-label="Unassigned invoices drop zone" aria-live="polite"></div>
             </section>
 
-            <section class="trips-panel" aria-labelledby="tripsTitle">
-              <div class="section-heading trips-heading">
+            <section class="lorry-board-section" aria-labelledby="lorryBoardTitle">
+              <div class="section-heading lorry-board-heading">
                 <div>
                   <p class="eyebrow">Physical loading plan</p>
-                  <h2 id="tripsTitle">Today’s trips</h2>
+                  <h2 id="lorryBoardTitle">Lorry lanes</h2>
                 </div>
                 <button class="primary-button" type="button" id="newTripButton">+ New trip</button>
               </div>
-              <p class="section-help" id="assignmentExplanation">Select an invoice, select a trip, then assign. One trip may contain both companies.</p>
-              <div class="trip-list" id="tripList"></div>
+              <p class="section-help" id="assignmentExplanation">Select an invoice, then drag it to a lorry lane or tap a lorry lane to assign. Drag an assigned invoice back to the queue or use Remove to return it.</p>
+              <div class="lorry-board" id="lorryBoard" aria-label="Lorry lanes"></div>
             </section>
           </div>
 
