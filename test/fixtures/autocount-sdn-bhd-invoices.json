@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "master": {
+        "docKey": "sdn-bhd-doc-001",
+        "docNo": "SDN-SI-0001",
+        "docDate": "2026-08-28",
+        "cancelled": false,
+        "debtorCode": "SDN-CUST-001",
+        "debtorName": "Sanitized Sdn Bhd Customer",
+        "deliverAddress": "Sanitized Sdn Bhd Delivery Address"
+      },
+      "details": [
+        {
+          "productCode": "OIL-5KG",
+          "description": "Cooking Oil 5KG",
+          "qty": "3",
+          "unit": "CTN"
+        }
+      ]
+    }
+  ],
+  "totalCount": 1
+}

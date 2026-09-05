@@ -1,0 +1,43 @@
+{
+  "data": [
+    {
+      "master": {
+        "docKey": "enterprise-doc-001",
+        "docNo": "ENT-SI-0001",
+        "docDate": "2026-08-28",
+        "cancelled": false,
+        "debtorCode": "ENT-CUST-001",
+        "debtorName": "Sanitized Enterprise Customer",
+        "deliverAddress": "Sanitized Enterprise Delivery Address"
+      },
+      "details": [
+        {
+          "productCode": "OIL-5KG",
+          "description": "Cooking Oil 5KG",
+          "qty": "2.125",
+          "unit": "CTN"
+        }
+      ]
+    },
+    {
+      "master": {
+        "docKey": "enterprise-doc-cancelled",
+        "docNo": "ENT-SI-VOID",
+        "docDate": "2026-08-28",
+        "cancelled": true,
+        "debtorCode": "ENT-CUST-002",
+        "debtorName": "Sanitized Cancelled Customer",
+        "deliverAddress": "Sanitized Cancelled Address"
+      },
+      "details": [
+        {
+          "productCode": "OIL-5KG",
+          "description": "Cooking Oil 5KG",
+          "qty": "1",
+          "unit": "CTN"
+        }
+      ]
+    }
+  ],
+  "totalCount": 2
+}

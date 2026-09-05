@@ -1,5 +1,15 @@
 const CACHE_NAME = 'sales-dashboard-v6';
-const STATIC_ASSETS = ['/', '/index.html', '/today-invoices.html', '/manifest.json', '/icons/icon-192.png'];
+const STATIC_ASSETS = [
+  '/',
+  '/index.html',
+  '/today-invoices.html',
+  '/dispatch.html',
+  '/dispatch.css',
+  '/dispatch.js',
+  '/dispatch-state.mjs',
+  '/manifest.json',
+  '/icons/icon-192.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -30,6 +40,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+  const isDispatchApi = url.pathname === '/api/dispatch'
+    || url.pathname.startsWith('/api/dispatch/')
+    || url.pathname.startsWith('/api/dispatch-');
+  if (isDispatchApi) {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   if (request.url.includes('/api/')) {
     // Sales data must never fall back to an unlabelled stale response.

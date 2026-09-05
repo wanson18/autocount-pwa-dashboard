@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>Trip loading sheet — AutoCount Sales Dashboard</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="stylesheet" href="/loading-sheet.css" />
+  </head>
+  <body>
+    <main class="loading-app" id="loadingSheetApp">
+      <header class="loading-header">
+        <div class="loading-heading">
+          <a class="loading-back no-print" href="/dispatch.html">← Back to Dispatch</a>
+          <p class="eyebrow">Trip loading sheet</p>
+          <h1 id="sheetTitle">Trip loading sheet</h1>
+        </div>
+        <div class="sheet-controls no-print" aria-label="Loading sheet actions">
+          <button class="secondary-button" id="retryButton" type="button" hidden>Retry</button>
+          <button class="primary-button" id="printButton" type="button" disabled>Print Items</button>
+        </div>
+      </header>
+
+      <p class="loading-state" id="loadingState" role="status" aria-live="polite" aria-atomic="true">Loading the persisted loading sheet…</p>
+      <section class="sheet-content" id="sheetContent" aria-live="polite" hidden></section>
+    </main>
+    <script type="module" src="/loading-sheet.js"></script>
+  </body>
+</html>
