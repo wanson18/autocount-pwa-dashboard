@@ -151,6 +151,32 @@ test('loadCompanyInvoices reports missing book-scoped credentials without callin
   );
 });
 
+test('loadCompanyInvoices normalizes the mock envelope and keeps line items', async () => {
+  const result = await loadCompanyInvoices(
+    '2026-09-01',
+    '2026-09-01',
+    {
+      id: 'enterprise',
+      name: 'Wanson Enterprise',
+      accountBookId: '63750',
+      credentialsConfigured: false,
+    },
+    true,
+  );
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.dataSource, 'mock');
+  assert.equal(result.invoices.length, 5);
+  assert.deepEqual(result.invoices[0].lineItems[0], {
+    sku: 'OIL-PKO-20L',
+    description: 'Palm Kernel Oil 20L Drum',
+    quantity: 50,
+    unitPrice: 125,
+    total: 6250,
+  });
+  assert.equal(result.invoices[0].grandTotal, 9757.3);
+});
+
 test('combineCompanyResults preserves company identity and reports both totals', () => {
   const result = combineCompanyResults(
     [
@@ -198,14 +224,29 @@ test('combineCompanyResults preserves company identity and reports both totals',
     { docNo: 'INV-1', companyId: 'enterprise', companyName: 'Wanson Enterprise', accountBookId: '63750' },
     { docNo: 'INV-1', companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd', accountBookId: '63688' },
   ]);
+  assert.deepEqual(result.invoices.map(({ lineItems }) => lineItems), [
+    [{ sku: 'SKU-1', description: 'Oil', quantity: 2, unitPrice: 50, total: 100 }],
+    [{ sku: 'SKU-1', description: 'Oil', quantity: 4, unitPrice: 50, total: 200 }],
+  ]);
   assert.deepEqual(result.companies.map(({ id, accountBookId, status, invoiceCount, totalRevenue }) => ({ id, accountBookId, status, invoiceCount, totalRevenue })), [
     { id: 'enterprise', accountBookId: '63750', status: 'ok', invoiceCount: 1, totalRevenue: 100 },
     { id: 'sdnBhd', accountBookId: '63688', status: 'ok', invoiceCount: 1, totalRevenue: 200 },
   ]);
-  assert.deepEqual(result.skuBreakdown[0].customers, [
-    { companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd', name: 'Same Customer', quantity: 4 },
-    { companyId: 'enterprise', companyName: 'Wanson Enterprise', name: 'Same Customer', quantity: 2 },
-  ]);
+  assert.deepEqual(
+    result.skuBreakdown.map(({ companyId, companyName, customers }) => ({ companyId, companyName, customers })),
+    [
+      {
+        companyId: 'sdnBhd',
+        companyName: 'Wanson Sdn Bhd',
+        customers: [{ companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd', name: 'Same Customer', quantity: 4 }],
+      },
+      {
+        companyId: 'enterprise',
+        companyName: 'Wanson Enterprise',
+        customers: [{ companyId: 'enterprise', companyName: 'Wanson Enterprise', name: 'Same Customer', quantity: 2 }],
+      },
+    ],
+  );
 });
 
 test('combineCompanyResults marks the response partial when one book fails', () => {
@@ -270,6 +311,52 @@ test('aggregateBySKU groups quantity sold per customer, sorted descending', () =
     { name: 'ABC Trading Sdn Bhd', quantity: 60 },
     { name: 'XYZ Industries Ltd', quantity: 30 },
   ]);
+});
+
+test('aggregateBySKU keeps the same item code separate across company books', () => {
+  const result = aggregateBySKU([
+    {
+      companyId: 'enterprise',
+      companyName: 'Wanson Enterprise',
+      customerName: 'Enterprise customer',
+      lineItems: [{ sku: '00022', description: 'RENTAL', quantity: 1, unitPrice: 1000, total: 1000 }],
+    },
+    {
+      companyId: 'sdnBhd',
+      companyName: 'Wanson Sdn Bhd',
+      customerName: 'Sdn Bhd customer',
+      lineItems: [{ sku: '00022', description: 'TEPUNG BERAS CAP ERAWAN 3 GAJAH 1KG', quantity: 15, unitPrice: 43, total: 645 }],
+    },
+  ]);
+
+  assert.deepEqual(
+    result.map(({ sku, description, companyId, companyName, totalUnits, totalRevenue }) => ({
+      sku,
+      description,
+      companyId,
+      companyName,
+      totalUnits,
+      totalRevenue,
+    })),
+    [
+      {
+        sku: '00022',
+        description: 'RENTAL',
+        companyId: 'enterprise',
+        companyName: 'Wanson Enterprise',
+        totalUnits: 1,
+        totalRevenue: 1000,
+      },
+      {
+        sku: '00022',
+        description: 'TEPUNG BERAS CAP ERAWAN 3 GAJAH 1KG',
+        companyId: 'sdnBhd',
+        companyName: 'Wanson Sdn Bhd',
+        totalUnits: 15,
+        totalRevenue: 645,
+      },
+    ],
+  );
 });
 
 test('getLocalToday returns the UTC+8 date, not the UTC date, after 16:00 UTC', () => {
@@ -365,6 +452,43 @@ test('normalizeInvoices sets outstandingAmount to null when AutoCount does not r
   const [result] = normalizeInvoices(rawInvoices);
 
   assert.equal(result.outstandingAmount, null);
+});
+
+test('normalizeInvoices excludes AutoCount cancelled invoice rows from sales', () => {
+  const invoices = normalizeInvoices([
+    {
+      master: {
+        docNo: 'SI-ACTIVE',
+        docDate: '2026-09-09',
+        debtorName: 'Active Customer',
+        finalTotal: '100.00',
+        cancelled: false,
+      },
+      details: [],
+    },
+    {
+      master: {
+        docNo: 'SI-VOID',
+        docDate: '2026-09-09',
+        debtorName: 'Voided Customer',
+        finalTotal: '200.00',
+        cancelled: true,
+      },
+      details: [],
+    },
+    {
+      master: {
+        docNo: 'SI-VOID-ALIAS',
+        docDate: '2026-09-09',
+        debtorName: 'Voided Alias Customer',
+        finalTotal: '300.00',
+        isCancelled: '1',
+      },
+      details: [],
+    },
+  ]);
+
+  assert.deepEqual(invoices.map((invoice) => invoice.docNo), ['SI-ACTIVE']);
 });
 
 test('classifyPaymentStatus returns paid when outstanding is zero', () => {

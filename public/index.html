@@ -346,6 +346,7 @@
       let barChart = null;
       let doughnutChart = null;
       let allSKUData = [];
+      let customerItemsByKey = Object.create(null);
       let currentStartDate = '';
       let currentEndDate = '';
       let requestSequence = 0;
@@ -645,17 +646,75 @@
         });
       }
 
-      function buildCustomerList(customers) {
+      function customerKey(customer) {
+        return JSON.stringify([customer.companyId || '', customer.name || '']);
+      }
+
+      function buildCustomerItemsByKey(skus) {
+        const itemsByCustomer = Object.create(null);
+
+        skus.forEach((sku) => {
+          (sku.customers || []).forEach((customer) => {
+            const key = customerKey({
+              companyId: customer.companyId || sku.companyId,
+              name: customer.name,
+            });
+            if (!itemsByCustomer[key]) itemsByCustomer[key] = [];
+            itemsByCustomer[key].push({
+              sku: sku.sku,
+              description: sku.description,
+              quantity: customer.quantity,
+              companyName: sku.companyName || customer.companyName,
+            });
+          });
+        });
+
+        Object.values(itemsByCustomer).forEach((items) => {
+          items.sort((a, b) => b.quantity - a.quantity);
+        });
+        return itemsByCustomer;
+      }
+
+      function buildCustomerItems(items) {
+        if (!items || items.length === 0) {
+          return '<div class="text-slate-500 text-[10px] px-2 py-1">No item data</div>';
+        }
+        return items
+          .map(
+            (item) => `
+        <div class="flex items-center justify-between gap-2 px-2 py-1 text-[10px]">
+          <span class="text-slate-400 truncate">${escapeHtml(item.description || item.sku)}<span class="text-slate-600"> · ${escapeHtml(item.sku)}</span></span>
+          <span class="text-slate-300 shrink-0">${formatNumber(item.quantity)}</span>
+        </div>`,
+          )
+          .join('');
+      }
+
+      function buildCustomerList(customers, companyId = '') {
         if (!customers || customers.length === 0) {
           return '<div class="text-slate-500 text-xs px-2 py-1">No customer data</div>';
         }
         return customers
           .map(
-            (c) => `
-        <div class="flex justify-between px-2 py-1 text-xs">
-          <span class="text-slate-300">${escapeHtml(c.name)}</span>
-          <span class="text-slate-400">${formatNumber(c.quantity)}</span>
-        </div>`,
+            (c) => {
+              const items = customerItemsByKey[customerKey({ ...c, companyId: c.companyId || companyId })] || [];
+              return `
+        <div data-customer-entry class="border-t border-slate-800 first:border-t-0">
+          <button type="button" data-customer-toggle aria-expanded="false" class="w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-800/70 rounded">
+            <span class="flex items-center gap-1.5 min-w-0">
+              <svg data-customer-chevron class="w-3 h-3 text-slate-500 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+              <span class="min-w-0">
+                <span class="block text-slate-300 truncate">${escapeHtml(c.name)}</span>
+                ${c.companyName ? `<span class="block text-slate-600 text-[10px] truncate">${escapeHtml(c.companyName)}</span>` : ''}
+              </span>
+            </span>
+            <span class="text-slate-400 shrink-0">${formatNumber(c.quantity)}</span>
+          </button>
+          <div data-customer-detail class="hidden pl-5 pr-2 pb-1">${buildCustomerItems(items)}</div>
+        </div>`;
+            },
           )
           .join('');
       }
@@ -672,7 +731,7 @@
               </svg>
               <div>
                 <div class="text-white font-medium">${escapeHtml(s.description || s.sku)}</div>
-                <div class="text-slate-500 text-[10px] mt-0.5">${escapeHtml(s.sku)}</div>
+                <div class="text-slate-500 text-[10px] mt-0.5">${escapeHtml(s.companyName ? `${s.companyName} · ${s.sku}` : s.sku)}</div>
               </div>
             </div>
           </td>
@@ -680,7 +739,7 @@
           <td class="px-3 py-2 text-right text-emerald-400">${formatMYR(s.totalRevenue)}</td>
         </tr>
         <tr id="detail-${i}" class="hidden bg-slate-900/50">
-          <td colspan="3" class="px-3 pb-2 pt-1">${buildCustomerList(s.customers)}</td>
+          <td colspan="3" class="px-3 pb-2 pt-1">${buildCustomerList(s.customers, s.companyId)}</td>
         </tr>`,
           )
           .join('');
@@ -695,6 +754,7 @@
 
       function renderTable(skus) {
         allSKUData = skus;
+        customerItemsByKey = buildCustomerItemsByKey(skus);
         $('skuTableBody').innerHTML = buildTableRows(skus);
         $('tableSkeleton').classList.add('hidden');
         $('skuTable').classList.remove('hidden');
@@ -743,19 +803,64 @@
         return [...invoices].sort((a, b) => (b.outstandingAmount || 0) - (a.outstandingAmount || 0));
       }
 
+      function buildInvoiceItems(lineItems) {
+        if (!lineItems || lineItems.length === 0) {
+          return '<div class="text-slate-500 text-[10px] px-2 py-1">No item data</div>';
+        }
+        return lineItems
+          .map(
+            (item) => `
+        <div class="flex items-center justify-between gap-2 px-2 py-1 text-[10px]">
+          <span class="text-slate-400 truncate">${escapeHtml(item.description || item.sku)}<span class="text-slate-600"> · ${escapeHtml(item.sku)}</span></span>
+          <span class="text-slate-300 shrink-0">${formatNumber(item.quantity)} · ${formatMYR(item.total)}</span>
+        </div>`,
+          )
+          .join('');
+      }
+
       function buildPaymentRow(invoice) {
         const meta = PAYMENT_STATUS_META[invoice.paymentStatus] || PAYMENT_STATUS_META.unknown;
         return `
-        <div class="flex items-center justify-between px-1 py-1.5 text-xs">
-          <div class="min-w-0">
-            <div class="text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</div>
-            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</div>
-          </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
-            <span class="${meta.badgeClass} px-1.5 py-0.5 rounded text-[10px] font-medium">${meta.label}</span>
-          </div>
+        <div data-invoice-entry>
+          <button type="button" data-invoice-toggle aria-expanded="false" class="w-full flex items-center justify-between gap-2 px-1 py-1.5 text-left text-xs hover:bg-slate-800/70">
+            <span class="flex items-center gap-1.5 min-w-0">
+              <svg data-invoice-chevron class="w-3 h-3 text-slate-500 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+              <span class="min-w-0">
+                <span class="block text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</span>
+                <span class="block text-slate-500 text-[10px]">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</span>
+              </span>
+            </span>
+            <span class="flex items-center gap-2 shrink-0">
+              <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
+              <span class="${meta.badgeClass} px-1.5 py-0.5 rounded text-[10px] font-medium">${meta.label}</span>
+            </span>
+          </button>
+          <div data-invoice-detail class="hidden px-5 pb-2">${buildInvoiceItems(invoice.lineItems)}</div>
         </div>`;
+      }
+
+      function toggleInvoiceItems(toggle) {
+        const entry = toggle.closest('[data-invoice-entry]');
+        if (!entry) return;
+        const detail = entry.querySelector('[data-invoice-detail]');
+        const chevron = entry.querySelector('[data-invoice-chevron]');
+        if (!detail) return;
+        const expanded = !detail.classList.toggle('hidden');
+        toggle.setAttribute('aria-expanded', String(expanded));
+        if (chevron) chevron.classList.toggle('rotate-90', expanded);
+      }
+
+      function toggleCustomerItems(toggle) {
+        const entry = toggle.closest('[data-customer-entry]');
+        if (!entry) return;
+        const detail = entry.querySelector('[data-customer-detail]');
+        const chevron = entry.querySelector('[data-customer-chevron]');
+        if (!detail) return;
+        const expanded = !detail.classList.toggle('hidden');
+        toggle.setAttribute('aria-expanded', String(expanded));
+        if (chevron) chevron.classList.toggle('rotate-90', expanded);
       }
 
       function renderTodayPayments(invoices, summary) {
@@ -811,12 +916,22 @@
           $('toggleInvoiceListChevron').classList.toggle('rotate-180', !collapsed);
         });
 
+        $('paymentInvoiceList').addEventListener('click', (event) => {
+          const toggle = event.target.closest('[data-invoice-toggle]');
+          if (toggle) toggleInvoiceItems(toggle);
+        });
+
         document
           .querySelectorAll('.preset-btn')
           .forEach((btn) => btn.addEventListener('click', () => setPreset(btn.dataset.preset)));
 
         // Delegated so rebuilt rows stay clickable without re-binding.
         $('skuTableBody').addEventListener('click', (event) => {
+          const customerToggle = event.target.closest('[data-customer-toggle]');
+          if (customerToggle) {
+            toggleCustomerItems(customerToggle);
+            return;
+          }
           const row = event.target.closest('tr[data-row]');
           if (row) toggleRow(row.dataset.row);
         });

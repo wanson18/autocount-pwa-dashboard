@@ -157,16 +157,21 @@ function parseOutstandingAmount(rawValue) {
   return Math.round(parsed * 100) / 100;
 }
 
+function isCancelledInvoice(master) {
+  const cancellationState = master.cancelled ?? master.isCancelled;
+  return cancellationState === true || cancellationState === 1 || cancellationState === '1';
+}
+
 function normalizeInvoices(rawInvoices, company = null) {
-  return rawInvoices.map((inv) => {
+  return rawInvoices.filter((inv) => !isCancelledInvoice(inv.master || inv)).map((inv) => {
     const master = inv.master || inv;
-    const details = inv.details || [];
+    const details = inv.details || inv.lineItems || [];
 
     const normalized = {
       docNo: master.docNo || '',
       docDate: master.docDate || '',
       customerName: master.debtorName || master.customerName || '',
-      grandTotal: Math.round(parseFloat(master.finalTotal || master.total || 0) * 100) / 100,
+      grandTotal: Math.round(parseFloat(master.finalTotal || master.total || master.grandTotal || 0) * 100) / 100,
       outstandingAmount: parseOutstandingAmount(master.outstandingAmount),
       lineItems: details.map((d) => ({
         sku: d.productCode || d.sku || '',
@@ -194,7 +199,8 @@ function loadMockData(company) {
 
   const mockPath = path.join(__dirname, 'mock-sales.json');
   const raw = fs.readFileSync(mockPath, 'utf8');
-  return JSON.parse(raw);
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : parsed.invoices || [];
 }
 
 function aggregateBySKU(invoices) {
@@ -202,8 +208,11 @@ function aggregateBySKU(invoices) {
 
   for (const invoice of invoices) {
     for (const item of invoice.lineItems || []) {
-      if (!skuMap[item.sku]) {
-        skuMap[item.sku] = {
+      // Item codes are scoped to an AutoCount company book. The same code can
+      // legitimately identify different products in the two companies.
+      const aggregationKey = invoice.companyId ? `${invoice.companyId}\u0000${item.sku}` : item.sku;
+      if (!skuMap[aggregationKey]) {
+        skuMap[aggregationKey] = {
           sku: item.sku,
           description: item.description,
           totalRevenue: 0,
@@ -212,22 +221,26 @@ function aggregateBySKU(invoices) {
           totalCost: 0,
           customerQuantities: {},
         };
+        if (invoice.companyId) {
+          skuMap[aggregationKey].companyId = invoice.companyId;
+          skuMap[aggregationKey].companyName = invoice.companyName;
+        }
       }
-      skuMap[item.sku].totalRevenue = Math.round((skuMap[item.sku].totalRevenue + item.total) * 100) / 100;
-      skuMap[item.sku].totalUnits = Math.round((skuMap[item.sku].totalUnits + item.quantity) * 100) / 100;
-      skuMap[item.sku].orderCount += 1;
-      skuMap[item.sku].totalCost =
-        Math.round((skuMap[item.sku].totalCost + item.unitPrice * item.quantity) * 100) / 100;
+      skuMap[aggregationKey].totalRevenue = Math.round((skuMap[aggregationKey].totalRevenue + item.total) * 100) / 100;
+      skuMap[aggregationKey].totalUnits = Math.round((skuMap[aggregationKey].totalUnits + item.quantity) * 100) / 100;
+      skuMap[aggregationKey].orderCount += 1;
+      skuMap[aggregationKey].totalCost =
+        Math.round((skuMap[aggregationKey].totalCost + item.unitPrice * item.quantity) * 100) / 100;
       const customerKey = invoice.companyId ? `${invoice.companyId}\u0000${invoice.customerName}` : invoice.customerName;
-      if (!skuMap[item.sku].customerQuantities[customerKey]) {
-        skuMap[item.sku].customerQuantities[customerKey] = {
+      if (!skuMap[aggregationKey].customerQuantities[customerKey]) {
+        skuMap[aggregationKey].customerQuantities[customerKey] = {
           name: invoice.customerName,
           quantity: 0,
           companyId: invoice.companyId,
           companyName: invoice.companyName,
         };
       }
-      skuMap[item.sku].customerQuantities[customerKey].quantity += item.quantity;
+      skuMap[aggregationKey].customerQuantities[customerKey].quantity += item.quantity;
     }
   }
 
@@ -439,6 +452,13 @@ function combineCompanyResults(companyResults, startDate, endDate, timestamp = n
       companyId: invoice.companyId,
       companyName: invoice.companyName,
       accountBookId: invoice.accountBookId,
+      lineItems: (invoice.lineItems || []).map((item) => ({
+        sku: item.sku,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        total: item.total,
+      })),
     })),
     paymentSummary: computePaymentSummary(classifiedInvoices),
   };
