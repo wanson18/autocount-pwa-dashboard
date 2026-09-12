@@ -16,5 +16,6 @@ test("today invoice dropdown renders every today's invoice with its payment stat
   assert.match(dashboard, /Array\.isArray\(data\?\.invoices\) \? data\.invoices : \[\]/);
   assert.match(dashboard, /renderTodayPayments\(getTodayInvoices\(todayResult\.value\), todayResult\.value\.paymentSummary\)/);
   assert.match(dashboard, /Show today's invoices/);
+  assert.match(dashboard, /Outstanding balance today/);
   assert.match(dashboard, /Payment status/);
 });
