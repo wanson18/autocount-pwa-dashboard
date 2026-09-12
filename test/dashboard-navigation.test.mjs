@@ -8,3 +8,13 @@ test('dashboard exposes Delivery Dispatch only when its destination page is pres
   assert.match(dashboard, /href=["']\/dispatch\.html["']/);
   assert.equal(existsSync(new URL('../public/dispatch.html', import.meta.url)), true);
 });
+
+test("today invoice dropdown renders every today's invoice with its payment status", () => {
+  const dashboard = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+
+  assert.match(dashboard, /function getTodayInvoices\(data\)/);
+  assert.match(dashboard, /Array\.isArray\(data\?\.invoices\) \? data\.invoices : \[\]/);
+  assert.match(dashboard, /renderTodayPayments\(getTodayInvoices\(todayResult\.value\), todayResult\.value\.paymentSummary\)/);
+  assert.match(dashboard, /Show today's invoices/);
+  assert.match(dashboard, /Payment status/);
+});
