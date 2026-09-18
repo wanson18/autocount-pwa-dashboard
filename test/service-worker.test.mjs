@@ -34,7 +34,7 @@ function loadServiceWorker() {
         return cache;
       },
       async keys() {
-        return ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7'];
+      return ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7', 'sales-dashboard-v8'];
       },
       async delete(name) {
         deletedCaches.push(name);
@@ -61,12 +61,12 @@ test('service worker installs a new cache namespace and activation removes every
   let installPromise;
   worker.listeners.get('install')({ waitUntil(promise) { installPromise = promise; } });
   await installPromise;
-  assert.equal(worker.openedCaches[0], 'sales-dashboard-v8');
+  assert.equal(worker.openedCaches[0], 'sales-dashboard-v9');
 
   let activationPromise;
   worker.listeners.get('activate')({ waitUntil(promise) { activationPromise = promise; } });
   await activationPromise;
-  assert.deepEqual(worker.deletedCaches, ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7']);
+  assert.deepEqual(worker.deletedCaches, ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7', 'sales-dashboard-v8']);
 });
 
 test('dispatch API requests stay network-only and never enter the static/API cache', async () => {

@@ -310,6 +310,30 @@ test('session GET reports the public session and DELETE clears the same cookie s
   assert.match(logoutRes.headers['Set-Cookie'], /Path=\//);
 });
 
+test('public access mode provides a session without requiring dispatch credentials', async () => {
+  const api = requireSessionApi();
+  const handler = api.createDispatchSessionHandler({
+    env: { DISPATCH_PUBLIC_ACCESS: 'true' },
+    now: NOW,
+    throttleStore: null,
+  });
+  const res = responseRecorder();
+
+  await handler({ method: 'GET', headers: {} }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    success: true,
+    authenticated: true,
+    session: {
+      clerkId: 'public-dispatch',
+      role: 'admin',
+      iat: Math.floor(NOW.getTime() / 1000),
+      exp: Math.floor(NOW.getTime() / 1000) + 8 * 60 * 60,
+    },
+  });
+});
+
 test('session endpoint rejects unsupported methods, non-JSON bodies, extra fields, and oversized bodies safely', async () => {
   const api = requireSessionApi();
   const env = await makeEnv();
@@ -414,10 +438,36 @@ test('dispatch invoice reads require a session before contacting the source', as
   assert.equal(JSON.stringify(res.body).includes('enterprise-book'), false);
 });
 
+test('public access mode permits protected dispatch invoice reads without a cookie', async () => {
+  let called = false;
+  const handler = invoicesApi.createDispatchInvoicesHandler({
+    env: { DISPATCH_PUBLIC_ACCESS: 'true' },
+    adapter: {
+      async listInvoices() {
+        called = true;
+        return [];
+      },
+    },
+    configs: { enterprise: {} },
+  });
+  const res = responseRecorder();
+
+  await handler({
+    method: 'GET',
+    query: { startDate: '2026-08-28', endDate: '2026-08-28', company: 'enterprise' },
+    headers: {},
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(called, true);
+});
+
 test('deployment configuration keeps dispatch credentials server-side and dispatch responses uncached', () => {
   const envExample = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
   assert.match(envExample, /^DISPATCH_SESSION_SECRET=/m);
   assert.match(envExample, /^DISPATCH_USERS_JSON=/m);
+  assert.match(envExample, /^DISPATCH_PUBLIC_ACCESS=/m);
 
   const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
   assert.deepEqual(

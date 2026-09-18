@@ -12,25 +12,7 @@
   </head>
   <body>
     <div class="dispatch-app" id="dispatchApp">
-      <section class="login-view panel" id="loginView" aria-labelledby="loginTitle">
-        <p class="eyebrow">Operations access</p>
-        <h1 id="loginTitle">Delivery Dispatch</h1>
-        <p class="login-copy">Sign in with your dispatch clerk account to view the protected board and maintain resources.</p>
-        <form id="dispatchLoginForm" class="login-form" novalidate>
-          <label class="field-group" for="clerkId">
-            <span>Clerk ID</span>
-            <input class="field-control" id="clerkId" name="clerkId" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required />
-          </label>
-          <label class="field-group" for="clerkPin">
-            <span>PIN</span>
-            <input class="field-control" id="clerkPin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" required />
-          </label>
-          <button class="primary-button" id="loginSubmit" type="submit">Sign in</button>
-        </form>
-        <p class="login-message" id="loginMessage" role="status" aria-live="polite"></p>
-      </section>
-
-      <div id="authenticatedView" hidden>
+      <div id="authenticatedView">
         <header class="page-header" aria-labelledby="pageTitle">
           <div class="brand-lockup">
             <a class="back-link" href="/" aria-label="Back to Sales Dashboard">←</a>
@@ -41,9 +23,8 @@
           </div>
           <div class="header-meta" aria-label="Dispatch status">
             <span class="online-indicator" aria-hidden="true"></span>
-            <span>Authenticated operational board</span>
+            <span>Operational board</span>
             <time id="updatedAt"></time>
-            <button class="secondary-button" type="button" id="logoutButton">Sign out</button>
           </div>
         </header>
 

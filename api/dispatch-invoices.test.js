@@ -103,6 +103,22 @@ test('company config uses shared credentials only when both shared values exist'
   );
 });
 
+test('company config accepts the existing Sdn Bhd credential variable names', () => {
+  const configs = loadCompanyConfigs({
+    AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: 'enterprise-book-fixture',
+    AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: 'sdn-bhd-book-fixture',
+    AUTOCOUNT_KEY_ID: 'shared-enterprise-key-fixture',
+    AUTOCOUNT_API_KEY: 'shared-enterprise-api-fixture',
+    AUTOCOUNT_SDN_BHD_KEY_ID: 'sdn-bhd-key-fixture',
+    AUTOCOUNT_SDN_BHD_API_KEY: 'sdn-bhd-api-fixture',
+  });
+
+  assert.equal(configs.enterprise.keyId, 'shared-enterprise-key-fixture');
+  assert.equal(configs.enterprise.apiKey, 'shared-enterprise-api-fixture');
+  assert.equal(configs.sdn_bhd.keyId, 'sdn-bhd-key-fixture');
+  assert.equal(configs.sdn_bhd.apiKey, 'sdn-bhd-api-fixture');
+});
+
 test('adapter consumes all pages, excludes cancelled invoices, and keeps exact item decimals', async () => {
   const configs = loadCompanyConfigs(ENV);
   const client = fakeClient({

@@ -511,7 +511,7 @@ class FakeElement {
   }
 }
 
-function createFakeDispatchDocument({ protectedShell = false } = {}) {
+function createFakeDispatchDocument({ protectedShell = false, publicShell = false } = {}) {
   const tabs = ['board', 'trips', 'reports', 'resources'].map((tabName, index) => new FakeElement({
     id: `${tabName}Tab`,
     role: 'tab',
@@ -535,10 +535,10 @@ function createFakeDispatchDocument({ protectedShell = false } = {}) {
     ['statusMessage', new FakeElement()],
     ...panels.map((panel) => [panel.id, panel]),
   ]);
-  if (protectedShell) {
+  if (protectedShell || publicShell) {
     for (const id of [
-      'loginView', 'authenticatedView', 'dispatchLoginForm', 'loginMessage', 'loginSubmit',
-      'clerkId', 'clerkPin', 'logoutButton', 'resourceStatus', 'driverList', 'lorryList',
+      ...(protectedShell ? ['loginView', 'dispatchLoginForm', 'loginMessage', 'loginSubmit', 'clerkId', 'clerkPin'] : []),
+      'authenticatedView', 'logoutButton', 'resourceStatus', 'driverList', 'lorryList',
       'resourceForm', 'resourceType', 'resourceSubmit', 'showInactiveResources',
       'driverResourceFields', 'lorryResourceFields', 'resourceName', 'resourceLicenseNo',
       'resourcePhone', 'resourceRegistrationNo', 'resourceDescription',
@@ -727,18 +727,31 @@ test('click delegation ignores disabled actions, keeps child invoice clicks scop
   );
 });
 
-test('dispatch shell provides a keyboard-accessible login boundary and resource controls', () => {
+test('dispatch shell opens directly without a credential input and keeps resource controls', () => {
   const html = fs.readFileSync(path.join(process.cwd(), 'public', 'dispatch.html'), 'utf8');
 
-  assert.match(html, /id="loginView"/);
-  assert.match(html, /id="dispatchLoginForm"/);
-  assert.match(html, /id="clerkId"/);
-  assert.match(html, /id="clerkPin"/);
-  assert.match(html, /type="password"/);
-  assert.match(html, /id="authenticatedView"[^>]*hidden/);
+  assert.doesNotMatch(html, /id="loginView"|id="dispatchLoginForm"|id="clerkId"|id="clerkPin"|type="password"/);
+  assert.match(html, /id="authenticatedView"/);
+  assert.doesNotMatch(html, /id="authenticatedView"[^>]*hidden/);
+  assert.doesNotMatch(html, /id="logoutButton"/);
   assert.match(html, /id="resourceForm"/);
   assert.match(html, /id="driverList"/);
   assert.match(html, /id="lorryList"/);
+});
+
+test('public dispatch shell marks itself available and loads the board without a session form', async () => {
+  const fake = createFakeDispatchDocument({ publicShell: true });
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    transport: { loadBoard: async () => ({ invoices, trips: [] }) },
+    resourcesTransport: { loadResources: async () => ({ drivers: [], lorries: [] }) },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(app.getSession(), { clerkId: 'public-dispatch', role: 'admin' });
+  assert.deepEqual(app.getState().invoices.map((invoice) => invoice.docNo), invoices.map((invoice) => invoice.docNo));
+  assert.equal(fake.elements.get('authenticatedView').hidden, false);
 });
 
 test('dispatch shell describes persisted dispatch records without stale preview claims', () => {

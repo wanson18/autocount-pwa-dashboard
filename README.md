@@ -70,6 +70,7 @@ Required variables:
 | `DATABASE_URL`              | Pooled PostgreSQL URL for dispatch state    |
 | `DISPATCH_USERS_JSON`       | Server-side clerk identities and scrypt hashes |
 | `DISPATCH_SESSION_SECRET`   | Base64url for exactly 32 random secret bytes |
+| `DISPATCH_PUBLIC_ACCESS`     | `true` deliberately disables dispatch credential checks |
 
 The old single-book `AUTOCOUNT_COMPANY_ID` setting does not select a book in this integration. Both book-scoped credential pairs must be present for a complete live result; otherwise the dashboard reports which book is unavailable.
 
@@ -102,6 +103,11 @@ padding). PIN hashes use the canonical positional
 profiles, unknown or duplicate parameters, noncanonical encodings, and malformed
 or out-of-bound salt/key lengths fail closed. The bounded parser checks remain in
 place as a defense-in-depth limit around that exact profile.
+Set `DISPATCH_PUBLIC_ACCESS=true` only for a deliberate public deployment: it
+removes the login screen and bypasses clerk checks for dispatch reads and writes.
+Anyone who can reach the deployment can then view invoice/customer data and use
+dispatch mutations, so keep it `false` unless the deployment is protected by a
+separate trusted network or access-control layer.
 Login throttling is persisted in PostgreSQL, keyed by HMAC digests of the
 normalized clerk ID and trusted client address; the service fails closed if that
 store is unavailable. Resource POST/PATCH requests require a validated
