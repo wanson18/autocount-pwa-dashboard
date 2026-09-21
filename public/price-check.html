@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="Read-only price-difference check for approved AutoCount invoices" />
+    <title>Price Check — AutoCount Sales Dashboard</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .panel {
+        background-color: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 0.75rem;
+      }
+      [data-alert-detail] {
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-900 text-white min-h-screen">
+    <div class="max-w-md mx-auto px-4 pb-8">
+      <header class="py-4 flex items-center justify-between border-b border-slate-700">
+        <div class="flex items-center gap-2">
+          <a
+            href="/"
+            class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition text-sm"
+            aria-label="Back to Sales Dashboard"
+          >←</a>
+          <div>
+            <p class="text-[10px] uppercase tracking-wide text-slate-500">Read-only check</p>
+            <h1 class="text-lg font-bold">Price Check</h1>
+          </div>
+        </div>
+        <div id="priceCheckOnline" class="text-[10px] text-slate-400">Fresh on demand</div>
+      </header>
+
+      <section class="panel mt-4 p-3">
+        <div class="flex items-center gap-2">
+          <label class="flex-1 text-xs text-slate-400" for="priceCheckRange">Monitored window</label>
+          <select id="priceCheckRange" class="field text-xs bg-slate-900 border border-slate-600 rounded-lg px-2 py-1">
+            <option value="today" selected>Today</option>
+            <option value="seven_days">Last 7 days</option>
+          </select>
+          <button
+            id="priceCheckRefresh"
+            type="button"
+            class="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition"
+          >Refresh now</button>
+        </div>
+        <p id="priceCheckStatus" role="status" aria-live="polite" class="mt-3 text-xs font-semibold text-slate-300">Loading price check…</p>
+        <div id="priceCheckCoverage" class="mt-2 text-[10px] text-slate-400" aria-live="polite"></div>
+        <div class="mt-1 flex flex-wrap justify-between gap-1 text-[10px] text-slate-500">
+          <span id="priceCheckScannedAt">Scanned: —</span>
+          <span id="priceCheckWindow">Window: —</span>
+        </div>
+        <div id="priceCheckCounts" class="mt-3"></div>
+      </section>
+
+      <section id="priceCheckSignInView" class="panel mt-4 p-3" hidden>
+        <h2 class="text-sm font-semibold">Sign in to view price differences</h2>
+        <p class="text-[10px] text-slate-400 mt-1">This view contains customer pricing and requires a clerk session.</p>
+        <form id="priceCheckSignIn" class="mt-3 space-y-2" novalidate>
+          <label class="block text-xs text-slate-400" for="priceCheckClerkId">Clerk ID</label>
+          <input id="priceCheckClerkId" type="text" autocomplete="username" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-sm" />
+          <label class="block text-xs text-slate-400" for="priceCheckPin">PIN</label>
+          <input id="priceCheckPin" type="password" autocomplete="current-password" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-sm" />
+          <p id="priceCheckSignInMessage" role="status" aria-live="polite" class="text-[10px] text-amber-400"></p>
+          <button type="submit" class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition">Sign in</button>
+        </form>
+      </section>
+
+      <section id="priceCheckResultView" class="mt-4">
+        <div id="priceCheckList" class="space-y-2" aria-live="polite"></div>
+      </section>
+
+      <p class="mt-6 text-[10px] text-slate-500">
+        Read-only alert only. It never blocks, approves, amends, or submits an invoice, and it keeps no alert history.
+      </p>
+    </div>
+
+    <script>
+      /* =========================================================================
+         Price Check — protected, read-only, on-demand view.
+         Every raw AutoCount string is passed through escapeHtml before it reaches
+         innerHTML. Failed or unauthenticated refreshes clear prior customer rows.
+         ========================================================================= */
+
+      var activeRange = 'today';
+      var requestSequence = 0;
+
+      var HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
+          return HTML_ESCAPES[character];
+        });
+      }
+
+      function text(value, fallback) {
+        return value == null || value === '' ? (fallback || '—') : String(value);
+      }
+
+      function formatTimestamp(value) {
+        if (!value) return 'unknown';
+        var date = new Date(value);
+        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+      }
+
+      function windowLabel(settings) {
+        if (!settings) return 'unknown';
+        return escapeHtml(settings.monitorFrom) + ' → ' + escapeHtml(settings.through)
+          + ' (history from ' + escapeHtml(settings.historyFrom) + ')';
+      }
+
+      function setStatus(state, message) {
+        var element = $('priceCheckStatus');
+        if (!element) return;
+        element.textContent = message;
+        element.dataset.state = state;
+      }
+
+      function setSignInMessage(message) {
+        var element = $('priceCheckSignInMessage');
+        if (element) element.textContent = message || '';
+      }
+
+      function showSignIn() {
+        if ($('priceCheckResultView')) $('priceCheckResultView').hidden = true;
+        if ($('priceCheckSignInView')) $('priceCheckSignInView').hidden = false;
+      }
+
+      function showResult() {
+        if ($('priceCheckSignInView')) $('priceCheckSignInView').hidden = true;
+        if ($('priceCheckResultView')) $('priceCheckResultView').hidden = false;
+      }
+
+      function clearResults() {
+        if ($('priceCheckList')) $('priceCheckList').innerHTML = '';
+        if ($('priceCheckCounts')) $('priceCheckCounts').innerHTML = '';
+        if ($('priceCheckCoverage')) $('priceCheckCoverage').innerHTML = '';
+        if ($('priceCheckScannedAt')) $('priceCheckScannedAt').textContent = '';
+        if ($('priceCheckWindow')) $('priceCheckWindow').textContent = '';
+      }
+
+      function buildSourceLine(source) {
+        var name = escapeHtml(text(source && source.companyName, 'Unknown company'));
+        var label = source && source.ok
+          ? 'Verified'
+          : 'Unavailable' + (source && source.code ? ' (' + escapeHtml(source.code) + ')' : '');
+        var tone = source && source.ok ? 'text-emerald-400' : 'text-red-400';
+        return '<div class="flex items-center justify-between gap-2 py-0.5">'
+          + '<span class="text-slate-400 truncate">' + name + '</span>'
+          + '<span class="text-[10px] ' + tone + '">' + label + '</span>'
+          + '</div>';
+      }
+
+      function buildCounts(counts, alerts) {
+        var data = counts || {};
+        var price = Number.isFinite(Number(data.priceChanges))
+          ? Number(data.priceChanges)
+          : alerts.filter(function (alert) { return alert.type === 'PRICE_CHANGED'; }).length;
+        var uom = Number.isFinite(Number(data.uomChanges))
+          ? Number(data.uomChanges)
+          : alerts.filter(function (alert) { return alert.type === 'UOM_CHANGED'; }).length;
+        var noHistory = Number(data.noHistory) || 0;
+        var skipped = (Number(data.skippedInvalidLine) || 0)
+          + (Number(data.skippedInvalidInvoice) || 0)
+          + (Number(data.skippedUnapproved) || 0)
+          + (Number(data.skippedVoid) || 0);
+        var cells = [
+          ['Price changes', price, 'text-red-400'],
+          ['UOM changes', uom, 'text-amber-400'],
+          ['No history', noHistory, 'text-slate-300'],
+          ['Skipped rows', skipped, 'text-slate-400'],
+        ];
+        return '<div class="grid grid-cols-2 gap-2">' + cells.map(function (cell) {
+          return '<div class="bg-slate-900 rounded-lg p-2">'
+            + '<div class="text-[10px] text-slate-400">' + cell[0] + '</div>'
+            + '<div class="text-sm font-bold ' + cell[2] + '">' + cell[1] + '</div>'
+            + '</div>';
+        }).join('') + '</div>';
+      }
+
+      function buildAlertCard(alert) {
+        var isUom = alert.type === 'UOM_CHANGED';
+        var delta = isUom
+          ? 'UOM ' + escapeHtml(text(alert.previousUom, '?')) + ' → ' + escapeHtml(text(alert.uom, '?'))
+          : 'RM ' + escapeHtml(text(alert.differenceMYR, '—'))
+            + ' (' + escapeHtml(text(alert.differencePercent, '—')) + '%)';
+        return '<article class="panel" data-alert-card>'
+          + '<button type="button" data-alert-toggle aria-expanded="false" class="w-full flex items-center justify-between gap-2 p-2 text-left">'
+          + '<span class="min-w-0">'
+          + '<span class="block text-xs font-semibold text-white truncate">' + escapeHtml(text(alert.itemCode, 'Unknown item')) + '</span>'
+          + '<span class="block text-[10px] text-slate-400 truncate">' + escapeHtml(text(alert.customerName, 'Unknown customer')) + ' · ' + escapeHtml(text(alert.docNo, '—')) + '</span>'
+          + '</span>'
+          + '<span class="shrink-0 text-[10px] font-semibold ' + (isUom ? 'text-amber-400' : 'text-red-400') + '">'
+          + (isUom ? 'UOM CHANGED' : 'PRICE CHANGED') + '</span>'
+          + '</button>'
+          + '<div data-alert-detail class="hidden px-2 pb-2 text-[10px] text-slate-400 space-y-0.5">'
+          + '<div>Company: ' + escapeHtml(text(alert.companyName, 'Unknown company')) + '</div>'
+          + '<div>Invoice: ' + escapeHtml(text(alert.docNo, '—')) + ' · ' + escapeHtml(text(alert.docDate, '—')) + '</div>'
+          + '<div>Customer: ' + escapeHtml(text(alert.customerCode, '—')) + ' · ' + escapeHtml(text(alert.customerName, '—')) + '</div>'
+          + '<div>Item: ' + escapeHtml(text(alert.itemCode, '—')) + ' · ' + escapeHtml(text(alert.description, '—')) + '</div>'
+          + '<div>UOM: ' + escapeHtml(text(alert.uom, '—')) + '</div>'
+          + '<div>Current: RM ' + escapeHtml(text(alert.currentPrice, '—')) + ' · Previous: RM ' + escapeHtml(text(alert.previousPrice, '—')) + '</div>'
+          + '<div>Delta: ' + delta + '</div>'
+          + '<div>Reference: ' + escapeHtml(text(alert.previousDocNo, '—')) + ' · ' + escapeHtml(text(alert.previousDocDate, '—')) + '</div>'
+          + '</div></article>';
+      }
+
+      function renderCoverage(sources) {
+        var list = Array.isArray(sources) ? sources : [];
+        if (!list.length) return '<span class="text-slate-500">No source coverage reported.</span>';
+        return list.map(buildSourceLine).join('');
+      }
+
+      function isEnvelope(data) {
+        if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+        if (!Array.isArray(data.sources) || !Array.isArray(data.alerts)) return false;
+        if (data.status !== 'PASS' && data.status !== 'PARTIAL' && data.status !== 'FAIL') return false;
+        if (data.sources.length !== 2) return false;
+        var okCount = data.sources.filter(function (source) { return source && source.ok === true; }).length;
+        if (data.status === 'PASS' && okCount !== 2) return false;
+        if (data.status === 'PARTIAL' && okCount !== 1) return false;
+        if (data.status === 'FAIL') {
+          if (okCount !== 0) return false;
+          if (data.alerts.length > 0) return false;
+        }
+        return true;
+      }
+
+      function isAcceptableResponse(httpStatus, data) {
+        if (!isEnvelope(data)) return false;
+        if (data.status === 'FAIL') return httpStatus === 502;
+        return httpStatus >= 200 && httpStatus < 300;
+      }
+
+      function renderInvalidResult() {
+        clearResults();
+        setStatus('error', 'ERROR · Price check returned an unrecognized result — no cached prices are shown');
+        showResult();
+      }
+
+      function renderResult(data) {
+        if (!isEnvelope(data)) {
+          renderInvalidResult();
+          return;
+        }
+        var alerts = Array.isArray(data.alerts) ? data.alerts : [];
+        var sources = Array.isArray(data.sources) ? data.sources : [];
+        var failed = sources.filter(function (source) { return source && source.ok === false; }).length;
+        var statusText;
+        if (data.status === 'FAIL') {
+          statusText = 'FAIL · No book produced a complete verified scan';
+        } else if (data.status === 'PARTIAL') {
+          statusText = 'PARTIAL · ' + failed + ' of ' + sources.length
+            + ' books failed — results are incomplete and must not be read as zero differences';
+        } else if (alerts.length === 0) {
+          statusText = 'PASS · Complete coverage · No price differences found';
+        } else {
+          statusText = 'PASS · Complete coverage · ' + alerts.length + ' difference' + (alerts.length === 1 ? '' : 's');
+        }
+        var state = data.status === 'FAIL' ? 'fail' : data.status === 'PARTIAL' ? 'partial' : (alerts.length ? 'alert' : 'ok');
+        setStatus(state, statusText);
+
+        if ($('priceCheckCoverage')) $('priceCheckCoverage').innerHTML = renderCoverage(sources);
+        if ($('priceCheckScannedAt')) $('priceCheckScannedAt').textContent = 'Scanned: ' + formatTimestamp(data.scannedAt);
+        if ($('priceCheckWindow')) $('priceCheckWindow').textContent = 'Window: ' + windowLabel(data.window);
+        if ($('priceCheckCounts')) $('priceCheckCounts').innerHTML = buildCounts(data.counts, alerts);
+        if ($('priceCheckList')) {
+          if (alerts.length) {
+            $('priceCheckList').innerHTML = alerts.map(buildAlertCard).join('');
+          } else if (data.status === 'PASS') {
+            $('priceCheckList').innerHTML = '<div class="panel p-3 text-xs text-slate-400">No price differences in the monitored window.</div>';
+          } else {
+            $('priceCheckList').innerHTML = '';
+          }
+        }
+        showResult();
+      }
+
+      function renderUnauthorized() {
+        clearResults();
+        setStatus('unauthorized', 'UNAUTHORIZED · Sign in to view price differences');
+        setSignInMessage('Sign in to view customer price differences.');
+        showSignIn();
+      }
+
+      function renderNetworkError() {
+        clearResults();
+        var online = typeof navigator === 'undefined' || navigator.onLine !== false;
+        if (online) {
+          setStatus('unavailable', 'UNAVAILABLE · Price check could not be reached — no cached prices are shown');
+        } else {
+          setStatus('offline', 'OFFLINE · You are offline — price check is unavailable and no cached prices are shown');
+        }
+        showResult();
+      }
+
+      function renderFailure(httpStatus) {
+        clearResults();
+        setStatus('fail', 'FAIL · Price check could not be completed (HTTP ' + Number(httpStatus || 0) + ')');
+        showResult();
+      }
+
+      function setLoading(loading) {
+        var refresh = $('priceCheckRefresh');
+        if (!refresh) return;
+        refresh.disabled = Boolean(loading);
+        refresh.classList.toggle('animate-pulse', Boolean(loading));
+      }
+
+      async function loadPrices(range) {
+        activeRange = range || activeRange;
+        var requestId = ++requestSequence;
+        setLoading(true);
+        clearResults();
+        setStatus('loading', 'LOADING · Refreshing price check…');
+        try {
+          var response = await fetch('/api/price-check?range=' + encodeURIComponent(activeRange), {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+          });
+          if (requestId !== requestSequence) return;
+          if (response.status === 401) {
+            renderUnauthorized();
+            return;
+          }
+          var data = await response.json().catch(function () { return null; });
+          if (requestId !== requestSequence) return;
+          if (isAcceptableResponse(response.status, data)) {
+            renderResult(data);
+            return;
+          }
+          if (!response.ok) {
+            renderFailure(response.status);
+            return;
+          }
+          renderInvalidResult();
+        } catch (error) {
+          if (requestId !== requestSequence) return;
+          renderNetworkError();
+        } finally {
+          if (requestId === requestSequence) setLoading(false);
+        }
+      }
+
+      async function submitSignIn(event) {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        var clerkId = (($('priceCheckClerkId') && $('priceCheckClerkId').value) || '').trim();
+        var pin = ($('priceCheckPin') && $('priceCheckPin').value) || '';
+        if (!clerkId || !pin) {
+          setSignInMessage('Enter your clerk ID and PIN.');
+          return;
+        }
+        setSignInMessage('Signing in…');
+        try {
+          var response = await fetch('/api/dispatch/session', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ clerkId: clerkId, pin: pin }),
+          });
+          var data = await response.json().catch(function () { return null; });
+          if (!response.ok || !data || data.authenticated !== true) {
+            setSignInMessage(response.status === 401 ? 'Invalid clerk ID or PIN.' : 'Sign-in could not be completed. Try again.');
+            return;
+          }
+          if ($('priceCheckPin')) $('priceCheckPin').value = '';
+          setSignInMessage('');
+          showResult();
+          await loadPrices(activeRange);
+        } catch (error) {
+          setSignInMessage('Sign-in could not be completed. Try again.');
+        }
+      }
+
+      function toggleAlert(toggle) {
+        var card = toggle.closest ? toggle.closest('[data-alert-card]') : null;
+        if (!card) return;
+        var detail = card.querySelector('[data-alert-detail]');
+        if (!detail) return;
+        var expanded = !detail.classList.toggle('hidden');
+        toggle.setAttribute('aria-expanded', String(expanded));
+      }
+
+      function bindEvents() {
+        var refresh = $('priceCheckRefresh');
+        if (refresh) refresh.addEventListener('click', function () { loadPrices(activeRange); });
+        var range = $('priceCheckRange');
+        if (range) range.addEventListener('change', function () { loadPrices(range.value); });
+        var form = $('priceCheckSignIn');
+        if (form) form.addEventListener('submit', submitSignIn);
+        var list = $('priceCheckList');
+        if (list) list.addEventListener('click', function (event) {
+          var toggle = event.target && event.target.closest ? event.target.closest('[data-alert-toggle]') : null;
+          if (toggle) toggleAlert(toggle);
+        });
+      }
+
+      function init() {
+        bindEvents();
+        loadPrices(activeRange);
+      }
+
+      window.addEventListener('load', init);
+    </script>
+  </body>
+</html>

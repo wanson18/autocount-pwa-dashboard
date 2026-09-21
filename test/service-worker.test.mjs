@@ -34,7 +34,7 @@ function loadServiceWorker() {
         return cache;
       },
       async keys() {
-      return ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7', 'sales-dashboard-v8'];
+      return ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7', 'sales-dashboard-v8', 'sales-dashboard-v9'];
       },
       async delete(name) {
         deletedCaches.push(name);
@@ -61,12 +61,12 @@ test('service worker installs a new cache namespace and activation removes every
   let installPromise;
   worker.listeners.get('install')({ waitUntil(promise) { installPromise = promise; } });
   await installPromise;
-  assert.equal(worker.openedCaches[0], 'sales-dashboard-v9');
+  assert.equal(worker.openedCaches[0], 'sales-dashboard-v10');
 
   let activationPromise;
   worker.listeners.get('activate')({ waitUntil(promise) { activationPromise = promise; } });
   await activationPromise;
-  assert.deepEqual(worker.deletedCaches, ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7', 'sales-dashboard-v8']);
+  assert.deepEqual(worker.deletedCaches, ['sales-dashboard-v4', 'dispatch-api-old', 'sales-dashboard-v5', 'sales-dashboard-v6', 'sales-dashboard-v7', 'sales-dashboard-v8', 'sales-dashboard-v9']);
 });
 
 test('dispatch API requests stay network-only and never enter the static/API cache', async () => {
@@ -87,6 +87,20 @@ test('sales API requests stay network-only and do not replay cached invoice data
   let responsePromise;
   worker.listeners.get('fetch')({
     request: new Request('https://dispatch.example/api/sales?startDate=2026-09-01&endDate=2026-09-01', { method: 'GET' }),
+    respondWith(promise) { responsePromise = promise; },
+  });
+  await responsePromise;
+  assert.equal(worker.fetchedRequests.length, 1);
+  assert.equal(worker.fetchedRequests[0].options.cache, 'no-store');
+  assert.equal(worker.putRequests.length, 0);
+  assert.equal(worker.openedCaches.length, 0);
+});
+
+test('price check API requests stay network-only and never enter the static/API cache', async () => {
+  const worker = loadServiceWorker();
+  let responsePromise;
+  worker.listeners.get('fetch')({
+    request: new Request('https://dispatch.example/api/price-check?range=today', { method: 'GET' }),
     respondWith(promise) { responsePromise = promise; },
   });
   await responsePromise;
