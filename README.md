@@ -246,15 +246,15 @@ real-Postgres run.
 
 ## On-demand price check
 
-`GET /api/price-check?range=today|seven_days` performs a fresh, read-only scan of both AutoCount Cloud books (`63750` Enterprise and `63688` Sdn Bhd) and highlights quoted unit-price differences between approved invoices. It is a separate protected route; the public `/api/sales` output is unchanged.
+`GET /api/price-check?range=today|seven_days` performs a fresh, read-only scan of both AutoCount Cloud books (`63750` Enterprise and `63688` Sdn Bhd) and highlights quoted unit-price differences between approved invoices. It is a public read-only route; the existing `/api/sales` output is unchanged.
 
-- **Access** — requires a real signed clerk session cookie (`dispatch_session`). `DISPATCH_PUBLIC_ACCESS=true` does not authorize this route; its synthetic public session is never accepted. A `401` is the only cue for the standalone page to show a clerk-ID/PIN form that posts to the existing `/api/dispatch/session` endpoint.
+- **Access** — no clerk ID, PIN, or session cookie is required. Anyone with the dashboard URL can view the returned customer, invoice, item, and price-difference details. Keep the route same-origin and do not add CORS headers.
 - **Windows** — fixed server-side only, in `Asia/Kuala_Lumpur`: `today` scans 90 prior days plus today (91 days), and `seven_days` monitors the last 7 calendar days plus 90 prior days (97 days). Arbitrary or unknown ranges return `400`.
 - **Read-only** — `Cache-Control: no-store`, no CORS, GET-only, and no service-worker cache or offline fallback for price data. No invoice is created, approved, amended, voided, or submitted, and Jev/TypeSafe is not involved.
 - **No persistent audit** — version 1 recomputes from fresh Cloud data on every check, so a corrected difference disappears on the next scan. A durable first-seen alert ledger is deliberately out of scope.
 - **Status** — `PASS` (both books verified and scanned completely, even with no alerts), `PARTIAL` (one book failed; only the successful book's alerts are shown), `FAIL` (neither book scanned, returned with HTTP `502`, never an empty-success state).
 
-The mobile page `public/price-check.html` is linked from the dashboard home screen, defaults to Today, and offers a Last 7 days selector. It clears customer rows on `401` and failed refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, offline, and unauthenticated states by text.
+The mobile page `public/price-check.html` is linked from the dashboard home screen by the **Check Price Differences** button, defaults to Today, and offers a Last 7 days selector. It clears customer rows on failed refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, and offline states by text.
 
 ## Deploy to Vercel
 

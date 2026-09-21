@@ -65,19 +65,6 @@
         <div id="priceCheckCounts" class="mt-3"></div>
       </section>
 
-      <section id="priceCheckSignInView" class="panel mt-4 p-3" hidden>
-        <h2 class="text-sm font-semibold">Sign in to view price differences</h2>
-        <p class="text-[10px] text-slate-400 mt-1">This view contains customer pricing and requires a clerk session.</p>
-        <form id="priceCheckSignIn" class="mt-3 space-y-2" novalidate>
-          <label class="block text-xs text-slate-400" for="priceCheckClerkId">Clerk ID</label>
-          <input id="priceCheckClerkId" type="text" autocomplete="username" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-sm" />
-          <label class="block text-xs text-slate-400" for="priceCheckPin">PIN</label>
-          <input id="priceCheckPin" type="password" autocomplete="current-password" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-sm" />
-          <p id="priceCheckSignInMessage" role="status" aria-live="polite" class="text-[10px] text-amber-400"></p>
-          <button type="submit" class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition">Sign in</button>
-        </form>
-      </section>
-
       <section id="priceCheckResultView" class="mt-4">
         <div id="priceCheckList" class="space-y-2" aria-live="polite"></div>
       </section>
@@ -89,9 +76,9 @@
 
     <script>
       /* =========================================================================
-         Price Check — protected, read-only, on-demand view.
+         Price Check — public, read-only, on-demand view.
          Every raw AutoCount string is passed through escapeHtml before it reaches
-         innerHTML. Failed or unauthenticated refreshes clear prior customer rows.
+         innerHTML. Failed refreshes clear prior customer rows.
          ========================================================================= */
 
       var activeRange = 'today';
@@ -132,18 +119,7 @@
         element.dataset.state = state;
       }
 
-      function setSignInMessage(message) {
-        var element = $('priceCheckSignInMessage');
-        if (element) element.textContent = message || '';
-      }
-
-      function showSignIn() {
-        if ($('priceCheckResultView')) $('priceCheckResultView').hidden = true;
-        if ($('priceCheckSignInView')) $('priceCheckSignInView').hidden = false;
-      }
-
       function showResult() {
-        if ($('priceCheckSignInView')) $('priceCheckSignInView').hidden = true;
         if ($('priceCheckResultView')) $('priceCheckResultView').hidden = false;
       }
 
@@ -292,13 +268,6 @@
         showResult();
       }
 
-      function renderUnauthorized() {
-        clearResults();
-        setStatus('unauthorized', 'UNAUTHORIZED · Sign in to view price differences');
-        setSignInMessage('Sign in to view customer price differences.');
-        showSignIn();
-      }
-
       function renderNetworkError() {
         clearResults();
         var online = typeof navigator === 'undefined' || navigator.onLine !== false;
@@ -332,14 +301,9 @@
         try {
           var response = await fetch('/api/price-check?range=' + encodeURIComponent(activeRange), {
             cache: 'no-store',
-            credentials: 'same-origin',
             headers: { Accept: 'application/json' },
           });
           if (requestId !== requestSequence) return;
-          if (response.status === 401) {
-            renderUnauthorized();
-            return;
-          }
           var data = await response.json().catch(function () { return null; });
           if (requestId !== requestSequence) return;
           if (isAcceptableResponse(response.status, data)) {
@@ -359,36 +323,6 @@
         }
       }
 
-      async function submitSignIn(event) {
-        if (event && typeof event.preventDefault === 'function') event.preventDefault();
-        var clerkId = (($('priceCheckClerkId') && $('priceCheckClerkId').value) || '').trim();
-        var pin = ($('priceCheckPin') && $('priceCheckPin').value) || '';
-        if (!clerkId || !pin) {
-          setSignInMessage('Enter your clerk ID and PIN.');
-          return;
-        }
-        setSignInMessage('Signing in…');
-        try {
-          var response = await fetch('/api/dispatch/session', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ clerkId: clerkId, pin: pin }),
-          });
-          var data = await response.json().catch(function () { return null; });
-          if (!response.ok || !data || data.authenticated !== true) {
-            setSignInMessage(response.status === 401 ? 'Invalid clerk ID or PIN.' : 'Sign-in could not be completed. Try again.');
-            return;
-          }
-          if ($('priceCheckPin')) $('priceCheckPin').value = '';
-          setSignInMessage('');
-          showResult();
-          await loadPrices(activeRange);
-        } catch (error) {
-          setSignInMessage('Sign-in could not be completed. Try again.');
-        }
-      }
-
       function toggleAlert(toggle) {
         var card = toggle.closest ? toggle.closest('[data-alert-card]') : null;
         if (!card) return;
@@ -403,8 +337,6 @@
         if (refresh) refresh.addEventListener('click', function () { loadPrices(activeRange); });
         var range = $('priceCheckRange');
         if (range) range.addEventListener('change', function () { loadPrices(range.value); });
-        var form = $('priceCheckSignIn');
-        if (form) form.addEventListener('submit', submitSignIn);
         var list = $('priceCheckList');
         if (list) list.addEventListener('click', function (event) {
           var toggle = event.target && event.target.closest ? event.target.closest('[data-alert-toggle]') : null;

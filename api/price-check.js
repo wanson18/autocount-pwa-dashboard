@@ -4,7 +4,6 @@ const { AutoCountClient } = require('../lib/autocount/client');
 const { loadCompanyConfigs } = require('../lib/autocount/company-config');
 const { loadPriceSource, priceCheckWindow } = require('../lib/price-check/source');
 const { compareApprovedInvoices } = require('../lib/price-check/compare');
-const defaultAuth = require('../lib/dispatch/auth');
 
 const STORE_HEADERS = Object.freeze({
   'Cache-Control': 'no-store, max-age=0, must-revalidate',
@@ -47,15 +46,6 @@ function sendJson(res, status, body) {
 
 function sendFailure(res, status, code) {
   return sendJson(res, status, { success: false, error: { code } });
-}
-
-function readCookieHeader(req) {
-  const headers = req?.headers || {};
-  const values = Object.entries(headers)
-    .filter(([name]) => name.toLowerCase() === 'cookie')
-    .map(([, value]) => value)
-    .filter((value) => typeof value === 'string');
-  return values.length ? values.join(';') : undefined;
 }
 
 function normalizeRange(req) {
@@ -116,7 +106,6 @@ function createPriceCheckHandler(options = {}) {
     env = process.env,
     client,
     configs,
-    auth = defaultAuth,
     now,
   } = options;
 
@@ -128,14 +117,6 @@ function createPriceCheckHandler(options = {}) {
     }
 
     const instant = resolveNow(now);
-
-    let session = null;
-    try {
-      session = await auth.verifySessionCookie(readCookieHeader(req), { env, now: instant });
-    } catch {
-      session = null;
-    }
-    if (!session) return sendFailure(res, 401, 'unauthorized');
 
     let range;
     try {

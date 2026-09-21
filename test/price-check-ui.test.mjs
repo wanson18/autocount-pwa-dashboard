@@ -128,14 +128,15 @@ function resultFixture(overrides = {}) {
   };
 }
 
-test('mobile PWA exposes a fresh protected price view', () => {
+test('mobile PWA exposes a fresh public price view', () => {
   assert.match(home, /href="\/price-check\.html"/);
+  assert.match(home, /Check Price Differences/);
   for (const id of ['priceCheckRefresh', 'priceCheckStatus', 'priceCheckList']) {
     assert.match(price, new RegExp(`id="${id}"`));
   }
   assert.match(price, /\/api\/price-check/);
   assert.match(price, /cache:\s*'no-store'/);
-  assert.match(price, /credentials:\s*'same-origin'/);
+  assert.doesNotMatch(price, /priceCheckSignIn|dispatch\/session|credentials:\s*'same-origin'/);
   assert.match(price, /escapeHtml/);
   assert.match(sw, /'\/price-check\.html'/);
 });
@@ -182,20 +183,6 @@ test('renders customer data as escaped text and distinguishes state by text', ()
 
   sandbox.renderResult(resultFixture({ status: 'PASS', alerts: [] }));
   assert.match(document.getElementById('priceCheckStatus').textContent, /No price differences/i);
-});
-
-test('a 401 clears customer rows and shows the sign-in form', () => {
-  const { sandbox, document } = loadPage();
-
-  sandbox.renderResult(resultFixture({ alerts: [alertFixture('Private Customer Sdn Bhd')] }));
-  assert.match(document.getElementById('priceCheckList').innerHTML, /Private Customer Sdn Bhd/);
-
-  sandbox.renderUnauthorized();
-
-  assert.equal(document.getElementById('priceCheckList').innerHTML, '');
-  assert.equal(document.getElementById('priceCheckCounts').innerHTML, '');
-  assert.match(document.getElementById('priceCheckStatus').textContent, /UNAUTHORIZED|Sign in/i);
-  assert.equal(document.getElementById('priceCheckSignInView').hidden, false);
 });
 
 test('a fetch failure while online shows UNAVAILABLE and clears rows', () => {
@@ -344,29 +331,21 @@ test('an older response cannot overwrite a newer range or refresh', async () => 
   assert.equal(pending[1].url.includes('range=seven_days'), true);
 });
 
-test('a 401 sign-in posts to the dispatch session endpoint then refetches prices', async () => {
+test('a public refresh calls the price API without a session request', async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url, options });
-    if (url === '/api/dispatch/session') {
-      return jsonResponse(200, { authenticated: true, session: { clerkId: 'clerk-1' } });
-    }
     if (url.startsWith('/api/price-check')) {
       return jsonResponse(200, resultFixture());
     }
     return jsonResponse(404, {});
   };
   const { sandbox, document } = loadPage(fetchImpl);
-  document.getElementById('priceCheckClerkId').value = 'clerk-1';
-  document.getElementById('priceCheckPin').value = '2468';
 
-  await sandbox.submitSignIn({ preventDefault() {} });
+  await sandbox.loadPrices('today');
 
-  const sessionCall = calls.find((call) => call.url === '/api/dispatch/session');
-  assert.ok(sessionCall, 'sign-in must POST to the dispatch session endpoint');
-  assert.equal(sessionCall.options.method, 'POST');
-  assert.equal(sessionCall.options.credentials, 'same-origin');
-  assert.deepEqual(JSON.parse(sessionCall.options.body), { clerkId: 'clerk-1', pin: '2468' });
-  assert.equal(document.getElementById('priceCheckPin').value, '');
-  assert.ok(calls.some((call) => call.url.startsWith('/api/price-check')));
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.startsWith('/api/price-check?range=today'));
+  assert.equal(calls[0].options.credentials, undefined);
+  assert.match(document.getElementById('priceCheckStatus').textContent, /PASS/);
 });
