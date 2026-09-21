@@ -128,15 +128,19 @@ function resultFixture(overrides = {}) {
   };
 }
 
-test('mobile PWA exposes a fresh public price view', () => {
+test('mobile PWA exposes a fresh protected price view with dashboard login', () => {
   assert.match(home, /href="\/price-check\.html"/);
+  assert.match(home, /id="dashboardLoginForm"/);
+  assert.match(home, /id="dashboardClerkId"/);
+  assert.match(home, /id="dashboardPin"/);
   assert.match(home, /Check Price Differences/);
   for (const id of ['priceCheckRefresh', 'priceCheckStatus', 'priceCheckList']) {
     assert.match(price, new RegExp(`id="${id}"`));
   }
   assert.match(price, /\/api\/price-check/);
   assert.match(price, /cache:\s*'no-store'/);
-  assert.doesNotMatch(price, /priceCheckSignIn|dispatch\/session|credentials:\s*'same-origin'/);
+  assert.match(price, /credentials:\s*'same-origin'/);
+  assert.doesNotMatch(price, /priceCheckSignIn|dashboardLoginForm/);
   assert.match(price, /escapeHtml/);
   assert.match(sw, /'\/price-check\.html'/);
 });
@@ -183,6 +187,19 @@ test('renders customer data as escaped text and distinguishes state by text', ()
 
   sandbox.renderResult(resultFixture({ status: 'PASS', alerts: [] }));
   assert.match(document.getElementById('priceCheckStatus').textContent, /No price differences/i);
+});
+
+test('a 401 clears customer rows and points back to the dashboard login', () => {
+  const { sandbox, document } = loadPage();
+
+  sandbox.renderResult(resultFixture({ alerts: [alertFixture('Private Customer Sdn Bhd')] }));
+  assert.match(document.getElementById('priceCheckList').innerHTML, /Private Customer Sdn Bhd/);
+
+  sandbox.renderUnauthorized();
+
+  assert.equal(document.getElementById('priceCheckCounts').innerHTML, '');
+  assert.match(document.getElementById('priceCheckStatus').textContent, /UNAUTHORIZED|dashboard/i);
+  assert.match(document.getElementById('priceCheckList').innerHTML, /Back to dashboard/);
 });
 
 test('a fetch failure while online shows UNAVAILABLE and clears rows', () => {
@@ -331,7 +348,7 @@ test('an older response cannot overwrite a newer range or refresh', async () => 
   assert.equal(pending[1].url.includes('range=seven_days'), true);
 });
 
-test('a public refresh calls the price API without a session request', async () => {
+test('a protected refresh calls the price API with the browser session', async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url, options });
@@ -346,6 +363,6 @@ test('a public refresh calls the price API without a session request', async () 
 
   assert.equal(calls.length, 1);
   assert.ok(calls[0].url.startsWith('/api/price-check?range=today'));
-  assert.equal(calls[0].options.credentials, undefined);
+  assert.equal(calls[0].options.credentials, 'same-origin');
   assert.match(document.getElementById('priceCheckStatus').textContent, /PASS/);
 });

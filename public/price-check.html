@@ -76,9 +76,9 @@
 
     <script>
       /* =========================================================================
-         Price Check — public, read-only, on-demand view.
+         Price Check — protected, read-only, on-demand view.
          Every raw AutoCount string is passed through escapeHtml before it reaches
-         innerHTML. Failed refreshes clear prior customer rows.
+         innerHTML. Failed or unauthenticated refreshes clear prior customer rows.
          ========================================================================= */
 
       var activeRange = 'today';
@@ -279,6 +279,15 @@
         showResult();
       }
 
+      function renderUnauthorized() {
+        clearResults();
+        setStatus('unauthorized', 'UNAUTHORIZED · Sign in on the dashboard first');
+        if ($('priceCheckList')) {
+          $('priceCheckList').innerHTML = '<div class="panel p-3 text-xs text-slate-400">Sign in at the top of the dashboard, then return here. <a href="/" class="text-emerald-400 underline">Back to dashboard</a></div>';
+        }
+        showResult();
+      }
+
       function renderFailure(httpStatus) {
         clearResults();
         setStatus('fail', 'FAIL · Price check could not be completed (HTTP ' + Number(httpStatus || 0) + ')');
@@ -301,9 +310,14 @@
         try {
           var response = await fetch('/api/price-check?range=' + encodeURIComponent(activeRange), {
             cache: 'no-store',
+            credentials: 'same-origin',
             headers: { Accept: 'application/json' },
           });
           if (requestId !== requestSequence) return;
+          if (response.status === 401) {
+            renderUnauthorized();
+            return;
+          }
           var data = await response.json().catch(function () { return null; });
           if (requestId !== requestSequence) return;
           if (isAcceptableResponse(response.status, data)) {

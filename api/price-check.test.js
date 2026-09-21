@@ -128,45 +128,57 @@ function signedCookie() {
   ).cookie;
 }
 
-test('price check is public and reads prices without dispatch credentials', async () => {
-  const client = cloudClient();
+test('public dispatch mode without a real cookie never reads prices', async () => {
+  let cloudCalls = 0;
+  let syntheticCalls = 0;
   const handler = createPriceCheckHandler({
-    env: { DISPATCH_PUBLIC_ACCESS: 'false' },
-    client,
-    configs: CONFIGS,
+    env: { DISPATCH_PUBLIC_ACCESS: 'true' },
+    auth: {
+      verifySessionCookie: () => null,
+      getSessionFromRequest: () => {
+        syntheticCalls += 1;
+        return { clerkId: 'public-dispatch', role: 'admin' };
+      },
+    },
+    client: { getCompanyProfile: async () => { cloudCalls += 1; } },
     now: NOW,
   });
 
   const res = response();
   await handler({ method: 'GET', headers: {} }, res);
 
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.status, 'PASS');
-  assert.equal(res.body.cloudWrites, false);
-  assert.ok(client.cloudCalls > 0);
+  assert.equal(res.statusCode, 401);
+  assert.equal(cloudCalls, 0);
+  assert.equal(syntheticCalls, 0);
   assert.equal(res.headers['Access-Control-Allow-Origin'], undefined);
   assert.equal(res.headers['Cache-Control'], 'no-store, max-age=0, must-revalidate');
 });
 
-test('a forged dispatch cookie does not affect public price checks', async () => {
+test('an invalid signed cookie is rejected with 401 and no Cloud reads', async () => {
   const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: 'dispatch_session=forged.token' }, query: {} }, res);
 
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.status, 'PASS');
-  assert.ok(client.cloudCalls > 0);
+  assert.equal(res.statusCode, 401);
+  assert.equal(client.cloudCalls, 0);
 });
 
-test('a public request returns PASS with exact window, alerts, and no-store', async () => {
+test('a real signed cookie returns PASS with exact window, alerts, and no-store', async () => {
+  const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ client, configs: CONFIGS, now: NOW });
+  const spyAuth = {
+    verifySessionCookie: (cookie, options) => auth.verifySessionCookie(cookie, options),
+    getSessionFromRequest: () => {
+      throw new Error('getSessionFromRequest must never be used');
+    },
+  };
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth: spyAuth, now: NOW });
 
   const res = response();
-  await handler({ method: 'GET', headers: {}, query: {} }, res);
+  await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.status, 'PASS');
