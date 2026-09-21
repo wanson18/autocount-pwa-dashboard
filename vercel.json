@@ -38,6 +38,10 @@
       "destination": "/api/dispatch-unknown.js"
     },
     {
+      "source": "/api/price-check",
+      "destination": "/api/price-check.js"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/sales.js"
     }
