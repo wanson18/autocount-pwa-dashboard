@@ -334,6 +334,26 @@ test('public access mode provides a session without requiring dispatch credentia
   });
 });
 
+test('public access mode preserves a real session when the browser already signed in', async () => {
+  const implementation = requireAuth();
+  const api = requireSessionApi();
+  const env = { ...(await makeEnv()), DISPATCH_PUBLIC_ACCESS: 'true' };
+  const login = await implementation.authenticateDispatchLogin(
+    { clerkId: 'clerk-aiman', pin: '2468' },
+    { env, now: NOW },
+  );
+  const handler = api.createDispatchSessionHandler({ env, now: NOW, throttleStore: allowingThrottleStore() });
+
+  const realSessionRes = responseRecorder();
+  await handler({ method: 'GET', headers: { cookie: login.cookie } }, realSessionRes);
+  assert.equal(realSessionRes.body.authenticated, true);
+  assert.equal(realSessionRes.body.session.clerkId, 'clerk-aiman');
+
+  const anonymousRes = responseRecorder();
+  await handler({ method: 'GET', headers: {} }, anonymousRes);
+  assert.equal(anonymousRes.body.session.clerkId, 'public-dispatch');
+});
+
 test('session endpoint rejects unsupported methods, non-JSON bodies, extra fields, and oversized bodies safely', async () => {
   const api = requireSessionApi();
   const env = await makeEnv();
