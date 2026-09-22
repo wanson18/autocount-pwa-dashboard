@@ -105,6 +105,25 @@
   </head>
   <body class="bg-slate-900 text-white min-h-screen">
     <div class="max-w-md mx-auto px-4 pb-8">
+      <div id="dashboardLoginView" class="min-h-screen flex items-center">
+        <section class="panel w-full p-5" aria-labelledby="dashboardLoginTitle">
+          <div class="text-center mb-5">
+            <p class="text-[10px] uppercase tracking-[0.2em] text-blue-400">Wanson Companies</p>
+            <h1 id="dashboardLoginTitle" class="text-xl font-bold mt-2">Sign in to continue</h1>
+            <p class="text-xs text-slate-400 mt-2">Your clerk login protects the dashboard and invoice price checks.</p>
+          </div>
+          <form id="dashboardLoginForm" class="space-y-3" novalidate>
+            <label class="block text-xs text-slate-400" for="dashboardClerkId">Clerk ID</label>
+            <input id="dashboardClerkId" type="text" autocomplete="username" class="field w-full" autofocus />
+            <label class="block text-xs text-slate-400" for="dashboardPin">PIN</label>
+            <input id="dashboardPin" type="password" autocomplete="current-password" class="field w-full" />
+            <p id="dashboardLoginMessage" role="status" aria-live="polite" class="text-[10px] text-amber-400 min-h-4"></p>
+            <button id="dashboardLoginButton" type="submit" class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2.5 text-sm font-semibold text-white transition">Sign in</button>
+          </form>
+        </section>
+      </div>
+
+      <div id="dashboardAppView" hidden>
       <!-- ===== Header ===== -->
       <header class="py-4 flex items-center justify-between border-b border-slate-700">
         <div class="flex items-center gap-2">
@@ -124,6 +143,12 @@
             <span id="statusText">Online</span>
           </div>
           <button
+            id="dashboardLogoutButton"
+            type="button"
+            class="rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-1.5 text-[10px] text-slate-300 transition"
+            hidden
+          >Sign out</button>
+          <button
             id="refreshBtn"
             type="button"
             aria-label="Refresh data"
@@ -140,27 +165,6 @@
           </button>
         </div>
       </header>
-
-      <section class="panel mt-4 p-3" aria-labelledby="dashboardAccessTitle">
-        <div class="flex items-center justify-between gap-2">
-          <div>
-            <h2 id="dashboardAccessTitle" class="text-sm font-semibold">Price Check access</h2>
-            <p id="dashboardAccessState" class="text-[10px] text-slate-400 mt-1">Sign in below before checking invoice price differences.</p>
-          </div>
-          <div id="dashboardSessionView" class="hidden items-center gap-2">
-            <span id="dashboardSessionLabel" class="text-[10px] text-emerald-400"></span>
-            <button id="dashboardLogoutButton" type="button" class="rounded-lg bg-slate-700 hover:bg-slate-600 px-2 py-1 text-[10px] font-semibold text-white transition">Sign out</button>
-          </div>
-        </div>
-        <form id="dashboardLoginForm" class="mt-3 space-y-2" novalidate>
-          <label class="block text-xs text-slate-400" for="dashboardClerkId">Clerk ID</label>
-          <input id="dashboardClerkId" type="text" autocomplete="username" class="field w-full" />
-          <label class="block text-xs text-slate-400" for="dashboardPin">PIN</label>
-          <input id="dashboardPin" type="password" autocomplete="current-password" class="field w-full" />
-          <p id="dashboardLoginMessage" role="status" aria-live="polite" class="text-[10px] text-amber-400"></p>
-          <button id="dashboardLoginButton" type="submit" class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition">Sign in to Price Check</button>
-        </form>
-      </section>
 
       <div id="lastUpdated" class="text-xs text-slate-500 mt-2 text-right">Last updated: --</div>
       <div id="companyCoverage" class="text-[10px] text-slate-400 mt-2" aria-live="polite">Loading both company books…</div>
@@ -354,6 +358,7 @@
           </table>
         </div>
       </section>
+      </div>
     </div>
 
     <script>
@@ -944,25 +949,13 @@
 
       function setDashboardSession(session) {
         const authenticated = Boolean(session && session.clerkId && session.clerkId !== 'public-dispatch');
-        const form = $('dashboardLoginForm');
-        const sessionView = $('dashboardSessionView');
-        const state = $('dashboardAccessState');
-        const label = $('dashboardSessionLabel');
-        const loginLink = $('priceCheckLink');
+        const loginView = $('dashboardLoginView');
+        const appView = $('dashboardAppView');
+        const logoutButton = $('dashboardLogoutButton');
 
-        if (form) form.hidden = authenticated;
-        if (sessionView) {
-          sessionView.hidden = !authenticated;
-          sessionView.classList.toggle('flex', authenticated);
-        }
-        if (state) state.textContent = authenticated
-          ? 'Price Check is unlocked for this browser session.'
-          : 'Sign in below before checking invoice price differences.';
-        if (label) label.textContent = authenticated ? session.clerkId : '';
-        if (loginLink) {
-          loginLink.setAttribute('aria-disabled', String(!authenticated));
-          loginLink.classList.toggle('opacity-50', !authenticated);
-        }
+        if (loginView) loginView.hidden = authenticated;
+        if (appView) appView.hidden = !authenticated;
+        if (logoutButton) logoutButton.hidden = !authenticated;
       }
 
       async function sessionRequest(method, body) {
@@ -986,8 +979,10 @@
           const result = await sessionRequest('GET');
           if (result.authenticated && result.session?.clerkId !== 'public-dispatch') {
             setDashboardSession(result.session);
+            setPreset('today');
           } else {
             setDashboardSession(null);
+            $('dashboardClerkId')?.focus();
           }
         } catch {
           setDashboardSession(null);
@@ -1013,6 +1008,7 @@
           $('dashboardPin').value = '';
           setDashboardLoginMessage('');
           setDashboardSession(result.session);
+          setPreset('today');
         } catch (error) {
           $('dashboardPin').value = '';
           setDashboardLoginMessage(error.status === 401 ? 'Invalid clerk ID or PIN.' : 'Sign-in could not be completed. Try again.');
@@ -1086,7 +1082,6 @@
         bindEvents();
         updateOnlineStatus();
         loadDashboardSession();
-        setPreset('today');
       });
     </script>
   </body>
