@@ -135,6 +135,8 @@ test('mobile PWA exposes a fresh protected price view with dashboard login', () 
   assert.match(home, /id="dashboardLoginForm"/);
   assert.match(home, /id="dashboardClerkId"/);
   assert.match(home, /id="dashboardPin"/);
+  assert.match(home, /loginView\.classList\.toggle\('hidden', authenticated\)/);
+  assert.match(home, /loginView\.classList\.toggle\('flex', !authenticated\)/);
   assert.match(home, /Check Price Differences/);
   for (const id of ['priceCheckRefresh', 'priceCheckStatus', 'priceCheckList']) {
     assert.match(price, new RegExp(`id="${id}"`));
@@ -148,7 +150,7 @@ test('mobile PWA exposes a fresh protected price view with dashboard login', () 
 });
 
 test('the service worker bumps the cache namespace and lists the price page', () => {
-  assert.match(sw, /const CACHE_NAME = 'sales-dashboard-v14'/);
+  assert.match(sw, /const CACHE_NAME = 'sales-dashboard-v15'/);
   assert.match(sw, /'\/price-check\.html'/);
 });
 

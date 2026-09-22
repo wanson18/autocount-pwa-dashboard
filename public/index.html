@@ -953,9 +953,19 @@
         const appView = $('dashboardAppView');
         const logoutButton = $('dashboardLogoutButton');
 
-        if (loginView) loginView.hidden = authenticated;
-        if (appView) appView.hidden = !authenticated;
-        if (logoutButton) logoutButton.hidden = !authenticated;
+        if (loginView) {
+          loginView.hidden = authenticated;
+          loginView.classList.toggle('hidden', authenticated);
+          loginView.classList.toggle('flex', !authenticated);
+        }
+        if (appView) {
+          appView.hidden = !authenticated;
+          appView.classList.toggle('hidden', !authenticated);
+        }
+        if (logoutButton) {
+          logoutButton.hidden = !authenticated;
+          logoutButton.classList.toggle('hidden', !authenticated);
+        }
       }
 
       async function sessionRequest(method, body) {
