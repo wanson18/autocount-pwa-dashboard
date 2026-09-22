@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sales-dashboard-v13';
+const CACHE_NAME = 'sales-dashboard-v14';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -48,6 +48,21 @@ self.addEventListener('fetch', (event) => {
     || url.pathname.startsWith('/api/dispatch-');
   if (isDispatchApi) {
     event.respondWith(fetch(request));
+    return;
+  }
+
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' })
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || new Response('Offline', { status: 503, statusText: 'Offline' }))),
+    );
     return;
   }
 
