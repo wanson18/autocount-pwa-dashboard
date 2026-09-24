@@ -8,6 +8,7 @@ const {
   loadCompanyInvoices,
   combineCompanyResults,
   normalizeInvoices,
+  resolveMultiPackRates,
   parseOutstandingAmount,
   classifyPaymentStatus,
   computePaymentSummary,
@@ -175,6 +176,107 @@ test('loadCompanyInvoices normalizes the mock envelope and keeps line items', as
     total: 6250,
   });
   assert.equal(result.invoices[0].grandTotal, 9757.3);
+});
+
+test('loadCompanyInvoices converts multipack quantities using the AutoCount product master', async () => {
+  const rawPages = [
+    {
+      status: 200,
+      data: {
+        data: [
+          {
+            master: {
+              docNo: 'CS-035525',
+              docDate: '2026-09-24',
+              debtorName: 'INFLOW GLOBALL MARKETING SDN BHD',
+              finalTotal: '13144.00',
+              outstandingAmount: '13144.00',
+            },
+            details: [
+              { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '100', unit: 'BOX', unitPrice: '118', subTotal: '11800' },
+              { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '30', unit: 'BTL', unitPrice: '28', subTotal: '840' },
+            ],
+          },
+        ],
+      },
+    },
+    { status: 200, data: { data: [] } },
+  ];
+  const httpClient = { get: async () => rawPages.shift() || { status: 200, data: { data: [] } } };
+  const requested = [];
+  const getProduct = async (sku) => {
+    requested.push(sku);
+    return { product: { unit: 'BTL' }, productMultiPacks: [{ multiPack: 'BOX', multiPackRate: '4.00000000' }] };
+  };
+
+  const result = await loadCompanyInvoices(
+    '2026-09-24',
+    '2026-09-24',
+    {
+      id: 'sdnBhd',
+      name: 'Wanson Sdn Bhd',
+      accountBookId: '63688',
+      apiUrl: 'https://accounting-api.autocountcloud.com',
+      apiKey: 'sdn-key',
+      keyId: 'sdn-id',
+      credentialsConfigured: true,
+    },
+    false,
+    { httpClient, getProduct },
+  );
+
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(requested, ['1110100002']);
+  assert.equal(result.invoices[0].lineItems[0].unitRate, 4);
+  assert.equal(result.invoices[0].lineItems[0].baseUnit, 'BTL');
+  assert.equal(result.invoices[0].lineItems[1].unitRate, 1);
+});
+
+test('loadCompanyInvoices still returns invoices when the product master is unavailable', async () => {
+  const rawPages = [
+    {
+      status: 200,
+      data: {
+        data: [
+          {
+            master: { docNo: 'CS-035525', docDate: '2026-09-24', debtorName: 'INFLOW GLOBALL MARKETING SDN BHD', finalTotal: '11800.00' },
+            details: [
+              { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '100', unit: 'BOX', unitPrice: '118', subTotal: '11800' },
+              { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '30', unit: 'BTL', unitPrice: '28', subTotal: '840' },
+            ],
+          },
+        ],
+      },
+    },
+    { status: 200, data: { data: [] } },
+  ];
+  const httpClient = { get: async () => rawPages.shift() || { status: 200, data: { data: [] } } };
+  const requested = [];
+  const getProduct = async (sku) => {
+    requested.push(sku);
+    throw new Error('AutoCount API unavailable');
+  };
+
+  const result = await loadCompanyInvoices(
+    '2026-09-24',
+    '2026-09-24',
+    {
+      id: 'sdnBhd',
+      name: 'Wanson Sdn Bhd',
+      accountBookId: '63688',
+      apiUrl: 'https://accounting-api.autocountcloud.com',
+      apiKey: 'sdn-key',
+      keyId: 'sdn-id',
+      credentialsConfigured: true,
+    },
+    false,
+    { httpClient, getProduct },
+  );
+
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(requested, ['1110100002']);
+  assert.equal(result.invoices[0].lineItems[0].unitRate, undefined);
+  assert.equal(result.invoices[0].lineItems[0].quantity, 100);
 });
 
 test('combineCompanyResults preserves company identity and reports both totals', () => {
@@ -359,6 +461,184 @@ test('aggregateBySKU keeps the same item code separate across company books', ()
   );
 });
 
+test('resolveMultiPackRates converts multipack lines to the item base unit for mixed-unit SKUs only', async () => {
+  const invoices = [
+    {
+      companyId: 'sdnBhd',
+      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      lineItems: [
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitPrice: 118, total: 11800 },
+      ],
+    },
+    {
+      companyId: 'sdnBhd',
+      customerName: 'ONG ST ENTERPRISE',
+      lineItems: [
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitPrice: 28, total: 840 },
+      ],
+    },
+    {
+      companyId: 'sdnBhd',
+      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      lineItems: [
+        { sku: '1110100005', description: 'MINYAK MASAK 1KG 食油', quantity: 200, unit: 'BTL', unitPrice: 6, total: 1200 },
+      ],
+    },
+  ];
+  const requested = [];
+  const getProduct = async (sku) => {
+    requested.push(sku);
+    return { product: { unit: 'BTL' }, productMultiPacks: [{ multiPack: 'BOX', multiPackRate: '4.00000000' }] };
+  };
+
+  const result = await resolveMultiPackRates(invoices, getProduct);
+
+  assert.deepEqual(requested, ['1110100002']);
+  assert.equal(result[0].lineItems[0].unitRate, 4);
+  assert.equal(result[0].lineItems[0].baseUnit, 'BTL');
+  assert.equal(result[1].lineItems[0].unitRate, 1);
+  assert.equal(result[1].lineItems[0].baseUnit, 'BTL');
+  assert.equal(result[2].lineItems[0].unitRate, undefined);
+  assert.equal(result[2].lineItems[0].baseUnit, undefined);
+});
+
+test('resolveMultiPackRates leaves mixed-unit quantities untouched when the product lookup fails', async () => {
+  const invoices = [
+    {
+      companyId: 'sdnBhd',
+      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      lineItems: [
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitPrice: 118, total: 11800 },
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitPrice: 28, total: 840 },
+      ],
+    },
+  ];
+  const getProduct = async () => {
+    throw new Error('AutoCount API unavailable');
+  };
+
+  const result = await resolveMultiPackRates(invoices, getProduct);
+
+  assert.equal(result[0].lineItems[0].unitRate, undefined);
+  assert.equal(result[0].lineItems[1].unitRate, undefined);
+});
+
+test('resolveMultiPackRates does not convert a mixed SKU when the product master cannot explain every unit', async () => {
+  const invoices = [
+    {
+      companyId: 'sdnBhd',
+      customerName: 'MIXED UOM CUSTOMER',
+      lineItems: [
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitPrice: 118, total: 11800 },
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 5, unit: 'CTN', unitPrice: 118, total: 590 },
+      ],
+    },
+  ];
+  const getProduct = async () => ({
+    product: { unit: 'BTL' },
+    productMultiPacks: [{ multiPack: 'BOX', multiPackRate: '4.00000000' }],
+  });
+
+  const result = await resolveMultiPackRates(invoices, getProduct);
+
+  assert.equal(result[0].lineItems[0].unitRate, undefined);
+  assert.equal(result[0].lineItems[1].unitRate, undefined);
+});
+
+test('aggregateBySKU counts multipack lines in the item base unit', () => {
+  const result = aggregateBySKU([
+    {
+      companyId: 'sdnBhd',
+      companyName: 'Wanson Sdn Bhd',
+      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      lineItems: [
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitRate: 4, baseUnit: 'BTL', unitPrice: 118, total: 11800 },
+      ],
+    },
+    {
+      companyId: 'sdnBhd',
+      companyName: 'Wanson Sdn Bhd',
+      customerName: 'ONG ST ENTERPRISE',
+      lineItems: [
+        { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitRate: 1, baseUnit: 'BTL', unitPrice: 28, total: 840 },
+      ],
+    },
+  ]);
+
+  const [sku] = result;
+
+  assert.equal(sku.totalUnits, 430);
+  assert.equal(sku.unit, 'BTL');
+  assert.equal(sku.totalCost, 12640);
+  assert.equal(sku.avgPricePerUnit, 29.4);
+  assert.deepEqual(sku.customers, [
+    { name: 'INFLOW GLOBALL MARKETING SDN BHD', quantity: 400, companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd' },
+    { name: 'ONG ST ENTERPRISE', quantity: 30, companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd' },
+  ]);
+});
+
+test('aggregateBySKU reports the unit for single-UOM SKUs and omits it when mixed units stay unresolved', () => {
+  const result = aggregateBySKU([
+    {
+      customerName: 'BTL customer',
+      lineItems: [{ sku: 'BTL-ONLY', description: 'Bottled oil', quantity: 5, unit: 'BTL', unitPrice: 10, total: 50 }],
+    },
+    {
+      customerName: 'Mixed customer',
+      lineItems: [{ sku: 'MIXED', description: 'Mixed oil', quantity: 1, unit: 'BOX', unitPrice: 100, total: 100 }],
+    },
+    {
+      customerName: 'Mixed customer',
+      lineItems: [{ sku: 'MIXED', description: 'Mixed oil', quantity: 2, unit: 'BTL', unitPrice: 10, total: 20 }],
+    },
+  ]);
+
+  const bySku = Object.fromEntries(result.map((entry) => [entry.sku, entry]));
+
+  assert.equal(bySku['BTL-ONLY'].unit, 'BTL');
+  assert.equal('unit' in bySku.MIXED, false);
+});
+
+test('combineCompanyResults converts multipack lines before computing units sold', () => {
+  const result = combineCompanyResults(
+    [
+      {
+        company: { id: 'sdnBhd', name: 'Wanson Sdn Bhd', accountBookId: '63688' },
+        status: 'ok',
+        dataSource: 'live',
+        invoices: [
+          {
+            docNo: 'CS-035525',
+            docDate: '2026-09-24',
+            customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+            grandTotal: 13144,
+            outstandingAmount: 13144,
+            lineItems: [
+              { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitRate: 4, baseUnit: 'BTL', unitPrice: 118, total: 11800 },
+              { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitRate: 1, baseUnit: 'BTL', unitPrice: 28, total: 840 },
+            ],
+          },
+        ],
+      },
+    ],
+    '2026-09-24',
+    '2026-09-24',
+    '2026-09-24T05:00:00.000Z',
+  );
+
+  assert.equal(result.kpis.totalItemsSold, 430);
+  assert.equal(result.skuBreakdown[0].totalUnits, 430);
+  assert.equal(result.skuBreakdown[0].unit, 'BTL');
+  assert.deepEqual(result.invoices[0].lineItems[0], {
+    sku: '1110100002',
+    description: 'MINYAK MASAK TOMATO MERAH 5KG 食油',
+    quantity: 100,
+    unit: 'BOX',
+    unitPrice: 118,
+    total: 11800,
+  });
+});
+
 test('getLocalToday returns the UTC+8 date, not the UTC date, after 16:00 UTC', () => {
   // 2026-08-12 16:30 UTC is already 2026-08-13 00:30 in Kuala Lumpur.
   const now = new Date('2026-08-12T16:30:00Z');
@@ -489,6 +769,31 @@ test('normalizeInvoices excludes AutoCount cancelled invoice rows from sales', (
   ]);
 
   assert.deepEqual(invoices.map((invoice) => invoice.docNo), ['SI-ACTIVE']);
+});
+
+test('normalizeInvoices keeps the AutoCount line unit so multipack quantities can be converted', () => {
+  const [invoice] = normalizeInvoices([
+    {
+      master: {
+        docNo: 'CS-035525',
+        docDate: '2026-09-24',
+        debtorName: 'INFLOW GLOBALL MARKETING SDN BHD',
+        finalTotal: '13144.00',
+      },
+      details: [
+        { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '100', unit: 'BOX', unitPrice: '118', subTotal: '11800' },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(invoice.lineItems[0], {
+    sku: '1110100002',
+    description: 'MINYAK MASAK TOMATO MERAH 5KG 食油',
+    quantity: 100,
+    unit: 'BOX',
+    unitPrice: 118,
+    total: 11800,
+  });
 });
 
 test('classifyPaymentStatus returns paid when outstanding is zero', () => {

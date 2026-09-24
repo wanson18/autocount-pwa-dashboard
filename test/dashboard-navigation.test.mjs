@@ -9,6 +9,15 @@ test('dashboard exposes Delivery Dispatch only when its destination page is pres
   assert.equal(existsSync(new URL('../public/dispatch.html', import.meta.url)), true);
 });
 
+test('dashboard quantities carry the resolved item unit', () => {
+  const dashboard = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+
+  assert.match(dashboard, /function formatQuantity\(value, unit\)/);
+  assert.match(dashboard, /formatQuantity\(s\.totalUnits, s\.unit\)/);
+  assert.match(dashboard, /formatQuantity\(c\.quantity, unit\)/);
+  assert.match(dashboard, /formatQuantity\(item\.quantity, item\.unit\)/);
+});
+
 test("today invoice dropdown renders every today's invoice with its payment status", () => {
   const dashboard = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { AutoCountClient } = require('../lib/autocount/client');
 // Vercel dev does not consistently inject `.env.local` into plain Node
 // serverless functions, so load the local override explicitly before `.env`.
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
@@ -173,13 +174,19 @@ function normalizeInvoices(rawInvoices, company = null) {
       customerName: master.debtorName || master.customerName || '',
       grandTotal: Math.round(parseFloat(master.finalTotal || master.total || master.grandTotal || 0) * 100) / 100,
       outstandingAmount: parseOutstandingAmount(master.outstandingAmount),
-      lineItems: details.map((d) => ({
-        sku: d.productCode || d.sku || '',
-        description: d.description || '',
-        quantity: parseFloat(d.qty || d.quantity || 0),
-        unitPrice: parseFloat(d.unitPrice || 0),
-        total: parseFloat(d.subTotal || d.total || 0),
-      })),
+      lineItems: details.map((d) => {
+        // The line unit is the only UOM evidence AutoCount returns per line.
+        // Without it a BOX line would be counted as a base-unit (BTL) line.
+        const unit = typeof d.unit === 'string' ? d.unit.trim() : '';
+        return {
+          sku: d.productCode || d.sku || '',
+          description: d.description || '',
+          quantity: parseFloat(d.qty || d.quantity || 0),
+          ...(unit ? { unit } : {}),
+          unitPrice: parseFloat(d.unitPrice || 0),
+          total: parseFloat(d.subTotal || d.total || 0),
+        };
+      }),
     };
 
     if (company) {
@@ -203,6 +210,92 @@ function loadMockData(company) {
   return Array.isArray(parsed) ? parsed : parsed.invoices || [];
 }
 
+function parseMultiPackRates(product) {
+  const baseUnit = typeof product?.product?.unit === 'string' ? product.product.unit.trim() : '';
+  const rates = new Map();
+
+  for (const pack of Array.isArray(product?.productMultiPacks) ? product.productMultiPacks : []) {
+    const unit = typeof pack?.multiPack === 'string' ? pack.multiPack.trim().toUpperCase() : '';
+    const rate = Number(pack?.multiPackRate);
+    if (unit && Number.isFinite(rate) && rate > 0) rates.set(unit, rate);
+  }
+
+  return { baseUnit, rates };
+}
+
+/**
+ * AutoCount invoice lines carry the quantity in the line's own unit, so the
+ * same SKU can arrive as BTL and BOX within one range. For SKUs that mix
+ * units, resolve the product's MultiPack rate (for example 1 BOX = 4 BTL) and
+ * tag every line with the rate needed to express it in the base unit.
+ * SKUs with a single unit and SKUs whose units the product master cannot
+ * explain are left untouched rather than guessed at.
+ */
+async function resolveMultiPackRates(invoices, getProduct) {
+  const unitsBySku = new Map();
+
+  for (const invoice of invoices) {
+    for (const item of invoice.lineItems || []) {
+      if (!item.sku || !item.unit) continue;
+      const key = `${invoice.companyId || ''}\u0000${item.sku}`;
+      if (!unitsBySku.has(key)) unitsBySku.set(key, new Set());
+      unitsBySku.get(key).add(item.unit.trim().toUpperCase());
+    }
+  }
+
+  const resolutions = new Map();
+  for (const [key, units] of unitsBySku) {
+    if (units.size < 2) continue;
+
+    const sku = key.slice(key.indexOf('\u0000') + 1);
+    let parsed;
+    try {
+      parsed = parseMultiPackRates(await getProduct(sku));
+    } catch (error) {
+      console.warn(`AutoCount product lookup failed for ${sku}:`, error.message);
+      continue;
+    }
+
+    const baseUnit = parsed.baseUnit.toUpperCase();
+    if (!baseUnit) continue;
+
+    const rateFor = new Map();
+    let resolved = true;
+    for (const unit of units) {
+      if (unit === baseUnit) rateFor.set(unit, 1);
+      else if (parsed.rates.has(unit)) rateFor.set(unit, parsed.rates.get(unit));
+      else {
+        resolved = false;
+        break;
+      }
+    }
+
+    if (resolved) resolutions.set(key, { baseUnit: parsed.baseUnit, rateFor });
+  }
+
+  if (resolutions.size === 0) return invoices;
+
+  return invoices.map((invoice) => ({
+    ...invoice,
+    lineItems: (invoice.lineItems || []).map((item) => {
+      const resolution = resolutions.get(`${invoice.companyId || ''}\u0000${item.sku}`);
+      if (!resolution) return item;
+      const unit = item.unit ? item.unit.trim().toUpperCase() : '';
+      return {
+        ...item,
+        unitRate: (unit && resolution.rateFor.get(unit)) || 1,
+        baseUnit: resolution.baseUnit,
+      };
+    }),
+  }));
+}
+
+function lineUnits(item) {
+  const rate = Number(item.unitRate);
+  const multiplier = Number.isFinite(rate) && rate > 0 ? rate : 1;
+  return Math.round(item.quantity * multiplier * 100) / 100;
+}
+
 function aggregateBySKU(invoices) {
   const skuMap = Object.create(null);
 
@@ -220,17 +313,22 @@ function aggregateBySKU(invoices) {
           orderCount: 0,
           totalCost: 0,
           customerQuantities: {},
+          units: new Set(),
         };
         if (invoice.companyId) {
           skuMap[aggregationKey].companyId = invoice.companyId;
           skuMap[aggregationKey].companyName = invoice.companyName;
         }
       }
+      const units = lineUnits(item);
       skuMap[aggregationKey].totalRevenue = Math.round((skuMap[aggregationKey].totalRevenue + item.total) * 100) / 100;
-      skuMap[aggregationKey].totalUnits = Math.round((skuMap[aggregationKey].totalUnits + item.quantity) * 100) / 100;
+      skuMap[aggregationKey].totalUnits = Math.round((skuMap[aggregationKey].totalUnits + units) * 100) / 100;
       skuMap[aggregationKey].orderCount += 1;
+      // Cost stays priced per invoice unit (RM/BOX), so it uses the raw quantity.
       skuMap[aggregationKey].totalCost =
         Math.round((skuMap[aggregationKey].totalCost + item.unitPrice * item.quantity) * 100) / 100;
+      if (item.baseUnit) skuMap[aggregationKey].baseUnit = item.baseUnit;
+      if (item.unit) skuMap[aggregationKey].units.add(item.unit.trim().toUpperCase());
       const customerKey = invoice.companyId ? `${invoice.companyId}\u0000${invoice.customerName}` : invoice.customerName;
       if (!skuMap[aggregationKey].customerQuantities[customerKey]) {
         skuMap[aggregationKey].customerQuantities[customerKey] = {
@@ -240,26 +338,30 @@ function aggregateBySKU(invoices) {
           companyName: invoice.companyName,
         };
       }
-      skuMap[aggregationKey].customerQuantities[customerKey].quantity += item.quantity;
+      skuMap[aggregationKey].customerQuantities[customerKey].quantity += units;
     }
   }
 
   return Object.values(skuMap)
-    .map(({ customerQuantities, ...sku }) => ({
-      ...sku,
-      totalRevenue: Math.round(sku.totalRevenue * 100) / 100,
-      avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0,
-      customers: Object.values(customerQuantities)
-        .map((customer) => {
-          const result = { name: customer.name, quantity: Math.round(customer.quantity * 100) / 100 };
-          if (customer.companyId) {
-            result.companyId = customer.companyId;
-            result.companyName = customer.companyName;
-          }
-          return result;
-        })
-        .sort((a, b) => b.quantity - a.quantity),
-    }))
+    .map(({ customerQuantities, units, baseUnit, ...sku }) => {
+      const unit = baseUnit || (units.size === 1 ? [...units][0] : null);
+      return {
+        ...sku,
+        ...(unit ? { unit } : {}),
+        totalRevenue: Math.round(sku.totalRevenue * 100) / 100,
+        avgPricePerUnit: sku.totalUnits ? Math.round((sku.totalRevenue / sku.totalUnits) * 100) / 100 : 0,
+        customers: Object.values(customerQuantities)
+          .map((customer) => {
+            const result = { name: customer.name, quantity: Math.round(customer.quantity * 100) / 100 };
+            if (customer.companyId) {
+              result.companyId = customer.companyId;
+              result.companyName = customer.companyName;
+            }
+            return result;
+          })
+          .sort((a, b) => b.quantity - a.quantity),
+      };
+    })
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 }
 
@@ -271,7 +373,7 @@ function computeKPIs(invoices) {
   for (const invoice of invoices) {
     totalRevenue = Math.round((totalRevenue + invoice.grandTotal) * 100) / 100;
     for (const item of invoice.lineItems || []) {
-      totalItems += item.quantity;
+      totalItems += lineUnits(item);
     }
     const customerKey = invoice.companyId ? `${invoice.companyId}\u0000${invoice.customerName}` : invoice.customerName;
     if (!customerMap[customerKey]) {
@@ -344,7 +446,7 @@ function computePaymentSummary(invoices) {
   return summary;
 }
 
-async function loadCompanyInvoices(startDate, endDate, company, useMock) {
+async function loadCompanyInvoices(startDate, endDate, company, useMock, dependencies = {}) {
   if (!useMock && !company.credentialsConfigured) {
     return {
       company,
@@ -355,7 +457,9 @@ async function loadCompanyInvoices(startDate, endDate, company, useMock) {
   }
 
   try {
-    const rawInvoices = useMock ? loadMockData(company) : await fetchAllInvoices(startDate, endDate, company);
+    const rawInvoices = useMock
+      ? loadMockData(company)
+      : await fetchAllInvoices(startDate, endDate, company, dependencies.httpClient);
     if (!rawInvoices) {
       return {
         company,
@@ -365,11 +469,24 @@ async function loadCompanyInvoices(startDate, endDate, company, useMock) {
       };
     }
 
+    let invoices = normalizeInvoices(rawInvoices, company);
+    if (!useMock) {
+      try {
+        const getProduct = dependencies.getProduct
+          || ((itemCode) => new AutoCountClient({ baseUrl: company.apiUrl }).getProduct(company, itemCode));
+        invoices = await resolveMultiPackRates(invoices, getProduct);
+      } catch (error) {
+        // The dashboard still shows every invoice; only the mixed-UOM SKUs
+        // stay in their raw units when the product master cannot be read.
+        console.error(`AutoCount ${company.name} MultiPack enrichment error:`, error.message);
+      }
+    }
+
     return {
       company,
       status: 'ok',
       dataSource: useMock ? 'mock' : 'live',
-      invoices: normalizeInvoices(rawInvoices, company),
+      invoices,
     };
   } catch (error) {
     console.error(`AutoCount ${company.name} load error:`, error.message);
@@ -456,6 +573,7 @@ function combineCompanyResults(companyResults, startDate, endDate, timestamp = n
         sku: item.sku,
         description: item.description,
         quantity: item.quantity,
+        ...(item.unit ? { unit: item.unit } : {}),
         unitPrice: item.unitPrice,
         total: item.total,
       })),
@@ -511,6 +629,7 @@ module.exports = async (req, res) => {
 };
 
 module.exports.aggregateBySKU = aggregateBySKU;
+module.exports.resolveMultiPackRates = resolveMultiPackRates;
 module.exports.getLocalToday = getLocalToday;
 module.exports.fetchAllInvoices = fetchAllInvoices;
 module.exports.getCompanyConfigs = getCompanyConfigs;

@@ -420,6 +420,12 @@
         return Number(value || 0).toLocaleString();
       }
 
+      /** Quantity with its resolved unit, e.g. "400 BTL". Returns HTML-safe text. */
+      function formatQuantity(value, unit) {
+        const formatted = formatNumber(value);
+        return unit ? `${formatted} ${escapeHtml(unit)}` : formatted;
+      }
+
       function formatTime(date = new Date()) {
         return date.toLocaleTimeString();
       }
@@ -672,7 +678,10 @@
               tooltip: {
                 callbacks: {
                   title: tooltipTitle(skus),
-                  label: (item) => `${formatNumber(item.raw)} units`,
+                  label: (item) => {
+                    const sku = skus[item.dataIndex];
+                    return sku && sku.unit ? `${formatNumber(item.raw)} ${sku.unit}` : `${formatNumber(item.raw)} units`;
+                  },
                 },
               },
             },
@@ -698,6 +707,7 @@
               sku: sku.sku,
               description: sku.description,
               quantity: customer.quantity,
+              unit: sku.unit,
               companyName: sku.companyName || customer.companyName,
             });
           });
@@ -718,13 +728,13 @@
             (item) => `
         <div class="flex items-center justify-between gap-2 px-2 py-1 text-[10px]">
           <span class="text-slate-400 truncate">${escapeHtml(item.description || item.sku)}<span class="text-slate-600"> · ${escapeHtml(item.sku)}</span></span>
-          <span class="text-slate-300 shrink-0">${formatNumber(item.quantity)}</span>
+          <span class="text-slate-300 shrink-0">${formatQuantity(item.quantity, item.unit)}</span>
         </div>`,
           )
           .join('');
       }
 
-      function buildCustomerList(customers, companyId = '') {
+      function buildCustomerList(customers, companyId = '', unit = '') {
         if (!customers || customers.length === 0) {
           return '<div class="text-slate-500 text-xs px-2 py-1">No customer data</div>';
         }
@@ -744,7 +754,7 @@
                 ${c.companyName ? `<span class="block text-slate-600 text-[10px] truncate">${escapeHtml(c.companyName)}</span>` : ''}
               </span>
             </span>
-            <span class="text-slate-400 shrink-0">${formatNumber(c.quantity)}</span>
+            <span class="text-slate-400 shrink-0">${formatQuantity(c.quantity, unit)}</span>
           </button>
           <div data-customer-detail class="hidden pl-5 pr-2 pb-1">${buildCustomerItems(items)}</div>
         </div>`;
@@ -769,11 +779,11 @@
               </div>
             </div>
           </td>
-          <td class="px-3 py-2 text-right">${formatNumber(s.totalUnits)}</td>
+          <td class="px-3 py-2 text-right">${formatQuantity(s.totalUnits, s.unit)}</td>
           <td class="px-3 py-2 text-right text-emerald-400">${formatMYR(s.totalRevenue)}</td>
         </tr>
         <tr id="detail-${i}" class="hidden bg-slate-900/50">
-          <td colspan="3" class="px-3 pb-2 pt-1">${buildCustomerList(s.customers, s.companyId)}</td>
+          <td colspan="3" class="px-3 pb-2 pt-1">${buildCustomerList(s.customers, s.companyId, s.unit)}</td>
         </tr>`,
           )
           .join('');
@@ -846,7 +856,7 @@
             (item) => `
         <div class="flex items-center justify-between gap-2 px-2 py-1 text-[10px]">
           <span class="text-slate-400 truncate">${escapeHtml(item.description || item.sku)}<span class="text-slate-600"> · ${escapeHtml(item.sku)}</span></span>
-          <span class="text-slate-300 shrink-0">${formatNumber(item.quantity)} · ${formatMYR(item.total)}</span>
+          <span class="text-slate-300 shrink-0">${formatQuantity(item.quantity, item.unit)} · ${formatMYR(item.total)}</span>
         </div>`,
           )
           .join('');
