@@ -24,6 +24,64 @@
       [data-alert-detail] {
         line-height: 1.4;
       }
+      /* Status banner: colour + icon + text, so state never relies on colour alone. */
+      .status-banner {
+        padding: 0.625rem 0.75rem;
+        border: 1px solid #475569;
+        border-left-width: 4px;
+        border-radius: 0.5rem;
+        background-color: #0f172a;
+        color: #e2e8f0;
+        line-height: 1.35;
+      }
+      .status-banner::before {
+        content: '\21bb\00a0\00a0';
+        content: '\21bb\00a0\00a0' / '';
+      }
+      .status-banner[data-state='ok'] {
+        border-color: #10b981;
+        background-color: #052e24;
+        color: #d1fae5;
+      }
+      .status-banner[data-state='ok']::before {
+        content: '\2713\00a0\00a0';
+        content: '\2713\00a0\00a0' / '';
+      }
+      .status-banner[data-state='alert'] {
+        border-color: #38bdf8;
+        background-color: #0c2a3f;
+        color: #e0f2fe;
+      }
+      .status-banner[data-state='alert']::before {
+        content: '\24d8\00a0\00a0';
+        content: '\24d8\00a0\00a0' / '';
+      }
+      .status-banner[data-state='partial'],
+      .status-banner[data-state='unauthorized'],
+      .status-banner[data-state='offline'] {
+        border-color: #f59e0b;
+        background-color: #3b2a05;
+        color: #fef3c7;
+      }
+      .status-banner[data-state='partial']::before,
+      .status-banner[data-state='unauthorized']::before,
+      .status-banner[data-state='offline']::before {
+        content: '\26a0\00a0\00a0';
+        content: '\26a0\00a0\00a0' / '';
+      }
+      .status-banner[data-state='fail'],
+      .status-banner[data-state='error'],
+      .status-banner[data-state='unavailable'] {
+        border-color: #f87171;
+        background-color: #3f1219;
+        color: #fee2e2;
+      }
+      .status-banner[data-state='fail']::before,
+      .status-banner[data-state='error']::before,
+      .status-banner[data-state='unavailable']::before {
+        content: '\2715\00a0\00a0';
+        content: '\2715\00a0\00a0' / '';
+      }
     </style>
   </head>
   <body class="bg-slate-900 text-white min-h-screen">
@@ -32,33 +90,34 @@
         <div class="flex items-center gap-2">
           <a
             href="/"
-            class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition text-sm"
+            class="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 transition text-base"
             aria-label="Back to Sales Dashboard"
           >←</a>
           <div>
-            <p class="text-[10px] uppercase tracking-wide text-slate-500">Read-only check</p>
+            <p class="text-xs uppercase tracking-wide text-slate-400">Read-only check</p>
             <h1 class="text-lg font-bold">Price Check</h1>
           </div>
         </div>
-        <div id="priceCheckOnline" class="text-[10px] text-slate-400">Fresh on demand</div>
+        <div id="priceCheckOnline" class="text-xs text-slate-400">Fresh on demand</div>
       </header>
 
       <section class="panel mt-4 p-3">
-        <div class="flex items-center gap-2">
-          <label class="flex-1 text-xs text-slate-400" for="priceCheckRange">Monitored window</label>
-          <select id="priceCheckRange" class="field text-xs bg-slate-900 border border-slate-600 rounded-lg px-2 py-1">
+        <label class="block text-xs text-slate-400" for="priceCheckRange">Monitored window</label>
+        <div class="mt-1 flex items-center gap-2">
+          <!-- 16px text on the select stops iOS Safari zooming the page when it is tapped. -->
+          <select id="priceCheckRange" class="min-h-[44px] flex-1 text-base bg-slate-900 border border-slate-600 rounded-lg px-3">
             <option value="today" selected>Today</option>
             <option value="seven_days">Last 7 days</option>
           </select>
           <button
             id="priceCheckRefresh"
             type="button"
-            class="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition"
+            class="min-h-[44px] rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 px-5 text-sm font-semibold text-white transition"
           >Refresh now</button>
         </div>
-        <p id="priceCheckStatus" role="status" aria-live="polite" class="mt-3 text-xs font-semibold text-slate-300">Loading price check…</p>
-        <div id="priceCheckCoverage" class="mt-2 text-[10px] text-slate-400" aria-live="polite"></div>
-        <div class="mt-1 flex flex-wrap justify-between gap-1 text-[10px] text-slate-500">
+        <p id="priceCheckStatus" role="status" aria-live="polite" data-state="loading" class="status-banner mt-3 text-sm font-semibold">Loading price check…</p>
+        <div id="priceCheckCoverage" class="mt-2 text-xs text-slate-400" aria-live="polite"></div>
+        <div class="mt-1 flex flex-wrap justify-between gap-1 text-xs text-slate-400">
           <span id="priceCheckScannedAt">Scanned: —</span>
           <span id="priceCheckWindow">Window: —</span>
         </div>
@@ -69,7 +128,7 @@
         <div id="priceCheckList" class="space-y-2" aria-live="polite"></div>
       </section>
 
-      <p class="mt-6 text-[10px] text-slate-500">
+      <p class="mt-6 text-xs text-slate-400">
         Read-only alert only. It never blocks, approves, amends, or submits an invoice, and it keeps no alert history.
       </p>
     </div>
@@ -131,16 +190,36 @@
         if ($('priceCheckWindow')) $('priceCheckWindow').textContent = '';
       }
 
+      var SOURCE_REASONS = {
+        PRICE_SOURCE_UNAVAILABLE: 'AutoCount did not answer in time, or returned an error',
+        PRICE_SOURCE_INVALID: 'AutoCount sent data in an unexpected format',
+        PRICE_PROFILE_MISMATCH: 'AutoCount returned a different company than expected',
+        PRICE_PAGE_INCOMPLETE: 'The invoice list was incomplete',
+        PRICE_DUPLICATE_DOC: 'The invoice list contained a duplicate invoice',
+        PRICE_BOOK_MISMATCH: 'An invoice belonged to a different company book',
+      };
+
+      function sourceReason(code) {
+        return Object.prototype.hasOwnProperty.call(SOURCE_REASONS, code)
+          ? SOURCE_REASONS[code]
+          : 'The scan could not be completed';
+      }
+
       function buildSourceLine(source) {
         var name = escapeHtml(text(source && source.companyName, 'Unknown company'));
-        var label = source && source.ok
-          ? 'Verified'
-          : 'Unavailable' + (source && source.code ? ' (' + escapeHtml(source.code) + ')' : '');
-        var tone = source && source.ok ? 'text-emerald-400' : 'text-red-400';
-        return '<div class="flex items-center justify-between gap-2 py-0.5">'
-          + '<span class="text-slate-400 truncate">' + name + '</span>'
-          + '<span class="text-[10px] ' + tone + '">' + label + '</span>'
+        var ok = Boolean(source && source.ok);
+        var label = ok ? 'Verified' : 'Unavailable';
+        var tone = ok ? 'text-emerald-400' : 'text-red-400';
+        var html = '<div class="py-0.5">'
+          + '<div class="flex items-center justify-between gap-2">'
+          + '<span class="min-w-0 break-words text-slate-300">' + name + '</span>'
+          + '<span class="shrink-0 font-semibold ' + tone + '">' + label + '</span>'
           + '</div>';
+        if (!ok) {
+          var code = source && source.code ? ' <span class="text-slate-400">(' + escapeHtml(source.code) + ')</span>' : '';
+          html += '<div class="text-red-300">' + escapeHtml(sourceReason(source && source.code)) + code + '</div>';
+        }
+        return html + '</div>';
       }
 
       function buildCounts(counts, alerts) {
@@ -152,22 +231,83 @@
           ? Number(data.uomChanges)
           : alerts.filter(function (alert) { return alert.type === 'UOM_CHANGED'; }).length;
         var noHistory = Number(data.noHistory) || 0;
-        var skipped = (Number(data.skippedInvalidLine) || 0)
-          + (Number(data.skippedInvalidInvoice) || 0)
-          + (Number(data.skippedUnapproved) || 0)
-          + (Number(data.skippedVoid) || 0);
+        // These three describe invoices inside the monitored window only.
+        var notApproved = Number(data.skippedUnapproved) || 0;
+        var cancelled = Number(data.skippedVoid) || 0;
+        var unreadable = (Number(data.skippedInvalidLine) || 0) + (Number(data.skippedInvalidInvoice) || 0);
         var cells = [
           ['Price changes', price, 'text-red-400'],
           ['UOM changes', uom, 'text-amber-400'],
           ['No history', noHistory, 'text-slate-300'],
-          ['Skipped rows', skipped, 'text-slate-400'],
+          ['Not approved yet', notApproved, 'text-slate-300'],
         ];
         return '<div class="grid grid-cols-2 gap-2">' + cells.map(function (cell) {
           return '<div class="bg-slate-900 rounded-lg p-2">'
-            + '<div class="text-[10px] text-slate-400">' + cell[0] + '</div>'
-            + '<div class="text-sm font-bold ' + cell[2] + '">' + cell[1] + '</div>'
+            + '<div class="text-xs text-slate-400">' + cell[0] + '</div>'
+            + '<div class="text-lg font-bold ' + cell[2] + '">' + cell[1] + '</div>'
             + '</div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>'
+          + '<p class="mt-2 text-xs text-slate-400">Cancelled: ' + cancelled
+          + ' · Unreadable rows: ' + unreadable
+          + '. Invoices not approved yet are only checked after approval.</p>';
+      }
+
+      function shortCompany(name) {
+        var value = text(name, 'Unknown company');
+        if (/sdn/i.test(value)) return 'Sdn Bhd';
+        if (/^wanson enterprise$/i.test(value.trim())) return 'Enterprise';
+        return value;
+      }
+
+      function isDecrease(value) {
+        return String(value == null ? '' : value).charAt(0) === '-';
+      }
+
+      function signed(value) {
+        var textValue = String(value == null ? '' : value);
+        if (!textValue) return '';
+        return textValue.charAt(0) === '-' ? textValue : '+' + textValue;
+      }
+
+      function percentValue(alert) {
+        var value = parseFloat(alert.differencePercent);
+        return Number.isFinite(value) ? Math.abs(value) : 0;
+      }
+
+      // Newest invoices first; within a day, price changes before UOM changes,
+      // then the biggest percentage move first.
+      function sortAlerts(alerts) {
+        return alerts.slice().sort(function (a, b) {
+          var dateA = String(a.docDate || '');
+          var dateB = String(b.docDate || '');
+          if (dateA !== dateB) return dateA < dateB ? 1 : -1;
+          var typeA = a.type === 'UOM_CHANGED' ? 1 : 0;
+          var typeB = b.type === 'UOM_CHANGED' ? 1 : 0;
+          if (typeA !== typeB) return typeA - typeB;
+          var moveA = percentValue(a);
+          var moveB = percentValue(b);
+          if (moveA !== moveB) return moveB - moveA;
+          var docA = String(a.docNo || '');
+          var docB = String(b.docNo || '');
+          if (docA !== docB) return docA < docB ? 1 : -1;
+          return String(a.itemCode || '') < String(b.itemCode || '') ? -1 : 1;
+        });
+      }
+
+      // One-line "what changed", shown on the collapsed card.
+      function buildChangeSummary(alert) {
+        if (alert.type === 'UOM_CHANGED') {
+          return 'UOM ' + escapeHtml(text(alert.previousUom, '?')) + ' → ' + escapeHtml(text(alert.uom, '?'));
+        }
+        var decrease = isDecrease(alert.differenceMYR);
+        var move = (decrease ? '▼' : '▲')
+          + '<span class="sr-only">' + (decrease ? ' decrease ' : ' increase ') + '</span> '
+          + escapeHtml(signed(text(alert.differenceMYR, '')) || '—');
+        if (alert.differencePercent != null && alert.differencePercent !== '') {
+          move += ' (' + escapeHtml(signed(alert.differencePercent)) + '%)';
+        }
+        return 'RM ' + escapeHtml(text(alert.previousPrice, '—')) + ' → RM ' + escapeHtml(text(alert.currentPrice, '—'))
+          + ' · ' + move;
       }
 
       function buildAlertCard(alert) {
@@ -175,23 +315,33 @@
         var delta = isUom
           ? 'UOM ' + escapeHtml(text(alert.previousUom, '?')) + ' → ' + escapeHtml(text(alert.uom, '?'))
           : 'RM ' + escapeHtml(text(alert.differenceMYR, '—'))
-            + ' (' + escapeHtml(text(alert.differencePercent, '—')) + '%)';
+            + (alert.differencePercent != null && alert.differencePercent !== ''
+              ? ' (' + escapeHtml(alert.differencePercent) + '%)'
+              : '');
         return '<article class="panel" data-alert-card>'
-          + '<button type="button" data-alert-toggle aria-expanded="false" class="w-full flex items-center justify-between gap-2 p-2 text-left">'
+          + '<button type="button" data-alert-toggle aria-expanded="false" class="w-full min-h-[44px] p-3 text-left">'
+          + '<span class="flex items-start justify-between gap-2">'
           + '<span class="min-w-0">'
-          + '<span class="block text-xs font-semibold text-white truncate">' + escapeHtml(text(alert.itemCode, 'Unknown item')) + '</span>'
-          + '<span class="block text-[10px] text-slate-400 truncate">' + escapeHtml(text(alert.customerName, 'Unknown customer')) + ' · ' + escapeHtml(text(alert.docNo, '—')) + '</span>'
+          + '<span class="block text-sm font-semibold text-white truncate">' + escapeHtml(text(alert.itemCode, 'Unknown item')) + '</span>'
+          + '<span class="flex gap-1 text-xs text-slate-400">'
+          + '<span class="min-w-0 truncate">' + escapeHtml(text(alert.customerName, 'Unknown customer')) + '</span>'
+          + '<span class="shrink-0">· ' + escapeHtml(text(alert.docNo, '—')) + '</span>'
           + '</span>'
-          + '<span class="shrink-0 text-[10px] font-semibold ' + (isUom ? 'text-amber-400' : 'text-red-400') + '">'
+          + '</span>'
+          + '<span class="shrink-0 text-xs font-semibold ' + (isUom ? 'text-amber-400' : 'text-red-400') + '">'
           + (isUom ? 'UOM CHANGED' : 'PRICE CHANGED') + '</span>'
+          + '</span>'
+          + '<span class="mt-1 block text-sm text-slate-100">' + buildChangeSummary(alert) + '</span>'
+          + '<span class="mt-0.5 block text-xs text-slate-400">' + escapeHtml(shortCompany(alert.companyName)) + ' · ' + escapeHtml(text(alert.docDate, '—')) + '</span>'
           + '</button>'
-          + '<div data-alert-detail class="hidden px-2 pb-2 text-[10px] text-slate-400 space-y-0.5">'
+          + '<div data-alert-detail class="hidden px-3 pb-3 text-xs text-slate-300 space-y-0.5">'
           + '<div>Company: ' + escapeHtml(text(alert.companyName, 'Unknown company')) + '</div>'
           + '<div>Invoice: ' + escapeHtml(text(alert.docNo, '—')) + ' · ' + escapeHtml(text(alert.docDate, '—')) + '</div>'
           + '<div>Customer: ' + escapeHtml(text(alert.customerCode, '—')) + ' · ' + escapeHtml(text(alert.customerName, '—')) + '</div>'
           + '<div>Item: ' + escapeHtml(text(alert.itemCode, '—')) + ' · ' + escapeHtml(text(alert.description, '—')) + '</div>'
-          + '<div>UOM: ' + escapeHtml(text(alert.uom, '—')) + '</div>'
-          + '<div>Current: RM ' + escapeHtml(text(alert.currentPrice, '—')) + ' · Previous: RM ' + escapeHtml(text(alert.previousPrice, '—')) + '</div>'
+          + '<div>UOM: ' + escapeHtml(text(alert.uom, '—')) + (isUom ? ' (was ' + escapeHtml(text(alert.previousUom, '?')) + ')' : '') + '</div>'
+          + '<div>Current: RM ' + escapeHtml(text(alert.currentPrice, '—')) + ' / ' + escapeHtml(text(alert.uom, '?'))
+          + ' · Previous: RM ' + escapeHtml(text(alert.previousPrice, '—')) + ' / ' + escapeHtml(text(alert.previousUom, '?')) + '</div>'
           + '<div>Delta: ' + delta + '</div>'
           + '<div>Reference: ' + escapeHtml(text(alert.previousDocNo, '—')) + ' · ' + escapeHtml(text(alert.previousDocDate, '—')) + '</div>'
           + '</div></article>';
@@ -199,7 +349,7 @@
 
       function renderCoverage(sources) {
         var list = Array.isArray(sources) ? sources : [];
-        if (!list.length) return '<span class="text-slate-500">No source coverage reported.</span>';
+        if (!list.length) return '<span class="text-slate-400">No source coverage reported.</span>';
         return list.map(buildSourceLine).join('');
       }
 
@@ -237,13 +387,15 @@
         }
         var alerts = Array.isArray(data.alerts) ? data.alerts : [];
         var sources = Array.isArray(data.sources) ? data.sources : [];
-        var failed = sources.filter(function (source) { return source && source.ok === false; }).length;
+        var failedSources = sources.filter(function (source) { return source && source.ok === false; });
+        var failed = failedSources.length;
         var statusText;
         if (data.status === 'FAIL') {
           statusText = 'FAIL · No book produced a complete verified scan';
         } else if (data.status === 'PARTIAL') {
-          statusText = 'PARTIAL · ' + failed + ' of ' + sources.length
-            + ' books failed — results are incomplete and must not be read as zero differences';
+          statusText = 'PARTIAL · ' + failedSources.map(function (source) {
+            return text(source.companyName, 'Unknown company');
+          }).join(' and ') + ' could not be checked — results are incomplete and must not be read as zero differences';
         } else if (alerts.length === 0) {
           statusText = 'PASS · Complete coverage · No price differences found';
         } else {
@@ -258,9 +410,9 @@
         if ($('priceCheckCounts')) $('priceCheckCounts').innerHTML = buildCounts(data.counts, alerts);
         if ($('priceCheckList')) {
           if (alerts.length) {
-            $('priceCheckList').innerHTML = alerts.map(buildAlertCard).join('');
+            $('priceCheckList').innerHTML = sortAlerts(alerts).map(buildAlertCard).join('');
           } else if (data.status === 'PASS') {
-            $('priceCheckList').innerHTML = '<div class="panel p-3 text-xs text-slate-400">No price differences in the monitored window.</div>';
+            $('priceCheckList').innerHTML = '<div class="panel p-3 text-sm text-slate-300">No price differences in the monitored window.</div>';
           } else {
             $('priceCheckList').innerHTML = '';
           }
@@ -272,7 +424,7 @@
         clearResults();
         var online = typeof navigator === 'undefined' || navigator.onLine !== false;
         if (online) {
-          setStatus('unavailable', 'UNAVAILABLE · Price check could not be reached — no cached prices are shown');
+          setStatus('unavailable', 'UNAVAILABLE · Price check could not be reached — no cached prices are shown. Check your connection, then tap Refresh now.');
         } else {
           setStatus('offline', 'OFFLINE · You are offline — price check is unavailable and no cached prices are shown');
         }
@@ -283,14 +435,23 @@
         clearResults();
         setStatus('unauthorized', 'UNAUTHORIZED · Sign in on the dashboard first');
         if ($('priceCheckList')) {
-          $('priceCheckList').innerHTML = '<div class="panel p-3 text-xs text-slate-400">Sign in at the top of the dashboard, then return here. <a href="/" class="text-emerald-400 underline">Back to dashboard</a></div>';
+          $('priceCheckList').innerHTML = '<div class="panel p-3 text-sm text-slate-300">Sign in at the top of the dashboard, then return here. <a href="/" class="text-emerald-400 underline">Back to dashboard</a></div>';
         }
         showResult();
       }
 
+      var FAILURE_HINTS = {
+        408: 'The scan took too long. Tap Refresh now to retry; Today is faster than Last 7 days.',
+        429: 'Too many requests. Wait a minute, then tap Refresh now.',
+        503: 'Price check is temporarily unavailable. Try again shortly.',
+        504: 'The scan took too long. Tap Refresh now to retry; Today is faster than Last 7 days.',
+      };
+
       function renderFailure(httpStatus) {
         clearResults();
-        setStatus('fail', 'FAIL · Price check could not be completed (HTTP ' + Number(httpStatus || 0) + ')');
+        var code = Number(httpStatus || 0);
+        var hint = FAILURE_HINTS[code] || 'Tap Refresh now to try again.';
+        setStatus('fail', 'FAIL · Price check could not be completed (HTTP ' + code + ') — ' + hint);
         showResult();
       }
 

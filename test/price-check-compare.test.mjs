@@ -58,8 +58,32 @@ test('draft and cancelled references are excluded', () => {
 
   assert.equal(out.alerts.length, 0);
   assert.equal(out.counts.noHistory, 1);
+  // Both excluded rows pre-date monitorFrom (2026-09-15), so they are history,
+  // not skipped work in the monitored window.
+  assert.equal(out.counts.skippedUnapproved, 0);
+  assert.equal(out.counts.skippedVoid, 0);
+});
+
+test('skipped counters only cover the monitored window, not the history baseline', () => {
+  const rows = [
+    inv('OLD-D', '2026-08-01', '8.00', 'CTN', { approverID: null }),
+    inv('OLD-V', '2026-08-02', '9.00', 'CTN', { cancelled: true }),
+    rawInv('OLD-L', '2026-08-03', [line('not-a-number')]),
+    rawInv('OLD-X', '2026-08-04', [line('9.00')], { debtorCode: '' }),
+    inv('NEW-D', '2026-09-20', '8.00', 'CTN', { approverID: null }),
+    inv('NEW-V', '2026-09-20', '9.00', 'CTN', { cancelled: true }),
+    rawInv('NEW-L', '2026-09-20', [line('not-a-number')]),
+    rawInv('NEW-X', '2026-09-20', [line('9.00')], { debtorCode: '' }),
+    rawInv('NODATE-X', 'not-a-date', [line('9.00')]),
+  ];
+  const out = compareApprovedInvoices(rows, ENTERPRISE);
+
+  assert.equal(out.counts.invoices, 9);
   assert.equal(out.counts.skippedUnapproved, 1);
   assert.equal(out.counts.skippedVoid, 1);
+  assert.equal(out.counts.skippedInvalidLine, 1);
+  // NEW-X plus the row whose date cannot be read; OLD-X is history.
+  assert.equal(out.counts.skippedInvalidInvoice, 2);
 });
 
 test('UOM change and invalid price are not numeric price alerts', () => {
@@ -155,7 +179,8 @@ test('approval requires approverID plus approvedTimeStamp, not status text or ca
     inv('V-3', '2026-09-04', '9.00', 'CTN', { cancelled: '1' }),
     inv('G-1', '2026-09-20', '12.00'),
   ];
-  const out = compareApprovedInvoices(rows, ENTERPRISE);
+  // Widen the window so every excluded row is counted as skipped.
+  const out = compareApprovedInvoices(rows, { ...ENTERPRISE, monitorFrom: '2026-09-01' });
 
   assert.equal(out.alerts.length, 0);
   assert.equal(out.counts.skippedUnapproved, 2);

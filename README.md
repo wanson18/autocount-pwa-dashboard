@@ -254,7 +254,7 @@ real-Postgres run.
 - **No persistent audit** — version 1 recomputes from fresh Cloud data on every check, so a corrected difference disappears on the next scan. A durable first-seen alert ledger is deliberately out of scope.
 - **Status** — `PASS` (both books verified and scanned completely, even with no alerts), `PARTIAL` (one book failed; only the successful book's alerts are shown), `FAIL` (neither book scanned, returned with HTTP `502`, never an empty-success state).
 
-The dashboard home page starts with the **Price Check access** panel. After signing in, use the **Check Price Differences** button. The mobile page `public/price-check.html` defaults to Today and offers a Last 7 days selector. It clears customer rows on failed or unauthenticated refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, offline, and unauthenticated states by text.
+The dashboard home page starts with the **Price Check access** panel. After signing in, use the **Check Price Differences** button. The mobile page `public/price-check.html` defaults to Today and offers a Last 7 days selector. It clears customer rows on failed or unauthenticated refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, offline, and unauthenticated states by text, colour, and icon. Findings are listed newest invoice first and each card shows the price movement (for example `RM 95.00 → RM 98.50 · ▲ +3.50 (+3.68%)`) without opening it. The `skipped*` counts in the API response cover the monitored window only, not the 90-day history baseline.
 
 ## Deploy to Vercel
 

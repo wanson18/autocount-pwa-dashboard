@@ -167,7 +167,9 @@ test('renders customer data as escaped text and distinguishes state by text', ()
   assert.match(listHtml, /Invoice: SI-0001 · 2026-09-21/);
   assert.match(document.getElementById('priceCheckStatus').textContent, /PASS/);
   assert.match(document.getElementById('priceCheckCounts').innerHTML, /No history/i);
-  assert.match(document.getElementById('priceCheckCounts').innerHTML, /Skipped/i);
+  assert.match(document.getElementById('priceCheckCounts').innerHTML, /Not approved yet/i);
+  assert.match(document.getElementById('priceCheckCounts').innerHTML, /Unreadable rows: 1/);
+  assert.doesNotMatch(document.getElementById('priceCheckCounts').innerHTML, /Skipped rows/i);
   assert.match(document.getElementById('priceCheckCoverage').innerHTML, /Wanson Enterprise/);
 
   sandbox.renderResult(resultFixture({
@@ -369,4 +371,134 @@ test('a protected refresh calls the price API with the browser session', async (
   assert.ok(calls[0].url.startsWith('/api/price-check?range=today'));
   assert.equal(calls[0].options.credentials, 'same-origin');
   assert.match(document.getElementById('priceCheckStatus').textContent, /PASS/);
+});
+
+test('every status state has its own banner colour and icon, not just text', () => {
+  const { sandbox, document } = loadPage();
+  const states = {
+    ok: resultFixture(),
+    alert: resultFixture({ alerts: [alertFixture('Customer')] }),
+    partial: resultFixture({
+      status: 'PARTIAL',
+      sources: [{ companyName: 'A', ok: true }, { companyName: 'B', ok: false, code: 'PRICE_PAGE_INCOMPLETE' }],
+    }),
+  };
+  for (const [state, envelope] of Object.entries(states)) {
+    sandbox.renderResult(envelope);
+    assert.equal(document.getElementById('priceCheckStatus').dataset.state, state);
+  }
+  sandbox.renderUnauthorized();
+  assert.equal(document.getElementById('priceCheckStatus').dataset.state, 'unauthorized');
+  sandbox.renderFailure(500);
+  assert.equal(document.getElementById('priceCheckStatus').dataset.state, 'fail');
+
+  assert.match(price, /id="priceCheckStatus"[^>]*class="status-banner/);
+  for (const state of ['ok', 'alert', 'partial', 'unauthorized', 'offline', 'fail', 'error', 'unavailable']) {
+    assert.match(price, new RegExp(`\\.status-banner\\[data-state='${state}'\\]::before`), `${state} needs an icon`);
+  }
+});
+
+test('a PARTIAL banner names the book that could not be checked', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({
+    status: 'PARTIAL',
+    sources: [
+      { companyName: 'Wanson Enterprise', ok: true },
+      { companyName: 'Wanson Enterprise (M) Sdn Bhd', ok: false, code: 'PRICE_PAGE_INCOMPLETE' },
+    ],
+  }));
+  const status = document.getElementById('priceCheckStatus').textContent;
+  assert.match(status, /PARTIAL/);
+  assert.match(status, /Wanson Enterprise \(M\) Sdn Bhd could not be checked/);
+  assert.match(status, /must not be read as zero differences/);
+});
+
+test('failed sources show a plain-language reason and keep the technical code', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({
+    status: 'PARTIAL',
+    sources: [
+      { companyName: 'Wanson Enterprise', ok: true },
+      { companyName: 'Wanson Enterprise (M) Sdn Bhd', ok: false, code: 'PRICE_PAGE_INCOMPLETE' },
+    ],
+  }));
+  const coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.match(coverage, /The invoice list was incomplete/);
+  assert.match(coverage, /PRICE_PAGE_INCOMPLETE/);
+
+  sandbox.renderResult(resultFixture({
+    status: 'PARTIAL',
+    sources: [
+      { companyName: 'A', ok: true },
+      { companyName: 'B', ok: false, code: '<img src=x onerror=alert(1)>' },
+    ],
+  }));
+  const unknown = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.match(unknown, /The scan could not be completed/);
+  assert.equal(unknown.includes('<img'), false);
+});
+
+test('collapsed cards show the price movement without tapping', () => {
+  const { sandbox, document } = loadPage();
+  const down = { ...alertFixture('Down Customer'), docNo: 'SI-DOWN', currentPrice: '9.50', previousPrice: '10.00', differenceMYR: '-0.50', differencePercent: '-5.00' };
+  const uom = { ...alertFixture('Uom Customer'), docNo: 'SI-UOM', type: 'UOM_CHANGED', uom: 'PKT', previousUom: 'CTN', differenceMYR: null, differencePercent: null };
+  sandbox.renderResult(resultFixture({ alerts: [alertFixture('Up Customer'), down, uom] }));
+  const html = document.getElementById('priceCheckList').innerHTML;
+
+  assert.match(html, /RM 10\.00 → RM 12\.00 · ▲<span class="sr-only"> increase <\/span> \+2\.00 \(\+20\.00%\)/);
+  assert.match(html, /RM 10\.00 → RM 9\.50 · ▼<span class="sr-only"> decrease <\/span> -0\.50 \(-5\.00%\)/);
+  assert.match(html, /UOM CTN → PKT/);
+  assert.match(html, /Enterprise · 2026-09-21/);
+  // Detail view labels each price with its own UOM.
+  assert.match(html, /Current: RM 12\.00 \/ PKT|Current: RM 12\.00 \/ CTN/);
+  assert.match(html, /Previous: RM 10\.00 \/ CTN/);
+});
+
+test('a missing percentage is omitted instead of rendering "—%"', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({ alerts: [{ ...alertFixture('Zero Base'), differencePercent: null }] }));
+  const html = document.getElementById('priceCheckList').innerHTML;
+  assert.equal(html.includes('—%'), false);
+  assert.match(html, /\+2\.00/);
+});
+
+test('alerts are listed newest invoice first, then biggest move first', () => {
+  const { sandbox, document } = loadPage();
+  const mk = (docNo, docDate, extra = {}) => ({ ...alertFixture(`Customer ${docNo}`), docNo, docDate, ...extra });
+  sandbox.renderResult(resultFixture({
+    alerts: [
+      mk('OLD', '2026-09-15'),
+      mk('NEW-SMALL', '2026-09-21', { differencePercent: '1.00' }),
+      mk('NEW-UOM', '2026-09-21', { type: 'UOM_CHANGED', differenceMYR: null, differencePercent: null }),
+      mk('MID', '2026-09-18'),
+      mk('NEW-BIG', '2026-09-21', { differencePercent: '-30.00', differenceMYR: '-3.00' }),
+    ],
+  }));
+  const html = document.getElementById('priceCheckList').innerHTML;
+  const order = ['NEW-BIG', 'NEW-SMALL', 'NEW-UOM', 'MID', 'OLD'].map((docNo) => html.indexOf(`· ${docNo}</span>`));
+  assert.ok(order.every((position) => position > -1), 'every alert renders');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'cards appear in newest-first order');
+});
+
+test('timeouts and rate limits get an actionable message with the HTTP code kept', async () => {
+  for (const [status, expected] of [[504, /took too long/], [408, /took too long/], [429, /Wait a minute/], [503, /temporarily unavailable/], [500, /try again/i]]) {
+    const { sandbox, document } = loadPage(async () => jsonResponse(status, null));
+    await sandbox.loadPrices('seven_days');
+    const text = document.getElementById('priceCheckStatus').textContent;
+    assert.match(text, new RegExp(`HTTP ${status}`));
+    assert.match(text, expected);
+    assert.match(text, /^FAIL/);
+  }
+});
+
+test('controls meet the 44px touch target and the select avoids iOS focus zoom', () => {
+  for (const id of ['priceCheckRefresh', 'priceCheckRange']) {
+    const tag = price.match(new RegExp(`<[a-z]+[^>]*id="${id}"[^>]*>`, 'i'))?.[0] ?? '';
+    assert.match(tag, /min-h-\[44px\]/, `${id} must be at least 44px tall`);
+  }
+  assert.match(price.match(/<select[^>]*id="priceCheckRange"[^>]*>/i)[0], /text-base/);
+  assert.match(price, /aria-label="Back to Sales Dashboard"/);
+  assert.match(price.match(/<a[^>]*aria-label="Back to Sales Dashboard"/i)[0], /min-h-\[44px\] min-w-\[44px\]/);
+  assert.doesNotMatch(price, /text-\[10px\]/, 'no 10px text');
+  assert.doesNotMatch(price, /text-slate-500/, 'no low-contrast slate-500 text');
 });
