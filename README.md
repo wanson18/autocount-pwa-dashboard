@@ -252,9 +252,10 @@ real-Postgres run.
 - **Windows** — fixed server-side only, in `Asia/Kuala_Lumpur`: `today` scans 90 prior days plus today (91 days), and `seven_days` monitors the last 7 calendar days plus 90 prior days (97 days). Arbitrary or unknown ranges return `400`.
 - **Read-only** — `Cache-Control: no-store`, no CORS, GET-only, and no service-worker cache or offline fallback for price data. No invoice is created, approved, amended, voided, or submitted, and Jev/TypeSafe is not involved.
 - **No persistent audit** — version 1 recomputes from fresh Cloud data on every check, so a corrected difference disappears on the next scan. A durable first-seen alert ledger is deliberately out of scope.
+- **Unstable Cloud lists** — each book is first read page by page. If AutoCount repeats a row, changes its total, or returns a short or long list, the book is read once more in date slices that each fit on one page (up to 3 requests at a time, 250 requests at most), so the Cloud never has to order rows across pages. Both reads must prove completeness: every slice complete, slice totals equal to the overall total, and no invoice twice. A book that still fails is reported as failed with page, row, and total numbers (no invoice data) and an entry in the Vercel function log.
 - **Status** — `PASS` (both books verified and scanned completely, even with no alerts), `PARTIAL` (one book failed; only the successful book's alerts are shown), `FAIL` (neither book scanned, returned with HTTP `502`, never an empty-success state).
 
-The dashboard home page starts with the **Price Check access** panel. After signing in, use the **Check Price Differences** button. The mobile page `public/price-check.html` defaults to Today and offers a Last 7 days selector. It clears customer rows on failed or unauthenticated refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, offline, and unauthenticated states by text.
+The dashboard home page starts with the **Price Check access** panel. After signing in, use the **Check Price Differences** button. The mobile page `public/price-check.html` defaults to Today and offers a Last 7 days selector. It clears customer rows on failed or unauthenticated refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, offline, and unauthenticated states by text, colour, and icon. Findings are listed newest invoice first and each card shows the price movement (for example `RM 95.00 → RM 98.50 · ▲ +3.50 (+3.68%)`) without opening it. The `skipped*` counts in the API response cover the monitored window only, not the 90-day history baseline.
 
 ## Deploy to Vercel
 
@@ -272,6 +273,10 @@ npx vercel env add AUTOCOUNT_SDN_BHD_KEY_ID production,preview --value "your-sdn
 npx vercel env add AUTOCOUNT_API_URL production,preview --value "https://accounting-api.autocountcloud.com"
 npx vercel env add USE_MOCK_DATA production,preview --value "false"
 ```
+
+### Function region
+
+`vercel.json` pins the serverless functions to Singapore (`"regions": ["sin1"]`) so calls to AutoCount Cloud, which dominate the scan time, travel a short distance instead of from Washington D.C. (`iad1`, the Vercel default). This applies to every function, including the dispatch API, so the `DATABASE_URL` Postgres should be in or near Singapore too; a database in the US adds a round trip per query. To undo, delete the `regions` line. The `x-vercel-id` response header shows `<edge region>::<function region>::<id>`.
 
 ## API Endpoints
 
