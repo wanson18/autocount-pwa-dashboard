@@ -4,6 +4,7 @@ const auth = require('../lib/dispatch/auth');
 const { createPriceCheckHandler } = require('./price-check');
 
 const NOW = new Date('2026-09-21T04:00:00Z');
+const QUIET = { error() {} };
 const SECRET = Buffer.alloc(32, 9).toString('base64url');
 const pinHashPromise = auth.hashDispatchPin('2468');
 let cachedPinHash = null;
@@ -157,7 +158,7 @@ test('public dispatch mode without a real cookie never reads prices', async () =
 test('an invalid signed cookie is rejected with 401 and no Cloud reads', async () => {
   const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: 'dispatch_session=forged.token' }, query: {} }, res);
@@ -175,7 +176,7 @@ test('a real signed cookie returns PASS with exact window, alerts, and no-store'
       throw new Error('getSessionFromRequest must never be used');
     },
   };
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth: spyAuth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth: spyAuth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -209,7 +210,7 @@ test('a real signed cookie returns PASS with exact window, alerts, and no-store'
 test('selecting seven_days scans the 97-day window', async () => {
   const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: { range: 'seven_days' } }, res);
@@ -225,7 +226,7 @@ test('selecting seven_days scans the 97-day window', async () => {
 test('one failed book yields PARTIAL, keeps the other alerts, and leaks no message', async () => {
   const env = await signedEnv();
   const client = cloudClient({ sdnPages: ['REJECT'] });
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -261,7 +262,7 @@ test('a comparison-level cross-book failure marks only that book failed', async 
     ],
   }];
   const client = cloudClient({ enterprisePages: enterpriseCrossBook, sdnPages: sdnAlertPages });
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -299,7 +300,7 @@ test('both comparison failures yield FAIL/502 with no alerts', async () => {
     ],
   }];
   const client = cloudClient({ enterprisePages: enterpriseCrossBook, sdnPages: sdnCrossBook });
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -315,7 +316,7 @@ test('both comparison failures yield FAIL/502 with no alerts', async () => {
 test('both failed books yield FAIL/502 with no alerts', async () => {
   const env = await signedEnv();
   const client = cloudClient({ sdnPages: ['REJECT'], profile: { '63750': 'REJECT' } });
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -349,7 +350,7 @@ test('POST is rejected with 405 and never verifies or reads Cloud', async () => 
 test('an invalid range is rejected with 400 before any Cloud read', async () => {
   const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: { range: 'last_month' } }, res);
@@ -361,7 +362,7 @@ test('an invalid range is rejected with 400 before any Cloud read', async () => 
 test('an unexpected query key or array range is rejected with 400', async () => {
   const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const extraKey = response();
   await handler(
@@ -386,7 +387,7 @@ test('a configuration that crosses the fixed book ids fails closed without Cloud
     ...CONFIGS,
     enterprise: { ...CONFIGS.enterprise, accountBookId: '63688' },
   };
-  const handler = createPriceCheckHandler({ env, client, configs: crossed, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: crossed, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -399,7 +400,7 @@ test('a configuration that crosses the fixed book ids fails closed without Cloud
 test('the response never contains credentials, raw invoices, or internal messages', async () => {
   const env = await signedEnv();
   const client = cloudClient();
-  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW });
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger: QUIET });
 
   const res = response();
   await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
@@ -418,6 +419,140 @@ test('the response never contains credentials, raw invoices, or internal message
     'internal profile detail',
     'internal listing detail',
   ]) {
+    assert.equal(serialized.includes(token), false, `response leaked ${token}`);
+  }
+});
+
+function scriptedClient({ enterprise, sdn }) {
+  const scans = { '63750': 0, '63688': 0 };
+  const listCalls = { '63750': 0, '63688': 0 };
+  return {
+    scans,
+    listCalls,
+    async getCompanyProfile(company) {
+      return { companyName: company.accountBookId === '63750' ? ENTERPRISE_PROFILE : SDN_PROFILE };
+    },
+    async listInvoicePage(company, { page }) {
+      const id = company.accountBookId;
+      if (page === 1) scans[id] += 1;
+      listCalls[id] += 1;
+      return (id === '63750' ? enterprise : sdn)(scans[id], page);
+    },
+  };
+}
+
+const enterpriseOk = (_scan, page) => ENTERPRISE_PAGES[page - 1];
+// Page 2 re-lists S-2 (the last row of page 1): the list shifted while it was read.
+const shiftedList = (_scan, page) => (page === 1
+  ? { totalCount: 3, data: [invoice('S-1', '2026-09-20', '10.00'), invoice('S-2', '2026-09-21', '10.00')] }
+  : { totalCount: 3, data: [invoice('S-2', '2026-09-21', '10.00')] });
+const stableList = (_scan, page) => (page === 1
+  ? { totalCount: 3, data: [invoice('S-1', '2026-09-20', '10.00'), invoice('S-2', '2026-09-21', '10.00')] }
+  : { totalCount: 3, data: [invoice('S-3', '2026-09-21', '10.00')] });
+
+async function runScripted(client, logger = QUIET) {
+  const env = await signedEnv();
+  const handler = createPriceCheckHandler({ env, client, configs: CONFIGS, auth, now: NOW, logger });
+  const res = response();
+  await handler({ method: 'GET', headers: { cookie: signedCookie() }, query: {} }, res);
+  return res;
+}
+
+test('a list that shifts during one scan is retried once and can still PASS', async () => {
+  const logs = [];
+  const client = scriptedClient({
+    enterprise: enterpriseOk,
+    sdn: (scan, page) => (scan === 1 ? shiftedList(scan, page) : stableList(scan, page)),
+  });
+  const res = await runScripted(client, { error: (...args) => logs.push(args) });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'PASS');
+  const sdn = res.body.sources.find((source) => source.companyKey === 'sdn_bhd');
+  const enterprise = res.body.sources.find((source) => source.companyKey === 'enterprise');
+  assert.equal(sdn.ok, true);
+  assert.equal(sdn.attempts, 2, 'the page can show that this book needed a retry');
+  assert.equal(enterprise.attempts, 1);
+  assert.equal(client.scans['63688'], 2);
+  assert.equal(client.scans['63750'], 1);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][1], 'retrying');
+});
+
+test('a list that keeps shifting fails the book after one retry, with numeric diagnostics only', async () => {
+  const logs = [];
+  const client = scriptedClient({ enterprise: enterpriseOk, sdn: shiftedList });
+  const res = await runScripted(client, { error: (...args) => logs.push(args) });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'PARTIAL');
+  assert.equal(client.scans['63688'], 2, 'exactly one retry');
+  const failed = res.body.sources.find((source) => source.ok === false);
+  assert.equal(failed.companyKey, 'sdn_bhd');
+  assert.equal(failed.code, 'PRICE_DUPLICATE_DOC');
+  assert.equal(failed.attempts, 2);
+  assert.deepEqual(failed.detail, {
+    page: 2,
+    rowOnPage: 1,
+    pageSize: 2,
+    totalCount: 3,
+    rowsRead: 2,
+    firstSeenOnPage: 1,
+    pageRepeated: false,
+    sameContent: true,
+  });
+
+  assert.deepEqual(logs.map((entry) => entry[1]), ['retrying', 'failed']);
+  const logged = JSON.stringify(logs);
+  for (const token of ['S-1', 'S-2', 'Sample', 'fake-sdn-api-key', 'fake-sdn-key-id', 'apiKey']) {
+    assert.equal(logged.includes(token), false, `log leaked ${token}`);
+  }
+  assert.match(logged, /PRICE_DUPLICATE_DOC/);
+});
+
+test('failures that are not list instability are never retried', async () => {
+  const client = scriptedClient({
+    enterprise: enterpriseOk,
+    sdn: () => {
+      const error = new Error('internal listing detail');
+      error.code = 'PRICE_PAGE_INCOMPLETE';
+      throw error;
+    },
+  });
+  const res = await runScripted(client);
+
+  assert.equal(client.scans['63688'], 1);
+  const failed = res.body.sources.find((source) => source.ok === false);
+  assert.equal(failed.attempts, 1);
+  assert.equal(failed.detail, undefined);
+});
+
+test('only whitelisted integers and booleans from an error detail reach the response', async () => {
+  const client = scriptedClient({
+    enterprise: enterpriseOk,
+    sdn: () => {
+      const error = new Error('internal listing detail');
+      error.code = 'PRICE_PAGE_INCOMPLETE';
+      error.detail = {
+        page: 3,
+        totalCount: 7,
+        sameContent: false,
+        rowsRead: -1,
+        pageSize: 100.5,
+        rowOnPage: '4',
+        docNo: 'SI-SECRET',
+        customerName: 'Secret Customer',
+        nested: { page: 1 },
+      };
+      throw error;
+    },
+  });
+  const res = await runScripted(client);
+
+  const failed = res.body.sources.find((source) => source.ok === false);
+  assert.deepEqual(failed.detail, { page: 3, totalCount: 7, sameContent: false });
+  const serialized = JSON.stringify(res.body);
+  for (const token of ['SI-SECRET', 'Secret Customer', 'internal listing detail']) {
     assert.equal(serialized.includes(token), false, `response leaked ${token}`);
   }
 });

@@ -195,7 +195,7 @@
         PRICE_SOURCE_INVALID: 'AutoCount sent data in an unexpected format',
         PRICE_PROFILE_MISMATCH: 'AutoCount returned a different company than expected',
         PRICE_PAGE_INCOMPLETE: 'The invoice list was incomplete',
-        PRICE_DUPLICATE_DOC: 'The invoice list contained a duplicate invoice',
+        PRICE_DUPLICATE_DOC: 'AutoCount listed the same invoice twice. This can happen when invoices change while the list is being read',
         PRICE_BOOK_MISMATCH: 'An invoice belonged to a different company book',
       };
 
@@ -205,12 +205,39 @@
           : 'The scan could not be completed';
       }
 
+      function isCount(value) {
+        return typeof value === 'number' && Number.isFinite(value);
+      }
+
+      // Plain-language rendering of the numbers-only diagnostics from the API.
+      function describeDetail(source) {
+        var parts = [];
+        if (isCount(source.attempts) && source.attempts > 1) parts.push('tried ' + source.attempts + ' times');
+        var detail = source.detail;
+        if (detail && typeof detail === 'object') {
+          if (detail.pageRepeated === true && isCount(detail.page)) {
+            parts.push('page ' + detail.page + ' repeated the previous page');
+          } else if (isCount(detail.page)) {
+            parts.push('problem on page ' + detail.page + (isCount(detail.rowOnPage) ? ', row ' + detail.rowOnPage : ''));
+          }
+          if (isCount(detail.firstSeenOnPage)) parts.push('first seen on page ' + detail.firstSeenOnPage);
+          if (detail.sameContent === true) parts.push('the same invoice appeared twice');
+          else if (detail.sameContent === false) parts.push('two different invoices share one ID');
+          if (isCount(detail.receivedTotal) && isCount(detail.totalCount)) {
+            parts.push('total changed from ' + detail.totalCount + ' to ' + detail.receivedTotal);
+          } else if (isCount(detail.rowsRead) && isCount(detail.totalCount)) {
+            parts.push(detail.rowsRead + ' of ' + detail.totalCount + ' invoices read');
+          }
+        }
+        return parts.join(' · ');
+      }
+
       function buildSourceLine(source) {
         var name = escapeHtml(text(source && source.companyName, 'Unknown company'));
         var ok = Boolean(source && source.ok);
         var label = ok ? 'Verified' : 'Unavailable';
         var tone = ok ? 'text-emerald-400' : 'text-red-400';
-        var html = '<div class="py-0.5">'
+        var html = '<div class="py-1.5">'
           + '<div class="flex items-center justify-between gap-2">'
           + '<span class="min-w-0 break-words text-slate-300">' + name + '</span>'
           + '<span class="shrink-0 font-semibold ' + tone + '">' + label + '</span>'
@@ -218,6 +245,10 @@
         if (!ok) {
           var code = source && source.code ? ' <span class="text-slate-400">(' + escapeHtml(source.code) + ')</span>' : '';
           html += '<div class="text-red-300">' + escapeHtml(sourceReason(source && source.code)) + code + '</div>';
+          var details = describeDetail(source || {});
+          if (details) html += '<div class="text-slate-400">Details: ' + escapeHtml(details) + '</div>';
+        } else if (source && isCount(source.attempts) && source.attempts > 1) {
+          html += '<div class="text-slate-400">The first read was inconsistent, so it was repeated once.</div>';
         }
         return html + '</div>';
       }
@@ -391,7 +422,7 @@
         var failed = failedSources.length;
         var statusText;
         if (data.status === 'FAIL') {
-          statusText = 'FAIL · No book produced a complete verified scan';
+          statusText = 'FAIL · No book produced a complete verified scan — tap Refresh now to try again. If it keeps failing, tell the admin and show them the details below.';
         } else if (data.status === 'PARTIAL') {
           statusText = 'PARTIAL · ' + failedSources.map(function (source) {
             return text(source.companyName, 'Unknown company');

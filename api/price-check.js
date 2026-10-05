@@ -19,6 +19,23 @@ const SAFE_SOURCE_CODES = new Set([
   'PRICE_DUPLICATE_DOC',
   'PRICE_BOOK_MISMATCH',
 ]);
+// A scan that fails because the Cloud list shifted while it was read (an
+// invoice saved mid-scan) is repeated once from scratch. The retry is held to
+// the same strict checks, so a repeat never weakens what PASS means.
+const MAX_SCAN_ATTEMPTS = 2;
+// Diagnostics reach the page only as non-negative integers or booleans from
+// this list, so no invoice, customer, or message text can travel with them.
+const SAFE_DETAIL_KEYS = Object.freeze([
+  'page',
+  'rowOnPage',
+  'pageSize',
+  'totalCount',
+  'receivedTotal',
+  'rowsRead',
+  'firstSeenOnPage',
+  'pageRepeated',
+  'sameContent',
+]);
 const COUNT_KEYS = Object.freeze([
   'invoices',
   'approvedInvoices',
@@ -95,6 +112,54 @@ function safeSourceCode(reason) {
   return SAFE_SOURCE_CODES.has(code) ? code : 'PRICE_SOURCE_UNAVAILABLE';
 }
 
+function safeSourceDetail(reason) {
+  const detail = reason && typeof reason.detail === 'object' ? reason.detail : null;
+  if (!detail) return undefined;
+  const safe = {};
+  for (const key of SAFE_DETAIL_KEYS) {
+    const value = detail[key];
+    if (typeof value === 'boolean' || (Number.isSafeInteger(value) && value >= 0)) safe[key] = value;
+  }
+  return Object.keys(safe).length ? safe : undefined;
+}
+
+async function scanBook(client, company, window, logger) {
+  let attempts = 0;
+  for (;;) {
+    attempts += 1;
+    try {
+      const result = await loadPriceSource(client, company, {
+        historyFrom: window.historyFrom,
+        through: window.through,
+      });
+      const comparison = compareApprovedInvoices(result.rows, {
+        bookId: company.accountBookId,
+        companyName: company.name,
+        monitorFrom: window.monitorFrom,
+      });
+      return { result, comparison, attempts };
+    } catch (error) {
+      const retry = attempts < MAX_SCAN_ATTEMPTS && error && error.retryable === true;
+      logScanFailure(logger, retry ? 'retrying' : 'failed', company, error, attempts);
+      if (!retry) return { error, attempts };
+    }
+  }
+}
+
+// Server log only: codes, error names, HTTP status, and counts. Never invoice
+// rows, credentials, or error messages.
+function logScanFailure(logger, outcome, company, error, attempts) {
+  if (!logger || typeof logger.error !== 'function') return;
+  logger.error('price-check book scan', outcome, {
+    companyKey: company.companyKey,
+    attempts,
+    code: safeSourceCode(error),
+    errorName: typeof error?.name === 'string' ? error.name : undefined,
+    httpStatus: Number.isSafeInteger(error?.response?.status) ? error.response.status : undefined,
+    detail: safeSourceDetail(error),
+  });
+}
+
 function zeroCounts() {
   const counts = {};
   for (const key of COUNT_KEYS) counts[key] = 0;
@@ -118,6 +183,7 @@ function createPriceCheckHandler(options = {}) {
     configs,
     auth = defaultAuth,
     now,
+    logger = console,
   } = options;
 
   return async function priceCheck(req, res) {
@@ -162,18 +228,9 @@ function createPriceCheckHandler(options = {}) {
     }
 
     const books = Object.keys(EXPECTED_BOOKS).map((key) => resolvedConfigs[key]);
-    const settled = await Promise.allSettled(books.map(async (company) => {
-      const result = await loadPriceSource(resolvedClient, company, {
-        historyFrom: window.historyFrom,
-        through: window.through,
-      });
-      const comparison = compareApprovedInvoices(result.rows, {
-        bookId: company.accountBookId,
-        companyName: company.name,
-        monitorFrom: window.monitorFrom,
-      });
-      return { result, comparison };
-    }));
+    const settled = await Promise.allSettled(
+      books.map((company) => scanBook(resolvedClient, company, window, logger)),
+    );
 
     const sources = [];
     const alerts = [];
@@ -181,8 +238,11 @@ function createPriceCheckHandler(options = {}) {
 
     settled.forEach((outcome, index) => {
       const company = books[index];
-      if (outcome.status === 'fulfilled') {
-        const { result, comparison } = outcome.value;
+      const scan = outcome.status === 'fulfilled'
+        ? outcome.value
+        : { error: outcome.reason, attempts: 1 };
+      if (!scan.error) {
+        const { result, comparison, attempts } = scan;
         alerts.push(...comparison.alerts);
         mergeCounts(counts, comparison.counts);
         sources.push({
@@ -193,14 +253,18 @@ function createPriceCheckHandler(options = {}) {
           pageCount: result.pageCount,
           invoiceCount: result.invoiceCount,
           profileName: result.profileName,
+          attempts,
         });
       } else {
+        const detail = safeSourceDetail(scan.error);
         sources.push({
           companyKey: company.companyKey,
           accountBookId: company.accountBookId,
           companyName: company.name,
           ok: false,
-          code: safeSourceCode(outcome.reason),
+          code: safeSourceCode(scan.error),
+          attempts: scan.attempts,
+          ...(detail ? { detail } : {}),
         });
       }
     });

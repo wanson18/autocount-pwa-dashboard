@@ -502,3 +502,90 @@ test('controls meet the 44px touch target and the select avoids iOS focus zoom',
   assert.doesNotMatch(price, /text-\[10px\]/, 'no 10px text');
   assert.doesNotMatch(price, /text-slate-500/, 'no low-contrast slate-500 text');
 });
+
+test('a duplicate-invoice failure explains itself in plain words with the diagnostic numbers', () => {
+  const { sandbox, document } = loadPage();
+  const failedSource = (detail, attempts = 2) => ({
+    companyName: 'Wanson Enterprise (M) Sdn Bhd',
+    ok: false,
+    code: 'PRICE_DUPLICATE_DOC',
+    attempts,
+    detail,
+  });
+  const envelope = (source) => resultFixture({
+    status: 'PARTIAL',
+    sources: [{ companyName: 'Wanson Enterprise', ok: true, attempts: 1 }, source],
+  });
+
+  sandbox.renderResult(envelope(failedSource({
+    page: 2, rowOnPage: 1, pageSize: 100, totalCount: 2380, rowsRead: 100, firstSeenOnPage: 1, pageRepeated: false, sameContent: true,
+  })));
+  let coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.match(coverage, /AutoCount listed the same invoice twice/);
+  assert.match(coverage, /PRICE_DUPLICATE_DOC/);
+  assert.match(coverage, /Details: tried 2 times · problem on page 2, row 1 · first seen on page 1 · the same invoice appeared twice · 100 of 2380 invoices read/);
+
+  sandbox.renderResult(envelope(failedSource({ page: 2, rowOnPage: 1, firstSeenOnPage: 1, pageRepeated: true, sameContent: true })));
+  coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.match(coverage, /page 2 repeated the previous page/);
+
+  sandbox.renderResult(envelope(failedSource({ page: 1, rowOnPage: 2, firstSeenOnPage: 1, sameContent: false })));
+  coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.match(coverage, /two different invoices share one ID/);
+
+  sandbox.renderResult(envelope(failedSource({ page: 2, totalCount: 3, receivedTotal: 4 }, 1)));
+  coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.match(coverage, /total changed from 3 to 4/);
+  assert.doesNotMatch(coverage, /tried/);
+});
+
+test('diagnostic details are rendered as numbers only, never as markup', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({
+    status: 'PARTIAL',
+    sources: [
+      { companyName: 'A', ok: true },
+      {
+        companyName: 'B',
+        ok: false,
+        code: 'PRICE_DUPLICATE_DOC',
+        attempts: '<img src=x onerror=alert(1)>',
+        detail: { page: '<b>2</b>', rowOnPage: '<i>1</i>', sameContent: '<u>yes</u>', rowsRead: 'x', totalCount: 'y' },
+      },
+    ],
+  }));
+  const coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.equal(coverage.includes('<img'), false);
+  assert.equal(coverage.includes('<b>'), false);
+  assert.equal(coverage.includes('<i>'), false);
+  assert.equal(coverage.includes('<u>'), false);
+  assert.doesNotMatch(coverage, /Details:/);
+});
+
+test('a book that needed a retry says so, and a clean book does not', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({
+    sources: [
+      { companyName: 'Wanson Enterprise', ok: true, attempts: 1 },
+      { companyName: 'Wanson Enterprise (M) Sdn Bhd', ok: true, attempts: 2 },
+    ],
+  }));
+  const coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.equal((coverage.match(/repeated once/g) || []).length, 1);
+  assert.match(document.getElementById('priceCheckStatus').textContent, /^PASS/);
+});
+
+test('a FAIL banner tells staff what to do next', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({
+    status: 'FAIL',
+    sources: [
+      { companyName: 'A', ok: false, code: 'PRICE_DUPLICATE_DOC', attempts: 2 },
+      { companyName: 'B', ok: false, code: 'PRICE_DUPLICATE_DOC', attempts: 2 },
+    ],
+  }));
+  const status = document.getElementById('priceCheckStatus').textContent;
+  assert.match(status, /^FAIL/);
+  assert.match(status, /tap Refresh now/);
+  assert.match(status, /tell the admin/);
+});

@@ -315,3 +315,96 @@ test('getCompanyProfile rejects a non-200 profile response', async () => {
 
   await assert.rejects(() => client.getCompanyProfile(ENTERPRISE));
 });
+
+async function failureOf(client) {
+  try {
+    await loadPriceSource(client, ENTERPRISE, WINDOW);
+  } catch (error) {
+    return error;
+  }
+  assert.fail('expected the scan to fail');
+}
+
+test('a duplicate carries numeric diagnostics and is marked retryable', async () => {
+  // Page 2 re-lists the last row of page 1, as happens when a row is inserted mid-scan.
+  const client = pagedClient('WANSON ENTERPRISE', [
+    { totalCount: 4, data: [row('A'), row('B')] },
+    { totalCount: 4, data: [row('B'), row('C')] },
+  ]);
+  const error = await failureOf(client);
+
+  assert.equal(error.code, 'PRICE_DUPLICATE_DOC');
+  assert.equal(error.retryable, true);
+  assert.deepEqual(error.detail, {
+    page: 2,
+    rowOnPage: 1,
+    pageSize: 2,
+    totalCount: 4,
+    rowsRead: 2,
+    firstSeenOnPage: 1,
+    pageRepeated: false,
+    sameContent: true,
+  });
+});
+
+test('a page that repeats the previous page is reported as ignored paging', async () => {
+  const client = pagedClient('WANSON ENTERPRISE', [
+    { totalCount: 4, data: [row('A'), row('B')] },
+    { totalCount: 4, data: [row('A'), row('B')] },
+  ]);
+  const error = await failureOf(client);
+
+  assert.equal(error.code, 'PRICE_DUPLICATE_DOC');
+  assert.equal(error.detail.pageRepeated, true);
+  assert.equal(error.detail.page, 2);
+  assert.equal(error.detail.rowOnPage, 1);
+});
+
+test('two different invoices sharing one document key are reported as such', async () => {
+  const client = pagedClient('WANSON ENTERPRISE', [
+    { totalCount: 2, data: [row('A', { docNo: 'INV-1' }), row('A', { docNo: 'INV-2' })] },
+  ]);
+  const error = await failureOf(client);
+
+  assert.equal(error.code, 'PRICE_DUPLICATE_DOC');
+  assert.equal(error.detail.page, 1);
+  assert.equal(error.detail.rowOnPage, 2);
+  assert.equal(error.detail.firstSeenOnPage, 1);
+  assert.equal(error.detail.sameContent, false);
+  assert.equal(JSON.stringify(error.detail).includes('INV-'), false);
+});
+
+test('a total that changes between pages is retryable and reports both totals', async () => {
+  const client = pagedClient('WANSON ENTERPRISE', [
+    { totalCount: 3, data: [row('A')] },
+    { totalCount: 4, data: [row('B')] },
+  ]);
+  const error = await failureOf(client);
+
+  assert.equal(error.code, 'PRICE_SOURCE_INVALID');
+  assert.equal(error.retryable, true);
+  assert.deepEqual(error.detail, { page: 2, totalCount: 3, receivedTotal: 4, rowsRead: 1 });
+});
+
+test('ending early is retryable, but a malformed row or the page ceiling is not', async () => {
+  const early = await failureOf(pagedClient('WANSON ENTERPRISE', [
+    { totalCount: 3, data: [row('A')] },
+    { totalCount: 3, data: [] },
+  ]));
+  assert.equal(early.code, 'PRICE_PAGE_INCOMPLETE');
+  assert.equal(early.retryable, true);
+  assert.equal(early.detail.rowsRead, 1);
+  assert.equal(early.detail.totalCount, 3);
+
+  const malformed = await failureOf(pagedClient('WANSON ENTERPRISE', [
+    { totalCount: 1, data: [{ master: {}, details: [] }] },
+  ]));
+  assert.equal(malformed.retryable, undefined);
+
+  const ceiling = await failureOf({
+    async getCompanyProfile() { return { companyName: 'WANSON ENTERPRISE' }; },
+    async listInvoicePage(_company, { page }) { return { totalCount: 5000, data: [row(`D-${page}`)] }; },
+  });
+  assert.equal(ceiling.code, 'PRICE_PAGE_INCOMPLETE');
+  assert.equal(ceiling.retryable, undefined);
+});
