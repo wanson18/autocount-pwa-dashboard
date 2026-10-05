@@ -274,6 +274,10 @@ npx vercel env add AUTOCOUNT_API_URL production,preview --value "https://account
 npx vercel env add USE_MOCK_DATA production,preview --value "false"
 ```
 
+### Function region
+
+`vercel.json` pins the serverless functions to Singapore (`"regions": ["sin1"]`) so calls to AutoCount Cloud, which dominate the scan time, travel a short distance instead of from Washington D.C. (`iad1`, the Vercel default). This applies to every function, including the dispatch API, so the `DATABASE_URL` Postgres should be in or near Singapore too; a database in the US adds a round trip per query. To undo, delete the `regions` line. The `x-vercel-id` response header shows `<edge region>::<function region>::<id>`.
+
 ## API Endpoints
 
 | Endpoint                                             | Method | Description               |
