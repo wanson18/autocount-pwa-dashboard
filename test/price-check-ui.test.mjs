@@ -589,3 +589,45 @@ test('a FAIL banner tells staff what to do next', () => {
   assert.match(status, /tap Refresh now/);
   assert.match(status, /tell the admin/);
 });
+
+test('a book that was re-read in date ranges says so in plain words', () => {
+  const { sandbox, document } = loadPage();
+  sandbox.renderResult(resultFixture({
+    sources: [
+      { companyName: 'Wanson Enterprise', ok: true, attempts: 1, strategy: 'paged' },
+      { companyName: 'Wanson Enterprise (M) Sdn Bhd', ok: true, attempts: 2, strategy: 'windowed' },
+    ],
+  }));
+  const coverage = document.getElementById('priceCheckCoverage').innerHTML;
+  assert.equal((coverage.match(/smaller date ranges/g) || []).length, 1);
+  assert.doesNotMatch(coverage, /repeated once/);
+  assert.match(document.getElementById('priceCheckStatus').textContent, /^PASS/);
+});
+
+test('diagnostics from a date-range read and from an unreachable AutoCount are described', () => {
+  const { sandbox, document } = loadPage();
+  const render = (source) => {
+    sandbox.renderResult(resultFixture({
+      status: 'PARTIAL',
+      sources: [{ companyName: 'Wanson Enterprise', ok: true, attempts: 1, strategy: 'paged' }, source],
+    }));
+    return document.getElementById('priceCheckCoverage').innerHTML;
+  };
+  const failed = (code, detail, extra = {}) => ({ companyName: 'Wanson Enterprise (M) Sdn Bhd', ok: false, code, detail, ...extra });
+
+  let html = render(failed('PRICE_PAGE_INCOMPLETE', { windowed: true, totalCount: 2346, rowsRead: 2340, windowCount: 40 }, { attempts: 2, strategy: 'windowed' }));
+  assert.match(html, /tried 2 times · the last try read smaller date ranges · 2340 of 2346 invoices read in 40 date ranges/);
+
+  html = render(failed('PRICE_DUPLICATE_DOC', { windowed: true, windowIndex: 3, windowCount: 31, rowOnPage: 7, firstSeenInWindow: 2, sameContent: true }, { attempts: 2, strategy: 'windowed' }));
+  assert.match(html, /problem in date range 3 of 31, row 7 · first seen in date range 2 · the same invoice appeared twice/);
+
+  html = render(failed('PRICE_PAGE_INCOMPLETE', { windowed: true, requestCount: 250 }, { attempts: 1 }));
+  assert.match(html, /stopped after 250 requests/);
+
+  html = render(failed('PRICE_SOURCE_UNAVAILABLE', { httpStatus: 429 }, { attempts: 1 }));
+  assert.match(html, /AutoCount did not answer in time, or returned an error/);
+  assert.match(html, /AutoCount replied HTTP 429/);
+
+  html = render(failed('PRICE_SOURCE_UNAVAILABLE', { timedOut: true }, { attempts: 1 }));
+  assert.match(html, /AutoCount took too long to answer/);
+});

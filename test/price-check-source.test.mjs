@@ -316,9 +316,9 @@ test('getCompanyProfile rejects a non-200 profile response', async () => {
   await assert.rejects(() => client.getCompanyProfile(ENTERPRISE));
 });
 
-async function failureOf(client) {
+async function failureOf(client, { strategy, window = WINDOW } = {}) {
   try {
-    await loadPriceSource(client, ENTERPRISE, WINDOW);
+    await loadPriceSource(client, ENTERPRISE, strategy ? { ...window, strategy } : window);
   } catch (error) {
     return error;
   }
@@ -407,4 +407,176 @@ test('ending early is retryable, but a malformed row or the page ceiling is not'
   });
   assert.equal(ceiling.code, 'PRICE_PAGE_INCOMPLETE');
   assert.equal(ceiling.retryable, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Windowed (date-slice) reads
+// ---------------------------------------------------------------------------
+
+const LONG_WINDOW = { historyFrom: '2026-07-07', through: '2026-10-05' };
+const isoDay = (offset) => new Date(Date.UTC(2026, 6, 7 + offset)).toISOString().slice(0, 10);
+
+function invoicesPerDay(counts) {
+  const invoices = [];
+  counts.forEach((count, day) => {
+    for (let index = 0; index < count; index += 1) {
+      invoices.push(row(`K-${day}-${index}`, { docDate: isoDay(day), docNo: `INV-${day}-${index}` }));
+    }
+  });
+  return invoices;
+}
+
+// A fake Cloud over a fixed set of invoices. `unstablePaging` orders every page
+// after the first differently from page 1, so pages overlap (the behaviour seen
+// on the live books); `endExclusive` and `ignoreDates` model a misread filter.
+function fakeCloud(invoices, { unstablePaging = false, endExclusive = false, ignoreDates = false } = {}) {
+  let active = 0;
+  const cloud = {
+    calls: [],
+    maxActive: 0,
+    async getCompanyProfile() {
+      return { companyName: 'WANSON ENTERPRISE' };
+    },
+    async listInvoicePage(_company, { page, startDate, endDate }) {
+      cloud.calls.push({ page, startDate, endDate });
+      active += 1;
+      cloud.maxActive = Math.max(cloud.maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const matching = invoices
+        .filter((entry) => ignoreDates
+          || (entry.master.docDate >= startDate
+            && (endExclusive ? entry.master.docDate < endDate : entry.master.docDate <= endDate)))
+        .sort((left, right) => `${left.master.docDate}${left.master.docKey}`.localeCompare(`${right.master.docDate}${right.master.docKey}`));
+      const total = matching.length;
+      const ordered = unstablePaging && page > 1 && total > 0
+        ? matching.map((_, index) => matching[(index - 13 * (page - 1) + total * 100) % total])
+        : matching;
+      return { totalCount: total, data: ordered.slice((page - 1) * 100, page * 100) };
+    },
+  };
+  return cloud;
+}
+
+const MIXED_DAYS = Array.from({ length: 91 }, (_, day) => (day === 40 ? 60 : 5 + ((day * 7) % 23)));
+
+test('a Cloud that cannot order pages fails the paged read but the windowed read gets every invoice once', async () => {
+  const invoices = invoicesPerDay(MIXED_DAYS);
+  assert.ok(invoices.length > 1000, 'fixture must span many pages');
+
+  const paged = await failureOf(fakeCloud(invoices, { unstablePaging: true }));
+  assert.equal(paged.code, 'PRICE_DUPLICATE_DOC');
+
+  const cloud = fakeCloud(invoices, { unstablePaging: true });
+  const result = await loadPriceSource(cloud, ENTERPRISE, { ...LONG_WINDOW, strategy: 'windowed' });
+
+  assert.equal(result.strategy, 'windowed');
+  assert.equal(result.rows.length, invoices.length);
+  assert.deepEqual(
+    result.rows.map((entry) => entry.master.docKey).sort(),
+    invoices.map((entry) => entry.master.docKey).sort(),
+  );
+  assert.equal(result.invoiceCount, invoices.length);
+  assert.equal(result.pageCount, cloud.calls.length);
+  assert.equal(cloud.calls.every((call) => call.page === 1), true, 'every slice fits on one page');
+  assert.ok(cloud.calls.length < 120, `used ${cloud.calls.length} requests`);
+  assert.ok(cloud.maxActive >= 2 && cloud.maxActive <= 3, `concurrency was ${cloud.maxActive}`);
+});
+
+test('the default strategy is still the page-by-page read', async () => {
+  const invoices = invoicesPerDay(MIXED_DAYS);
+  const cloud = fakeCloud(invoices);
+  const result = await loadPriceSource(cloud, ENTERPRISE, LONG_WINDOW);
+
+  assert.equal(result.strategy, 'paged');
+  assert.equal(result.rows.length, invoices.length);
+  assert.deepEqual(cloud.calls.map((call) => call.page), cloud.calls.map((_, index) => index + 1));
+});
+
+test('a windowed read of a range that fits one page is a single request', async () => {
+  const cloud = fakeCloud(invoicesPerDay(Array.from({ length: 91 }, (_, day) => (day % 5 === 0 ? 2 : 0))));
+  const result = await loadPriceSource(cloud, ENTERPRISE, { ...LONG_WINDOW, strategy: 'windowed' });
+
+  assert.equal(cloud.calls.length, 1);
+  assert.equal(result.rows.length, 38);
+});
+
+test('windowed slices that do not add up to the overall total fail closed and are retryable', async () => {
+  const cloud = fakeCloud(invoicesPerDay(MIXED_DAYS), { endExclusive: true });
+  const error = await failureOf(Object.assign(cloud, {}), { strategy: 'windowed', window: LONG_WINDOW });
+
+  assert.equal(error.code, 'PRICE_PAGE_INCOMPLETE');
+  assert.equal(error.retryable, true);
+  assert.equal(error.detail.windowed, true);
+  assert.ok(error.detail.rowsRead < error.detail.totalCount);
+  assert.ok(error.detail.windowCount > 1);
+});
+
+test('one day bigger than a page is paged on its own, and the strict checks still apply', async () => {
+  const counts = Array.from({ length: 91 }, (_, day) => (day === 10 ? 130 : 3));
+  const invoices = invoicesPerDay(counts);
+
+  const stable = fakeCloud(invoices);
+  const result = await loadPriceSource(stable, ENTERPRISE, { ...LONG_WINDOW, strategy: 'windowed' });
+  assert.equal(result.rows.length, invoices.length);
+  const busyDay = isoDay(10);
+  assert.ok(stable.calls.some((call) => call.page === 2 && call.startDate === busyDay && call.endDate === busyDay));
+
+  const unstable = fakeCloud(invoices, { unstablePaging: true });
+  const error = await failureOf(unstable, { strategy: 'windowed', window: LONG_WINDOW });
+  assert.equal(error.code, 'PRICE_DUPLICATE_DOC');
+  assert.equal(error.detail.windowed, true);
+});
+
+test('a duplicate across the slices is reported with its slice numbers and no invoice text', async () => {
+  const client = {
+    async getCompanyProfile() { return { companyName: 'WANSON ENTERPRISE' }; },
+    async listInvoicePage() { return { totalCount: 3, data: [row('A'), row('B'), row('B')] }; },
+  };
+  const error = await failureOf(client, { strategy: 'windowed', window: WINDOW });
+
+  assert.equal(error.code, 'PRICE_DUPLICATE_DOC');
+  assert.deepEqual(error.detail, {
+    windowed: true,
+    windowIndex: 1,
+    windowCount: 1,
+    rowOnPage: 3,
+    totalCount: 3,
+    rowsRead: 2,
+    firstSeenInWindow: 1,
+    sameContent: true,
+  });
+});
+
+test('a date filter that does not narrow results hits the request ceiling instead of looping', async () => {
+  const cloud = fakeCloud(invoicesPerDay(Array.from({ length: 91 }, (_, day) => (day < 10 ? 50 : 0))), { ignoreDates: true });
+  const error = await failureOf(cloud, { strategy: 'windowed', window: LONG_WINDOW });
+
+  assert.equal(error.code, 'PRICE_PAGE_INCOMPLETE');
+  assert.equal(error.retryable, undefined, 'a broken filter is not retried');
+  assert.equal(error.detail.windowed, true);
+  assert.ok(cloud.calls.length <= 250, `made ${cloud.calls.length} requests`);
+});
+
+test('a failing request stops the remaining slices from being requested', async () => {
+  let calls = 0;
+  const invoices = invoicesPerDay(MIXED_DAYS);
+  const inner = fakeCloud(invoices);
+  const client = {
+    getCompanyProfile: inner.getCompanyProfile,
+    async listInvoicePage(company, params) {
+      calls += 1;
+      if (calls === 4) throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+      return inner.listInvoicePage(company, params);
+    },
+  };
+  const error = await failureOf(client, { strategy: 'windowed', window: LONG_WINDOW });
+
+  assert.equal(error.code, 'ECONNRESET');
+  assert.ok(calls < 12, `kept requesting after the failure: ${calls}`);
+});
+
+test('an unknown read strategy is rejected', async () => {
+  const error = await failureOf(fakeCloud([]), { strategy: 'sideways', window: LONG_WINDOW });
+  assert.equal(error.code, 'PRICE_SOURCE_INVALID');
 });

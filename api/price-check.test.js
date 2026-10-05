@@ -442,13 +442,6 @@ function scriptedClient({ enterprise, sdn }) {
 }
 
 const enterpriseOk = (_scan, page) => ENTERPRISE_PAGES[page - 1];
-// Page 2 re-lists S-2 (the last row of page 1): the list shifted while it was read.
-const shiftedList = (_scan, page) => (page === 1
-  ? { totalCount: 3, data: [invoice('S-1', '2026-09-20', '10.00'), invoice('S-2', '2026-09-21', '10.00')] }
-  : { totalCount: 3, data: [invoice('S-2', '2026-09-21', '10.00')] });
-const stableList = (_scan, page) => (page === 1
-  ? { totalCount: 3, data: [invoice('S-1', '2026-09-20', '10.00'), invoice('S-2', '2026-09-21', '10.00')] }
-  : { totalCount: 3, data: [invoice('S-3', '2026-09-21', '10.00')] });
 
 async function runScripted(client, logger = QUIET) {
   const env = await signedEnv();
@@ -458,56 +451,100 @@ async function runScripted(client, logger = QUIET) {
   return res;
 }
 
-test('a list that shifts during one scan is retried once and can still PASS', async () => {
+// ---- a Cloud that answers by date range, optionally misordering later pages ----
+
+const addDay = (offset) => new Date(Date.UTC(2026, 5, 23 + offset)).toISOString().slice(0, 10);
+
+function sdnInvoices() {
+  const invoices = [];
+  for (let index = 0; index < 150; index += 1) {
+    invoices.push(invoice(`SDN-INV-${index}`, addDay(index % 80), '10.00', 'CTN', {
+      debtorCode: `700-B${index % 7}`,
+    }));
+  }
+  return invoices;
+}
+
+const ENTERPRISE_BY_DATE = [
+  invoice('E-1', '2026-09-01', '10.00'),
+  invoice('E-2', '2026-09-21', '12.00'),
+];
+
+function dateAwareCloud({ sdn = sdnInvoices(), unstableSdn = false, endExclusiveSdn = false } = {}) {
+  const calls = { '63750': [], '63688': [] };
+  return {
+    calls,
+    async getCompanyProfile(company) {
+      return { companyName: company.accountBookId === '63750' ? ENTERPRISE_PROFILE : SDN_PROFILE };
+    },
+    async listInvoicePage(company, { page, startDate, endDate }) {
+      const id = company.accountBookId;
+      calls[id].push({ page, startDate, endDate });
+      const isSdn = id === '63688';
+      const matching = (isSdn ? sdn : ENTERPRISE_BY_DATE)
+        .filter((entry) => entry.master.docDate >= startDate
+          && (isSdn && endExclusiveSdn ? entry.master.docDate < endDate : entry.master.docDate <= endDate))
+        .sort((left, right) => `${left.master.docDate}${left.master.docKey}`.localeCompare(`${right.master.docDate}${right.master.docKey}`));
+      const total = matching.length;
+      // Pages after the first are ordered differently, so they overlap page 1.
+      const ordered = isSdn && unstableSdn && page > 1 && total > 0
+        ? matching.map((_, index) => matching[(index - 13 * (page - 1) + total * 100) % total])
+        : matching;
+      return { totalCount: total, data: ordered.slice((page - 1) * 100, page * 100) };
+    },
+  };
+}
+
+test('a list that cannot be paged reliably is re-read in date slices and can still PASS', async () => {
   const logs = [];
-  const client = scriptedClient({
-    enterprise: enterpriseOk,
-    sdn: (scan, page) => (scan === 1 ? shiftedList(scan, page) : stableList(scan, page)),
-  });
-  const res = await runScripted(client, { error: (...args) => logs.push(args) });
+  const cloud = dateAwareCloud({ unstableSdn: true });
+  const res = await runScripted(cloud, { error: (...args) => logs.push(args) });
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.status, 'PASS');
   const sdn = res.body.sources.find((source) => source.companyKey === 'sdn_bhd');
   const enterprise = res.body.sources.find((source) => source.companyKey === 'enterprise');
-  assert.equal(sdn.ok, true);
-  assert.equal(sdn.attempts, 2, 'the page can show that this book needed a retry');
-  assert.equal(enterprise.attempts, 1);
-  assert.equal(client.scans['63688'], 2);
-  assert.equal(client.scans['63750'], 1);
-  assert.equal(logs.length, 1);
-  assert.equal(logs[0][1], 'retrying');
+  assert.deepEqual([sdn.ok, sdn.attempts, sdn.strategy], [true, 2, 'windowed']);
+  assert.deepEqual([enterprise.ok, enterprise.attempts, enterprise.strategy], [true, 1, 'paged']);
+  assert.equal(sdn.invoiceCount, 150, 'every invoice is read exactly once');
+  assert.equal(cloud.calls['63750'].length, 1, 'the stable book is read once, page by page');
+  assert.ok(cloud.calls['63688'].some((call) => call.page === 2), 'the first attempt paged');
+  assert.ok(cloud.calls['63688'].some((call) => call.startDate !== '2026-06-23' || call.endDate !== '2026-09-21'),
+    'the second attempt asked for narrower date ranges');
+  assert.equal(res.body.counts.booksFailed, 0);
+  assert.deepEqual(logs.map((entry) => entry[1]), ['retrying']);
+  assert.equal(logs[0][2].strategy, 'paged');
+  assert.equal(logs[0][2].code, 'PRICE_DUPLICATE_DOC');
 });
 
-test('a list that keeps shifting fails the book after one retry, with numeric diagnostics only', async () => {
+test('a book that fails both reads is reported with numeric diagnostics only', async () => {
   const logs = [];
-  const client = scriptedClient({ enterprise: enterpriseOk, sdn: shiftedList });
-  const res = await runScripted(client, { error: (...args) => logs.push(args) });
+  const cloud = dateAwareCloud({ unstableSdn: true, endExclusiveSdn: true });
+  const res = await runScripted(cloud, { error: (...args) => logs.push(args) });
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.status, 'PARTIAL');
-  assert.equal(client.scans['63688'], 2, 'exactly one retry');
   const failed = res.body.sources.find((source) => source.ok === false);
   assert.equal(failed.companyKey, 'sdn_bhd');
-  assert.equal(failed.code, 'PRICE_DUPLICATE_DOC');
+  assert.equal(failed.code, 'PRICE_PAGE_INCOMPLETE');
   assert.equal(failed.attempts, 2);
-  assert.deepEqual(failed.detail, {
-    page: 2,
-    rowOnPage: 1,
-    pageSize: 2,
-    totalCount: 3,
-    rowsRead: 2,
-    firstSeenOnPage: 1,
-    pageRepeated: false,
-    sameContent: true,
-  });
+  assert.equal(failed.strategy, 'windowed');
+  assert.equal(failed.detail.windowed, true);
+  assert.ok(Number.isSafeInteger(failed.detail.totalCount) && failed.detail.totalCount > 0);
+  assert.ok(failed.detail.rowsRead < failed.detail.totalCount);
+  assert.ok(failed.detail.windowCount > 1);
 
   assert.deepEqual(logs.map((entry) => entry[1]), ['retrying', 'failed']);
+  assert.deepEqual(logs.map((entry) => entry[2].strategy), ['paged', 'windowed']);
   const logged = JSON.stringify(logs);
-  for (const token of ['S-1', 'S-2', 'Sample', 'fake-sdn-api-key', 'fake-sdn-key-id', 'apiKey']) {
+  const serialized = JSON.stringify(res.body);
+  for (const token of ['SDN-INV-', 'Sample', 'fake-sdn-api-key', 'fake-sdn-key-id', 'apiKey']) {
     assert.equal(logged.includes(token), false, `log leaked ${token}`);
   }
-  assert.match(logged, /PRICE_DUPLICATE_DOC/);
+  // The healthy book's alert legitimately names its customer ("Sample"); the failed book's rows must not appear.
+  for (const token of ['SDN-INV-', 'fake-sdn-api-key', 'fake-sdn-key-id', 'apiKey']) {
+    assert.equal(serialized.includes(token), false, `response leaked ${token}`);
+  }
 });
 
 test('failures that are not list instability are never retried', async () => {
@@ -555,4 +592,27 @@ test('only whitelisted integers and booleans from an error detail reach the resp
   for (const token of ['SI-SECRET', 'Secret Customer', 'internal listing detail']) {
     assert.equal(serialized.includes(token), false, `response leaked ${token}`);
   }
+});
+
+test('an HTTP status or timeout explains an unreachable book without leaking the message', async () => {
+  const failing = (make) => scriptedClient({
+    enterprise: enterpriseOk,
+    sdn: () => { throw make(); },
+  });
+
+  let res = await runScripted(failing(() => Object.assign(new Error('Request failed with status code 429 for https://secret.example/x'), { response: { status: 429 } })));
+  let failed = res.body.sources.find((source) => source.ok === false);
+  assert.equal(failed.code, 'PRICE_SOURCE_UNAVAILABLE');
+  assert.deepEqual(failed.detail, { httpStatus: 429 });
+  assert.equal(failed.attempts, 1, 'a rate limit or outage is not retried');
+  assert.equal(JSON.stringify(res.body).includes('secret.example'), false);
+
+  res = await runScripted(failing(() => Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' })));
+  failed = res.body.sources.find((source) => source.ok === false);
+  assert.deepEqual(failed.detail, { timedOut: true });
+  assert.equal(JSON.stringify(res.body).includes('15000ms'), false);
+
+  res = await runScripted(failing(() => Object.assign(new Error('x'), { response: { status: 99999 } })));
+  failed = res.body.sources.find((source) => source.ok === false);
+  assert.equal(failed.detail, undefined, 'a nonsense status is ignored');
 });

@@ -213,21 +213,30 @@
       function describeDetail(source) {
         var parts = [];
         if (isCount(source.attempts) && source.attempts > 1) parts.push('tried ' + source.attempts + ' times');
+        if (source.strategy === 'windowed') parts.push('the last try read smaller date ranges');
         var detail = source.detail;
         if (detail && typeof detail === 'object') {
           if (detail.pageRepeated === true && isCount(detail.page)) {
             parts.push('page ' + detail.page + ' repeated the previous page');
+          } else if (isCount(detail.windowIndex) && isCount(detail.windowCount)) {
+            parts.push('problem in date range ' + detail.windowIndex + ' of ' + detail.windowCount
+              + (isCount(detail.rowOnPage) ? ', row ' + detail.rowOnPage : ''));
           } else if (isCount(detail.page)) {
             parts.push('problem on page ' + detail.page + (isCount(detail.rowOnPage) ? ', row ' + detail.rowOnPage : ''));
           }
           if (isCount(detail.firstSeenOnPage)) parts.push('first seen on page ' + detail.firstSeenOnPage);
+          if (isCount(detail.firstSeenInWindow)) parts.push('first seen in date range ' + detail.firstSeenInWindow);
           if (detail.sameContent === true) parts.push('the same invoice appeared twice');
           else if (detail.sameContent === false) parts.push('two different invoices share one ID');
           if (isCount(detail.receivedTotal) && isCount(detail.totalCount)) {
             parts.push('total changed from ' + detail.totalCount + ' to ' + detail.receivedTotal);
           } else if (isCount(detail.rowsRead) && isCount(detail.totalCount)) {
-            parts.push(detail.rowsRead + ' of ' + detail.totalCount + ' invoices read');
+            parts.push(detail.rowsRead + ' of ' + detail.totalCount + ' invoices read'
+              + (isCount(detail.windowCount) && !isCount(detail.windowIndex) ? ' in ' + detail.windowCount + ' date ranges' : ''));
           }
+          if (isCount(detail.requestCount)) parts.push('stopped after ' + detail.requestCount + ' requests');
+          if (isCount(detail.httpStatus)) parts.push('AutoCount replied HTTP ' + detail.httpStatus);
+          if (detail.timedOut === true) parts.push('AutoCount took too long to answer');
         }
         return parts.join(' · ');
       }
@@ -247,6 +256,8 @@
           html += '<div class="text-red-300">' + escapeHtml(sourceReason(source && source.code)) + code + '</div>';
           var details = describeDetail(source || {});
           if (details) html += '<div class="text-slate-400">Details: ' + escapeHtml(details) + '</div>';
+        } else if (source && source.strategy === 'windowed') {
+          html += '<div class="text-slate-400">AutoCount\'s invoice list was inconsistent when read page by page, so it was read again in smaller date ranges and re-checked.</div>';
         } else if (source && isCount(source.attempts) && source.attempts > 1) {
           html += '<div class="text-slate-400">The first read was inconsistent, so it was repeated once.</div>';
         }

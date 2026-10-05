@@ -19,9 +19,11 @@ const SAFE_SOURCE_CODES = new Set([
   'PRICE_DUPLICATE_DOC',
   'PRICE_BOOK_MISMATCH',
 ]);
-// A scan that fails because the Cloud list shifted while it was read (an
-// invoice saved mid-scan) is repeated once from scratch. The retry is held to
-// the same strict checks, so a repeat never weakens what PASS means.
+// The first attempt reads each book page by page. If the Cloud list proves
+// unstable (a repeated row, a changing total, a short or long list), the second
+// attempt re-reads it in date slices that each fit on one page, so the Cloud
+// never has to order rows across pages. Both are held to the same strict checks,
+// so a retry never weakens what PASS means.
 const MAX_SCAN_ATTEMPTS = 2;
 // Diagnostics reach the page only as non-negative integers or booleans from
 // this list, so no invoice, customer, or message text can travel with them.
@@ -35,6 +37,11 @@ const SAFE_DETAIL_KEYS = Object.freeze([
   'firstSeenOnPage',
   'pageRepeated',
   'sameContent',
+  'windowed',
+  'windowIndex',
+  'windowCount',
+  'firstSeenInWindow',
+  'requestCount',
 ]);
 const COUNT_KEYS = Object.freeze([
   'invoices',
@@ -113,13 +120,16 @@ function safeSourceCode(reason) {
 }
 
 function safeSourceDetail(reason) {
-  const detail = reason && typeof reason.detail === 'object' ? reason.detail : null;
-  if (!detail) return undefined;
   const safe = {};
+  const detail = reason && typeof reason.detail === 'object' && reason.detail ? reason.detail : {};
   for (const key of SAFE_DETAIL_KEYS) {
     const value = detail[key];
     if (typeof value === 'boolean' || (Number.isSafeInteger(value) && value >= 0)) safe[key] = value;
   }
+  // Transport-level facts that explain an "AutoCount did not answer" failure.
+  const status = reason && reason.response ? reason.response.status : undefined;
+  if (Number.isSafeInteger(status) && status >= 100 && status <= 599) safe.httpStatus = status;
+  if (reason && (reason.code === 'ECONNABORTED' || reason.code === 'ETIMEDOUT')) safe.timedOut = true;
   return Object.keys(safe).length ? safe : undefined;
 }
 
@@ -127,35 +137,37 @@ async function scanBook(client, company, window, logger) {
   let attempts = 0;
   for (;;) {
     attempts += 1;
+    const strategy = attempts === 1 ? 'paged' : 'windowed';
     try {
       const result = await loadPriceSource(client, company, {
         historyFrom: window.historyFrom,
         through: window.through,
+        strategy,
       });
       const comparison = compareApprovedInvoices(result.rows, {
         bookId: company.accountBookId,
         companyName: company.name,
         monitorFrom: window.monitorFrom,
       });
-      return { result, comparison, attempts };
+      return { result, comparison, attempts, strategy };
     } catch (error) {
       const retry = attempts < MAX_SCAN_ATTEMPTS && error && error.retryable === true;
-      logScanFailure(logger, retry ? 'retrying' : 'failed', company, error, attempts);
-      if (!retry) return { error, attempts };
+      logScanFailure(logger, retry ? 'retrying' : 'failed', company, error, attempts, strategy);
+      if (!retry) return { error, attempts, strategy };
     }
   }
 }
 
-// Server log only: codes, error names, HTTP status, and counts. Never invoice
+// Server log only: codes, error names, strategy, and counts. Never invoice
 // rows, credentials, or error messages.
-function logScanFailure(logger, outcome, company, error, attempts) {
+function logScanFailure(logger, outcome, company, error, attempts, strategy) {
   if (!logger || typeof logger.error !== 'function') return;
   logger.error('price-check book scan', outcome, {
     companyKey: company.companyKey,
     attempts,
+    strategy,
     code: safeSourceCode(error),
     errorName: typeof error?.name === 'string' ? error.name : undefined,
-    httpStatus: Number.isSafeInteger(error?.response?.status) ? error.response.status : undefined,
     detail: safeSourceDetail(error),
   });
 }
@@ -240,7 +252,7 @@ function createPriceCheckHandler(options = {}) {
       const company = books[index];
       const scan = outcome.status === 'fulfilled'
         ? outcome.value
-        : { error: outcome.reason, attempts: 1 };
+        : { error: outcome.reason, attempts: 1, strategy: 'paged' };
       if (!scan.error) {
         const { result, comparison, attempts } = scan;
         alerts.push(...comparison.alerts);
@@ -254,6 +266,7 @@ function createPriceCheckHandler(options = {}) {
           invoiceCount: result.invoiceCount,
           profileName: result.profileName,
           attempts,
+          strategy: scan.strategy,
         });
       } else {
         const detail = safeSourceDetail(scan.error);
@@ -264,6 +277,7 @@ function createPriceCheckHandler(options = {}) {
           ok: false,
           code: safeSourceCode(scan.error),
           attempts: scan.attempts,
+          strategy: scan.strategy,
           ...(detail ? { detail } : {}),
         });
       }
