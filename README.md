@@ -274,9 +274,14 @@ npx vercel env add AUTOCOUNT_API_URL production,preview --value "https://account
 npx vercel env add USE_MOCK_DATA production,preview --value "false"
 ```
 
-### Function region
+### Function regions
 
-`vercel.json` pins the serverless functions to Singapore (`"regions": ["sin1"]`) so calls to AutoCount Cloud, which dominate the scan time, travel a short distance instead of from Washington D.C. (`iad1`, the Vercel default). This applies to every function, including the dispatch API, so the `DATABASE_URL` Postgres should be in or near Singapore too; a database in the US adds a round trip per query. To undo, delete the `regions` line. The `x-vercel-id` response header shows `<edge region>::<function region>::<id>`.
+`vercel.json` places each serverless function near what it talks to, because every call across the world costs a round trip:
+
+- **Singapore (`sin1`)** for `price-check`, `sales` and `dispatch-invoices`. They only call AutoCount Cloud, which is in Southeast Asia, and a Price Check scan makes dozens of those calls.
+- **Washington D.C. (`iad1`)** for the other dispatch functions. They query the `DATABASE_URL` Postgres, which is far from Singapore: when every function was moved to Singapore the Dispatch board got slower.
+
+When the database moves to Singapore, change `iad1` to `sin1` for the database-using functions (`test/vercel-regions.test.mjs` fails if a function that uses the database is not in the database region, and its `DATABASE_REGION` constant is the one place to update). The `x-vercel-id` response header shows `<edge region>::<function region>::<id>`.
 
 ## API Endpoints
 

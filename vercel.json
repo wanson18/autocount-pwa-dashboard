@@ -1,6 +1,17 @@
 {
   "version": 2,
-  "regions": ["sin1"],
+  "functions": {
+    "api/price-check.js": { "regions": ["sin1"] },
+    "api/sales.js": { "regions": ["sin1"] },
+    "api/dispatch-invoices.js": { "regions": ["sin1"] },
+    "api/dispatch-session.js": { "regions": ["iad1"] },
+    "api/dispatch-resources.js": { "regions": ["iad1"] },
+    "api/dispatch-trips.js": { "regions": ["iad1"] },
+    "api/dispatch-assignments.js": { "regions": ["iad1"] },
+    "api/dispatch-reports.js": { "regions": ["iad1"] },
+    "api/dispatch-loading-sheet.js": { "regions": ["iad1"] },
+    "api/dispatch-unknown.js": { "regions": ["iad1"] }
+  },
   "rewrites": [
     {
       "source": "/api/dispatch/session",
