@@ -4,7 +4,7 @@
   "description": "AutoCount Sales Dashboard - iPhone PWA",
   "scripts": {
     "local": "npx vercel dev",
-    "build": "echo 'No build step required - static frontend'",
+    "build": "node scripts/write-version.js",
     "test:dispatch": "node --test api/dispatch-invoices.test.js",
     "test:repository": "node --test api/dispatch-repository.test.js",
     "test": "node --test api/*.test.js test/*.test.mjs",
