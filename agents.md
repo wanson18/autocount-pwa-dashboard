@@ -13,7 +13,7 @@ Beyond the dashboard home page the app ships Delivery Dispatch, Price Check, Tod
 - **Dispatch persistence:** PostgreSQL via `pg`; schema in `db/migrations/`.
 - **Frontend:** static HTML5 + Tailwind CSS (CDN) + Chart.js; no build step.
 - **PWA:** `public/manifest.json` plus a versioned service worker cache.
-- **Auth:** clerk ID + PIN session cookie gates the dashboard and `/api/price-check`; dispatch honours `DISPATCH_PUBLIC_ACCESS`.
+- **Auth:** clerk ID + PIN session cookie. The home page shows a sign-in screen (browser-side only) and `/api/price-check` enforces a real clerk session on the server. `/api/sales` (home page and Today's Invoices) has no server-side login check, and dispatch honours `DISPATCH_PUBLIC_ACCESS`. The owner accepts this (one sign-in on the home page, not a login on every page), so do not add logins elsewhere without asking.
 
 ## Repository Layout
 
@@ -63,7 +63,8 @@ autocount-pwa-dashboard/
 - Changing any cached static asset requires bumping `CACHE_NAME` in `public/sw.js` and the expectations in `test/service-worker.test.mjs` and `test/price-check-ui.test.mjs`.
 - Money and quantity values round to 2 decimals at output; keep AutoCount decimal strings exact inside adapters.
 - Never commit `.env`, `.env.local`, or credentials; `.env.example` is the contract.
-- Production is deployed by hand (`npx vercel --prod`), only from a clean, up-to-date `main` (`git status` empty, `git pull --ff-only`). The CLI uploads the working folder, uncommitted edits included, so deploying anything else lets the live site drift from GitHub.
+- Merging to `main` deploys to Production by itself: the Vercel Production Branch is `main` (it was `master` before, which is why merges once did nothing). PRs and other branches only get protected previews. Open PRs against `main`; GitHub's default-branch setting may still say `master`, which is stale. Confirm a deploy with `/version.json` (`target` is `production`, `commit` is the merge commit).
+- `npx vercel --prod` is now only a backup. Run it from a clean, up-to-date `main` (`git status` empty, `git pull --ff-only`): the CLI uploads the working folder, uncommitted edits included, so deploying anything else lets the live site drift from GitHub (its `/version.json` shows `null` Git fields).
 - Function regions are set per function in `vercel.json`. Functions that only call AutoCount Cloud (`price-check`, `sales`, `dispatch-invoices`) run in `sin1`; every function that uses the Postgres (`DATABASE_URL`) runs in `iad1`, next to the database. Moving them all to Singapore made Dispatch slower. Never add a project-wide `regions`; `test/vercel-regions.test.mjs` enforces this (update its `DATABASE_REGION` if the database moves).
 
 ## Commands
@@ -72,4 +73,5 @@ autocount-pwa-dashboard/
 - `npm run local` — run the app locally with `vercel dev`.
 - `npm run migrate` / `npm run migrate:preflight` — dispatch database schema.
 - `npx playwright test` — end-to-end specs.
-- `npx vercel --prod` — production deploy, run by hand (see Conventions); alias https://autocount-pwa-dashboard.vercel.app. Merging on GitHub does not deploy it; branches and PRs only get protected preview deployments. A CLI login unused for 10 days expires, so run `npx vercel login` again if it says "Not authorized".
+- `curl https://autocount-pwa-dashboard.vercel.app/version.json` — which commit is live (`commit`, `branch`, `target`, `builtAt`); merges to `main` deploy to Production automatically (see Conventions).
+- `npx vercel --prod` — manual production deploy, a backup only (see Conventions); alias https://autocount-pwa-dashboard.vercel.app. A CLI login unused for 10 days expires, so run `npx vercel login` again if it says "Not authorized".

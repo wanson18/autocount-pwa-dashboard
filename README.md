@@ -259,9 +259,15 @@ The dashboard home page starts with the **Price Check access** panel. After sign
 
 ## Deploy to Vercel
 
+Merging a pull request into `main` deploys it to Production automatically (Vercel setting **Production Branch** is `main`). It usually takes under a minute; check it with `/version.json` (see "What is live"). Pull requests and other branches only get preview deployments, which sit behind Vercel login.
+
+A manual deploy still works as a backup. Run it from a clean, up-to-date `main`, because the CLI uploads the working folder exactly as it is:
+
 ```bash
 npx vercel --prod
 ```
+
+If it says "Not authorized", the CLI login has expired (they expire after 10 days unused): run `npx vercel login` and try again.
 
 Set environment variables on Vercel:
 
@@ -276,7 +282,7 @@ npx vercel env add USE_MOCK_DATA production,preview --value "false"
 
 ### What is live
 
-Every deployment writes `public/version.json` at build time (`scripts/write-version.js`), so you can see which commit is running: `curl https://autocount-pwa-dashboard.vercel.app/version.json` returns the commit, branch, environment (`production` or `preview`) and build time. A deployment uploaded from a computer can have `null` for the Git fields. The file is generated, so it is git-ignored, and it is never cached.
+Every deployment writes `public/version.json` at build time (`scripts/write-version.js`), so you can see which commit is running: `curl https://autocount-pwa-dashboard.vercel.app/version.json` returns the commit, branch, environment (`production` or `preview`) and build time. After a merge to `main` it shows `"target":"production"` and the merge commit. A deployment uploaded from a computer (`npx vercel --prod`) can have `null` for the Git fields. The file is generated, so it is git-ignored, and it is never cached.
 
 ### Verified invoice reads
 
