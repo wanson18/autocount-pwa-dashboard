@@ -157,7 +157,7 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
       </div>
       <div class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</div>
       <div class="invoice-address">${escapeHtml(invoice.deliveryAddress || 'Delivery address review')}</div>
-      <div class="invoice-footer"><span class="invoice-items">${itemSummary(invoice)}</span><span class="invoice-date">${escapeHtml(invoice.docDate)}</span></div>
+      <div class="invoice-footer">${rail ? '' : `<span class="invoice-items">${itemSummary(invoice)}</span>`}<span class="invoice-date">${escapeHtml(invoice.docDate)}</span></div>
       <button class="invoice-select-button" type="button" data-select-invoice="${escapeHtml(key)}" aria-pressed="${String(selected)}" aria-label="Select invoice ${escapeHtml(invoice.docNo)} from ${escapeHtml(COMPANY_BADGES[companyKeyOf(invoice)] || companyKeyOf(invoice))}">Select invoice</button>${action}
     </article>`;
 }

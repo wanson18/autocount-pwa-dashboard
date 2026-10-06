@@ -425,6 +425,11 @@ h2 {
 
 .invoice-card--rail {
   padding: 11px;
+  border: 2px solid var(--mint-ink);
+}
+
+.invoice-card--rail.is-selected {
+  border-color: var(--primary);
 }
 
 .invoice-card--rail .invoice-customer {
