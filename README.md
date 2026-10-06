@@ -274,6 +274,10 @@ npx vercel env add AUTOCOUNT_API_URL production,preview --value "https://account
 npx vercel env add USE_MOCK_DATA production,preview --value "false"
 ```
 
+### What is live
+
+Every deployment writes `public/version.json` at build time (`scripts/write-version.js`), so you can see which commit is running: `curl https://autocount-pwa-dashboard.vercel.app/version.json` returns the commit, branch, environment (`production` or `preview`) and build time. A deployment uploaded from a computer can have `null` for the Git fields. The file is generated, so it is git-ignored, and it is never cached.
+
 ### Verified invoice reads
 
 AutoCount's invoice listing pages can repeat invoices on large date ranges, which also pushes other invoices out of the list. On a live 91-day range the Sales dashboard once received 9 invoices twice and missed 9 others, so revenue was about 1.3% off with no error. `lib/autocount/invoice-reader.js` (used by Price Check and Sales) checks every read: when AutoCount reports a `totalCount` the rows must add up to it with no invoice repeated. If they do not, the range is re-read in date slices that each fit on one page (at most 3 requests at once, 250 in total), and if completeness still cannot be proven, Sales shows that company as unavailable and Price Check fails that book, instead of showing wrong numbers. Ranges up to 30 days were consistent when checked, so normal use reads page by page exactly as before.
