@@ -207,7 +207,7 @@ export function createDispatchState({
     const key = getInvoiceKey(assignment);
     if (key) assignedByKey.set(key, assignment);
   });
-  const normalizedTrips = trips.map((trip) => normalizeTrip(trip, activeAssignments, resources))
+  const normalizedTrips = trips.filter((trip) => trip.status !== 'cancelled').map((trip) => normalizeTrip(trip, activeAssignments, resources))
     .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }));
   const normalizedInvoices = invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips, assignedByKey));
   const invoiceKeys = new Set(normalizedInvoices.map((invoice) => invoice.key));
@@ -341,7 +341,6 @@ export function getLorryLanes(state, resources = {}) {
     if (!lanes.has(key)) lanes.set(key, { lorry, trips: [] });
     return lanes.get(key);
   };
-  for (const lorry of resources.lorries || []) registerLorry(lorry);
   for (const trip of state.trips) {
     const tripLorryId = lorryIdOf(trip);
     const tripRegistrationNo = trip.lorry?.registrationNo || trip.registrationNo || '';

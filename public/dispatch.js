@@ -157,18 +157,19 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
       </div>
       <div class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</div>
       <div class="invoice-address">${escapeHtml(invoice.deliveryAddress || 'Delivery address review')}</div>
-      <div class="invoice-footer"><span class="invoice-items">${itemSummary(invoice)}</span><span class="invoice-date">${escapeHtml(invoice.docDate)}</span></div>
+      <div class="invoice-footer">${rail ? '' : `<span class="invoice-items">${itemSummary(invoice)}</span>`}<span class="invoice-date">${escapeHtml(invoice.docDate)}</span></div>
       <button class="invoice-select-button" type="button" data-select-invoice="${escapeHtml(key)}" aria-pressed="${String(selected)}" aria-label="Select invoice ${escapeHtml(invoice.docNo)} from ${escapeHtml(COMPANY_BADGES[companyKeyOf(invoice)] || companyKeyOf(invoice))}">Select invoice</button>${action}
     </article>`;
 }
 
-export function renderTripCard(state, trip, { writesEnabled = true, drivers = null } = {}) {
+export function renderTripCard(state, trip, { writesEnabled = true, drivers = null, tripNumber = null } = {}) {
   const tripInvoices = getTripInvoices(state, trip.id);
   const driverName = trip.driver?.name || trip.driverName || 'Driver not set';
   const lorryNumber = trip.lorry?.registrationNo || trip.registrationNo || 'Lorry not set';
   const counts = getTripCompanyCounts(state, trip.id);
   const selected = String(state.selectedTripId) === String(trip.id);
   const pending = Boolean(state.pendingMove);
+  const removableTrip = (trip.status === 'planned' || trip.status === 'loading' || !trip.status) && tripInvoices.length === 0 && (trip.invoiceKeys || []).length === 0;
   const activeDrivers = Array.isArray(drivers) ? drivers.filter((driver) => driver.active !== false) : [];
   const selectedDriverId = trip.driverId ?? trip.driver_id ?? trip.driver?.id;
   const tripDriverControl = Array.isArray(drivers)
@@ -179,7 +180,7 @@ export function renderTripCard(state, trip, { writesEnabled = true, drivers = nu
     : '';
   return `
     <article class="trip-card${selected ? ' is-selected' : ''}" data-trip-id="${escapeHtml(trip.id)}" data-drop-trip-id="${escapeHtml(trip.id)}">
-      <div class="trip-card-header"><div><p class="eyebrow">Trip ${escapeHtml(trip.id)}</p><h3>${escapeHtml(trip.tripDate)}</h3>
+      <div class="trip-card-header"><div><p class="eyebrow">${tripNumber ? `Trip ${escapeHtml(tripNumber)} · ` : ''}Ref ${escapeHtml(trip.id)}</p><h3>${escapeHtml(trip.tripDate)}</h3>
         <div class="trip-meta"><span>Driver <strong>${escapeHtml(driverName)}</strong></span><span>Lorry <strong>${escapeHtml(lorryNumber)}</strong></span>${tripDriverControl}</div></div>
         <span class="status-badge">${escapeHtml(trip.status || 'planned')}</span></div>
       <p class="trip-route">${escapeHtml(trip.routeNotes || 'Route notes not set')}</p>
@@ -188,7 +189,7 @@ export function renderTripCard(state, trip, { writesEnabled = true, drivers = nu
         ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key, pending, writesEnabled, tripId: trip.id })).join('') : '<div class="empty-dropzone">Select an invoice above, then assign it here.</div>'}
       </div>
       <div class="trip-actions"><span class="trip-subtotal"><strong>Enterprise ${counts.enterprise}</strong> · <strong>Sdn Bhd ${counts.sdn_bhd}</strong> · Combined ${counts.total}</span>
-        <span class="trip-action-buttons"><a class="future-print-button" data-print-items-trip="${escapeHtml(trip.id)}" href="${escapeHtml(loadingSheetHref(trip.id))}">Print Items</a><button class="assign-selected-button" type="button" data-assign-selected="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Assign selected invoice to trip ${escapeHtml(trip.id)}">Assign selected invoice</button></span></div>
+        <span class="trip-action-buttons">${removableTrip ? `<button class="remove-trip-button" type="button" data-remove-trip="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Remove trip ${escapeHtml(tripNumber || trip.id)} for lorry ${escapeHtml(lorryNumber)}">Remove trip</button>` : ''}<a class="future-print-button" data-print-items-trip="${escapeHtml(trip.id)}" href="${escapeHtml(loadingSheetHref(trip.id))}">Print Items</a><button class="assign-selected-button" type="button" data-assign-selected="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Assign selected invoice to trip ${escapeHtml(trip.id)}">Assign selected invoice</button></span></div>
     </article>`;
 }
 
@@ -230,12 +231,13 @@ export function renderLorryLane(state, lane, { resources = { drivers: [], lorrie
     : '';
   const effectiveDriverControl = hasTrip && !hasSingleTrip ? multiTripDriverNote : driverSelect;
   const tripsArea = hasTrip
-    ? lane.trips.map((trip) => renderTripCard(state, trip, { writesEnabled, drivers: hasSingleTrip ? null : resources.drivers || [] })).join('')
+    ? lane.trips.map((trip, index) => renderTripCard(state, trip, { writesEnabled, drivers: hasSingleTrip ? null : resources.drivers || [], tripNumber: index + 1 })).join('')
     : `<div class="empty-lane" data-drop-lorry-id="${escapeHtml(String(lorry.id))}" aria-label="Drop an invoice here to start a trip for lorry ${escapeHtml(reg)}"><p class="section-help">No trip planned for this lorry yet.</p><button class="secondary-button" type="button" data-start-trip="${escapeHtml(String(lorry.id))}" ${writesEnabled ? '' : 'disabled'} aria-label="Start a trip for lorry ${escapeHtml(reg)}">Start trip for this lorry</button></div>`;
   return `<section class="lorry-lane panel" data-lorry-id="${escapeHtml(String(lorry.id))}" aria-label="Lorry ${escapeHtml(reg)} lane">
     <div class="lorry-lane-header">
       <div class="lorry-lane-title"><p class="eyebrow">Lorry lane</p><h3>${escapeHtml(reg)}</h3></div>
       ${effectiveDriverControl}
+      ${hasTrip && hasPersistedLorryId ? `<button class="secondary-button add-trip-button" type="button" data-start-trip="${escapeHtml(String(lorry.id))}" ${writesEnabled ? '' : 'disabled'} aria-label="Add another trip for lorry ${escapeHtml(reg)}">+ Add another trip</button>` : ''}
     </div>
     <div class="lorry-trips">${tripsArea}</div>
   </section>`;
@@ -247,7 +249,7 @@ export function renderLorryBoard(root, state, { resources = { drivers: [], lorri
   const lanes = getLorryLanes(state, resources);
   board.innerHTML = lanes.length
     ? lanes.map((lane) => renderLorryLane(state, lane, { resources, writesEnabled })).join('')
-    : '<div class="empty-dropzone">No active lorries registered. Add a lorry in Resources to start planning trips.</div>';
+    : '<div class="empty-dropzone">No trips yet. Use + New trip to add a lorry.</div>';
 }
 
 export function renderDispatchBoard(root, state, { writesEnabled = true, resources = { drivers: [], lorries: [] } } = {}) {
@@ -754,6 +756,31 @@ export function createDispatchApp({
       }
     });
   }
+  async function removeTrip(tripId) {
+    if (!writesEnabled()) return false;
+    const trip = state.trips.find((candidate) => String(candidate.id) === String(tripId));
+    if (!trip) return false;
+    if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Remove this empty trip for ${trip.lorry?.registrationNo || trip.registrationNo || 'the lorry'}?`)) return false;
+    return runMutation(async () => {
+      try {
+        await tripsTransport.updateTrip({ trip_id: trip.id, status: 'cancelled', expected_revision: trip.revision, request_id: createRequestId() });
+        state.statusMessage = 'Trip removed.';
+        await loadBoard({ preserveMessage: true, allowDuringMutation: true });
+        return true;
+      } catch (error) {
+        if (error.code === 'unauthorized') handleSessionLoss();
+        else if (error.code === 'stale_trip') {
+          state.statusMessage = 'Trip changed on the server. Board refreshed — try removing it again.';
+          try { await loadBoard({ preserveMessage: true, allowDuringMutation: true }); } catch { /* loadBoard renders the authoritative refresh failure. */ }
+        } else if (error.code === 'trip_not_empty') {
+          state.statusMessage = 'Remove the invoices from this trip first.';
+          try { await loadBoard({ preserveMessage: true, allowDuringMutation: true }); } catch { /* loadBoard renders the authoritative refresh failure. */ }
+        } else state.statusMessage = 'The trip could not be removed. Try again.';
+        render();
+        return false;
+      }
+    });
+  }
   function closeTripDialog() { if (tripDialogBackdrop) tripDialogBackdrop.hidden = true; dialogInvoker?.focus?.(); dialogInvoker = null; stagedInvoiceKey = null; }
   async function stageInvoiceForLorry(invoiceKey, lorryId) {
     if (!writesEnabled()) return;
@@ -968,6 +995,7 @@ export function createDispatchApp({
   resourceType?.addEventListener('change', updateResourceTypeFields); showInactiveResources?.addEventListener('change', () => loadResources().catch(() => {}));
 
   root.addEventListener('click', (event) => {
+    const removeTripButton = event.target.closest?.('[data-remove-trip]'); if (removeTripButton) { removeTrip(removeTripButton.dataset.removeTrip).catch(() => {}); return; }
     const remove = event.target.closest?.('[data-remove-assignment]'); if (remove) { removeAssignedInvoice(remove.dataset.removeAssignment).catch(() => {}); return; }
     const assign = event.target.closest?.('[data-assign-invoice]'); if (assign) { const tripId = state.selectedTripId || state.trips[0]?.id; if (tripId !== undefined) assignInvoice(assign.dataset.assignInvoice, tripId, assign).catch(() => {}); return; }
     const assignSelected = event.target.closest?.('[data-assign-selected]'); if (assignSelected) { if (state.selectedInvoiceKey) assignInvoice(state.selectedInvoiceKey, assignSelected.dataset.assignSelected, assignSelected).catch(() => {}); return; }

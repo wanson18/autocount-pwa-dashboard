@@ -159,7 +159,11 @@ not supply an actor or authoritative invoice data.
 Trips are persisted with optimistic revisions and the explicit state machine
 `planned -> loading -> dispatched -> completed`, with cancellation allowed from
 `planned` or `loading`. A trip can be dispatched only with an active driver, an
-active lorry, and at least one active assignment. Assignment outcomes are
+active lorry, and at least one active assignment. A lorry and driver may run several trips on the same day: the Board numbers them
+per lorry (Trip 1, Trip 2, ...) and each lane has "+ Add another trip". An empty
+`planned` or `loading` trip can be removed (PATCH `status: cancelled`); cancelling
+a trip that still holds active invoices returns `409 trip_not_empty`, and cancelled
+trips are hidden from the Board. Assignment outcomes are
 `assigned -> loaded -> out_for_delivery -> delivered`, with `failed` or
 `returned` from `out_for_delivery` and `removed` from `assigned` or `loaded`.
 

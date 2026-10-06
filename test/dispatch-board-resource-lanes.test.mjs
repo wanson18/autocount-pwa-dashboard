@@ -8,7 +8,7 @@ import {
   getTripInvoices,
   visibleUnassignedInvoices,
 } from '../public/dispatch-state.mjs';
-import { createDispatchApp, renderTripCard } from '../public/dispatch.js';
+import { createDispatchApp, renderLorryLane, renderTripCard } from '../public/dispatch.js';
 
 const startDate = '2026-08-28';
 
@@ -201,24 +201,20 @@ async function bootApp(transports) {
   return { app, root: documentRef.querySelector('#dispatchApp') };
 }
 
-test('loadBoard loads the active resource catalog so a no-trip board shows every active lorry as a permanent lane', async () => {
+test('loadBoard with no trips shows no lorry lanes until a trip is added', async () => {
   const transports = createAppTransports();
   const { app, root } = await bootApp(transports);
   const state = app.getState();
 
   assert.equal(state.trips.length, 0);
   const lanes = getLorryLanes(state, { drivers, lorries });
-  assert.deepEqual(lanes.map((lane) => lane.lorry.id).sort(), [2, 3]);
+  assert.deepEqual(lanes, []);
 
   const board = root.querySelector('#lorryBoard');
-  assert.match(board.innerHTML, /data-lorry-id="2"/);
-  assert.match(board.innerHTML, /data-lorry-id="3"/);
-  assert.match(board.innerHTML, /data-drop-lorry-id="2"/);
-  assert.match(board.innerHTML, /data-drop-lorry-id="3"/);
-  assert.match(board.innerHTML, /data-start-trip="2"/);
+  assert.doesNotMatch(board.innerHTML, /data-lorry-id=/);
 });
 
-test('loadBoard keeps every active lorry lane on a joined-trip board', async () => {
+test('loadBoard shows only the lorry that has a trip, not the other lorries', async () => {
   const createdTrips = [{
     id: 'trip-200',
     tripDate: startDate,
@@ -236,10 +232,10 @@ test('loadBoard keeps every active lorry lane on a joined-trip board', async () 
   const state = app.getState();
 
   const lanes = getLorryLanes(state, { drivers, lorries });
-  assert.deepEqual(lanes.map((lane) => lane.lorry.id).sort(), [2, 3]);
+  assert.deepEqual(lanes.map((lane) => lane.lorry.id), [2]);
   const board = root.querySelector('#lorryBoard');
   assert.match(board.innerHTML, /data-lorry-id="2"/);
-  assert.match(board.innerHTML, /data-lorry-id="3"/);
+  assert.doesNotMatch(board.innerHTML, /data-lorry-id="3"/);
   assert.match(board.innerHTML, /data-trip-id="trip-200"/);
 });
 
@@ -352,13 +348,11 @@ test('multi-trip lane driver controls patch the exact selected trip', async () =
   assert.equal(driverUpdates[0].expected_revision, 1);
 });
 
-test('a permanent empty lorry lane keeps its driver selector disabled so it never patches a nonexistent trip', async () => {
-  const transports = createAppTransports();
-  const { root } = await bootApp(transports);
-  const board = root.querySelector('#lorryBoard');
+test('a lane without a trip keeps its driver selector disabled so it never patches a nonexistent trip', () => {
+  const state = createDispatchState({ trips: [] });
+  const markup = renderLorryLane(state, { lorry: lorries.find((lorry) => lorry.id === 3), trips: [] }, { resources: { drivers, lorries } });
 
-  assert.match(board.innerHTML, /data-lorry-id="3"/);
-  assert.match(board.innerHTML, /data-lorry-driver="3"[^>]*disabled/);
+  assert.match(markup, /data-lorry-driver="3"[^>]*disabled/);
 });
 
 test('assigned invoice cards can be dragged back to the queue and expose a remove control', () => {
