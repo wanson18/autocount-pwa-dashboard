@@ -49,12 +49,21 @@ autocount-pwa-dashboard/
 
 `lib/dispatch/loading-sheet.js` groups loading totals by exact item code + UOM and must **never** convert or merge units. Do not reuse the sales MultiPack conversion for dispatch quantities.
 
+## Price Check Rules (`api/price-check.js`, `lib/price-check/`)
+
+- Read-only and protected: it needs a real signed clerk session (`verifySessionCookie`), never the synthetic public-dispatch session, and every response is `no-store`.
+- Each book is read page by page first. AutoCount's paging returned repeated invoices on large date ranges, so a duplicate document, a changing total, or a short or long list triggers one re-read in date slices that each fit on one page. Both reads must prove completeness (no document twice, slice totals equal to the overall total). Never relax these checks to make a failing book pass; fail the book instead.
+- `counts.skipped*` describe the monitored window only, not the 90-day history baseline.
+- A failed book is `PARTIAL`, never an empty success. Failure details are integers and booleans only (no invoice or customer data).
+
 ## Conventions
 
 - Tests first: `node:test` suites live in `api/*.test.js` and `test/*.test.mjs`; Playwright specs in `test/e2e/`.
 - Changing any cached static asset requires bumping `CACHE_NAME` in `public/sw.js` and the expectations in `test/service-worker.test.mjs` and `test/price-check-ui.test.mjs`.
 - Money and quantity values round to 2 decimals at output; keep AutoCount decimal strings exact inside adapters.
 - Never commit `.env`, `.env.local`, or credentials; `.env.example` is the contract.
+- Production is deployed by hand (`npx vercel --prod`), only from a clean, up-to-date `main` (`git status` empty, `git pull --ff-only`). The CLI uploads the working folder, uncommitted edits included, so deploying anything else lets the live site drift from GitHub.
+- Function regions are set per function in `vercel.json`. Functions that only call AutoCount Cloud (`price-check`, `sales`, `dispatch-invoices`) run in `sin1`; every function that uses the Postgres (`DATABASE_URL`) runs in `iad1`, next to the database. Moving them all to Singapore made Dispatch slower. Never add a project-wide `regions`; `test/vercel-regions.test.mjs` enforces this (update its `DATABASE_REGION` if the database moves).
 
 ## Commands
 
@@ -62,4 +71,4 @@ autocount-pwa-dashboard/
 - `npm run local` — run the app locally with `vercel dev`.
 - `npm run migrate` / `npm run migrate:preflight` — dispatch database schema.
 - `npx playwright test` — end-to-end specs.
-- `vercel deploy --prod` (or push to `master`/`main`) — production deploy; alias https://autocount-pwa-dashboard.vercel.app
+- `npx vercel --prod` — production deploy, run by hand (see Conventions); alias https://autocount-pwa-dashboard.vercel.app. Merging on GitHub does not deploy it; branches and PRs only get protected preview deployments. A CLI login unused for 10 days expires, so run `npx vercel login` again if it says "Not authorized".
