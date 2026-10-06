@@ -173,14 +173,15 @@ test('price check: two columns on wide screens, one column on phones', async ({ 
   else expect(result.y).toBeGreaterThan(controls.y + controls.height - 1);
 });
 
-test('dispatch: app bar on wide screens, queue beside the lorry lanes', async ({ page }, testInfo) => {
+test('dispatch: app bar on wide screens; the loading plan appears beside the queue once a trip exists', async ({ page }, testInfo) => {
   const wide = testInfo.project.name === 'desktop';
+  const trips = [];
   await page.route('**/api/dispatch/**', (route) => {
     const { pathname } = new URL(route.request().url());
     if (pathname === '/api/dispatch/session') return json(route, { success: true, authenticated: true, session: { clerkId: 'clerk-e2e', role: 'clerk' } });
-    if (pathname === '/api/dispatch/resources') return json(route, { success: true, drivers: [], lorries: [] });
+    if (pathname === '/api/dispatch/resources') return json(route, { success: true, drivers: [{ type: 'driver', id: 1, name: 'Aiman Driver', licenseNo: 'D-1001', active: true }], lorries: [{ type: 'lorry', id: 2, registrationNo: 'WXY 1001', description: '', active: true }] });
     if (pathname === '/api/dispatch/invoices') return json(route, { success: true, dateRange: { startDate: '2026-10-06', endDate: '2026-10-06' }, company: 'all', invoices: [], sources: { enterprise: { status: 'ok', invoiceCount: 0 }, sdn_bhd: { status: 'ok', invoiceCount: 0 } } });
-    if (pathname === '/api/dispatch/trips') return json(route, { success: true, trips: [] });
+    if (pathname === '/api/dispatch/trips') return json(route, { success: true, trips });
     if (pathname === '/api/dispatch/assignments') return json(route, { success: true, assignments: [] });
     return json(route, { success: false, error: { code: 'not_found' } }, 404);
   });
@@ -188,8 +189,20 @@ test('dispatch: app bar on wide screens, queue beside the lorry lanes', async ({
   await expect(page.getByRole('heading', { name: 'Unassigned invoices' })).toBeVisible();
   await expectNavFor(page, wide, { pageName: 'Delivery Dispatch', phoneControl: page.getByRole('link', { name: 'Back to Sales Dashboard' }) });
   await expectNoSidewaysScroll(page);
+
+  // No trip yet: the loading plan stays out of the way and the queue spans the whole board.
+  await expect(page.locator('.lorry-board-section')).toBeHidden();
+  const board = await page.locator('.board-layout').boundingBox();
+  const queueAlone = await page.locator('.queue-panel').boundingBox();
+  expect(queueAlone.width).toBeGreaterThanOrEqual(board.width - 1);
+
+  // Once a trip exists the plan appears: beside the queue on wide screens, below it on phones.
+  trips.push({ id: 101, tripDate: '2026-10-06', driverId: 1, vehicleId: 2, routeNotes: '', status: 'planned', revision: 1, assignments: [] });
+  await page.locator('#refreshBoard').click();
+  await expect(page.locator('.lorry-board-section')).toBeVisible();
   const queue = await page.locator('.queue-panel').boundingBox();
   const lanes = await page.locator('.lorry-board-section').boundingBox();
   if (wide) expect(lanes.x).toBeGreaterThan(queue.x + queue.width - 1);
   else expect(lanes.y).toBeGreaterThan(queue.y + queue.height - 1);
+  await expectNoSidewaysScroll(page);
 });

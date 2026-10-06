@@ -26,6 +26,8 @@ import {
 
 const COMPANY_BADGES = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
 const REMOVABLE_ASSIGNMENT_STATUSES = new Set(['assigned', 'loaded']);
+const QUEUE_HELP_NO_TRIPS = 'Add a trip to open the loading plan, then drag invoices into it. Assignments are saved as dispatch records; accounting invoices stay unchanged.';
+const QUEUE_HELP_WITH_TRIPS = 'Drag on desktop, or select an invoice and tap a lorry on mobile. Assignments are saved as dispatch records; accounting invoices stay unchanged. Drag an assigned invoice back here or use Remove to return it to this queue.';
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 const $ = (root, selector) => root.querySelector(selector);
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -135,21 +137,23 @@ function loadingSheetHref(tripId) {
   return `/loading-sheet.html?trip_id=${encodeURIComponent(String(tripId))}`;
 }
 
-export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null } = {}) {
+export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true } = {}) {
   const key = getInvoiceKey(invoice);
   const selectedClass = selected ? ' is-selected' : '';
   const railClass = rail ? ' invoice-card--rail' : '';
   const removeAllowed = inTrip && canRemoveAssignment(invoice);
-  const draggable = inTrip ? removeAllowed && writesEnabled && !pending : writesEnabled && !pending;
+  const showAssignControls = inTrip || assignable;
+  const draggable = inTrip ? removeAllowed && writesEnabled && !pending : assignable && writesEnabled && !pending;
   const removeLabel = tripId == null ? `Remove invoice ${invoice.docNo} from trip` : `Remove invoice ${invoice.docNo} from trip ${tripId}`;
   const action = inTrip ? (removeAllowed ? `
-      <button class="remove-assignment-button" type="button" data-remove-assignment="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="${escapeHtml(removeLabel)}">Remove</button>` : '') : `
-      <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-describedby="assignmentExplanation" aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to selected trip">Assign to selected trip</button>`;
+      <button class="remove-assignment-button" type="button" data-remove-assignment="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="${escapeHtml(removeLabel)}">Remove</button>` : '') : (assignable ? `
+      <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-describedby="assignmentExplanation" aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to selected trip">Assign to selected trip</button>` : '');
+  const dragHint = showAssignControls ? '<span class="drag-affordance" aria-label="Drag invoice to a lorry">↔ Drag / select</span>' : '';
   return `
     <article class="invoice-card${selectedClass}${railClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}">
       <div class="invoice-heading">
         <span><span class="invoice-number">${escapeHtml(invoice.docNo)}</span>${companyBadge(invoice)}</span>
-        <span class="drag-affordance" aria-label="Drag invoice to a lorry">↔ Drag / select</span>
+        ${dragHint}
       </div>
       <div class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</div>
       <div class="invoice-address">${escapeHtml(invoice.deliveryAddress || 'Delivery address review')}</div>
@@ -248,6 +252,13 @@ export function renderLorryBoard(root, state, { resources = { drivers: [], lorri
 
 export function renderDispatchBoard(root, state, { writesEnabled = true, resources = { drivers: [], lorries: [] } } = {}) {
   const unassigned = visibleUnassignedInvoices(state);
+  const hasTrips = state.trips.length > 0;
+  const boardLayout = $(root, '#boardLayout');
+  const loadingPlan = $(root, '#loadingPlan');
+  const queueHelp = $(root, '#queueHelp');
+  if (boardLayout) boardLayout.dataset.hasTrips = String(hasTrips);
+  if (loadingPlan) loadingPlan.hidden = !hasTrips;
+  if (queueHelp) queueHelp.textContent = hasTrips ? QUEUE_HELP_WITH_TRIPS : QUEUE_HELP_NO_TRIPS;
   const unassignedList = $(root, '#unassignedList');
   const companyFilter = $(root, '#companyFilter');
   const queueKey = $(root, '#queueKey');
@@ -261,7 +272,7 @@ export function renderDispatchBoard(root, state, { writesEnabled = true, resourc
     unassignedList.setAttribute('data-drop-unassigned', 'true');
     unassignedList.setAttribute('aria-label', 'Unassigned invoices drop zone');
     unassignedList.innerHTML = unassigned.length
-      ? unassigned.map((invoice) => renderInvoiceCard(invoice, { selected: state.selectedInvoiceKey === invoice.key, pending: Boolean(state.pendingMove), writesEnabled, rail: true })).join('')
+      ? unassigned.map((invoice) => renderInvoiceCard(invoice, { selected: state.selectedInvoiceKey === invoice.key, pending: Boolean(state.pendingMove), writesEnabled, rail: true, assignable: hasTrips })).join('')
       : (state.searchQuery || '').trim()
         ? '<div class="empty-dropzone">No invoices match this search.</div>'
         : '<div class="empty-dropzone">No unassigned invoices in this company view.</div>';

@@ -386,13 +386,24 @@ h2 {
   padding: 17px;
 }
 
-.invoice-rail {
+.queue-heading {
+  flex-wrap: wrap;
+}
+
+.queue-heading-actions {
   display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* Wrapping grid: the queue fills the panel and grows downward, so more invoices show at once. */
+.invoice-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  align-content: start;
   gap: 10px;
   min-height: 112px;
-  padding-bottom: 6px;
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
 }
 
 .invoice-rail[data-drop-unassigned] {
@@ -402,9 +413,14 @@ h2 {
   background: var(--ground);
 }
 
-.invoice-rail .invoice-card {
-  flex: 0 0 230px;
-  scroll-snap-align: start;
+.invoice-rail > .empty-dropzone {
+  grid-column: 1 / -1;
+}
+
+/* Loading plan visible, stacked: cap the queue so the lanes stay within reach. */
+.board-layout[data-has-trips="true"] .invoice-rail {
+  max-height: min(55vh, 520px);
+  overflow-y: auto;
 }
 
 .invoice-card--rail {
@@ -428,6 +444,10 @@ h2 {
 
 .invoice-card--rail .drag-affordance {
   font-size: 0.75rem;
+}
+
+.invoice-card--rail .invoice-date {
+  white-space: nowrap;
 }
 
 .lorry-board-section {
@@ -1115,10 +1135,6 @@ h2 {
     padding: 15px;
   }
 
-  .invoice-rail .invoice-card {
-    flex-basis: 200px;
-  }
-
   .lorry-board {
     grid-template-columns: 1fr;
   }
@@ -1353,8 +1369,8 @@ h2 {
   font-size: 0.8125rem;
 }
 
-/* Wide screens: the app bar carries navigation, the queue becomes a column
-   beside the lorry lanes, and the tab strip stays a compact control. */
+/* Wide screens: the app bar carries navigation, the loading plan (once a trip
+   exists) sits beside the queue, and the tab strip stays a compact control. */
 @media (min-width: 960px) {
   .back-link {
     display: none;
@@ -1368,21 +1384,23 @@ h2 {
     width: min(100%, 520px);
   }
 
-  .board-layout {
-    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  /* Loading plan visible: plan beside the queue; the queue sticks while the lanes scroll. */
+  .board-layout[data-has-trips="true"] {
+    grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 440px);
   }
 
-  .invoice-rail {
+  .board-layout[data-has-trips="true"] .queue-panel {
+    position: sticky;
+    top: 12px;
+    display: flex;
+    max-height: calc(100vh - 24px);
     flex-direction: column;
-    max-height: 72vh;
-    overflow-x: visible;
-    overflow-y: auto;
-    scroll-snap-type: none;
   }
 
-  .invoice-rail .invoice-card {
-    flex: 0 0 auto;
-    width: 100%;
+  .board-layout[data-has-trips="true"] .invoice-rail {
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
   }
 
   .resource-form {
