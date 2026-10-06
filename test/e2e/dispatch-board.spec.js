@@ -80,8 +80,21 @@ async function installFixtureApi(page, {
   deferStaleRefresh = false,
   deferResourceUpdate = false,
   idsOnlyTrip = false,
+  noTrips = false,
+  extraInvoices = 0,
 } = {}) {
   const state = createServerState();
+  if (noTrips) state.trips = [];
+  for (let index = 0; index < extraInvoices; index += 1) {
+    const suffix = String(100 + index);
+    state.invoices.push({
+      ...ENTERPRISE,
+      invoiceId: `enterprise-e2e-${suffix}`,
+      docKey: `enterprise-e2e-${suffix}`,
+      docNo: `ENT-E2E-${suffix}`,
+      customer: { code: `ENT-E2E-CUSTOMER-${suffix}`, name: `Enterprise E2E Customer ${suffix}` },
+    });
+  }
   if (idsOnlyTrip) {
     delete state.trips[0].driver;
     delete state.trips[0].lorry;
@@ -438,4 +451,78 @@ test('loading starts with an empty non-writable Board until the first authoritat
   state.initialBoardGate.resolve();
   await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
   await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
+});
+
+async function invoiceGrid(page) {
+  return page.locator('#unassignedList .invoice-card').evaluateAll((cards) => {
+    const rows = new Map();
+    for (const card of cards) rows.set(card.offsetTop, (rows.get(card.offsetTop) || 0) + 1);
+    return { total: cards.length, rows: rows.size, firstRowCount: rows.values().next().value ?? 0 };
+  });
+}
+
+test('creating the first trip reveals the loading plan and restores assignment controls', async ({ page }) => {
+  const state = await openBoard(page, { noTrips: true });
+  await expect(page.locator('#loadingPlan')).toBeAttached();
+  await expect(page.locator('#loadingPlan')).toBeHidden();
+  await expect(page.locator('#queueHelp')).toContainText('Add a trip');
+  await expect(page.locator('#unassignedList [data-assign-invoice]')).toHaveCount(0);
+  await expect(page.locator('#unassignedList .drag-affordance')).toHaveCount(0);
+
+  await page.getByRole('button', { name: /New trip/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Create trip' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create trip' }).click();
+
+  await expect(page.locator('#loadingPlan')).toBeVisible();
+  await expect(page.locator('[data-trip-id="102"]')).toBeVisible();
+  await expect(page.locator('#queueHelp')).toContainText('Drag on desktop');
+  await expect(page.locator('#unassignedList [data-assign-invoice]')).toHaveCount(3);
+  expect(state.tripBodies).toHaveLength(1);
+
+  await invoiceCard(page, 'ENT-E2E-001').getByRole('button', { name: /Select invoice/ }).click();
+  await page.locator('[data-trip-id="102"]').getByRole('button', { name: /Assign selected invoice/ }).click();
+  await expect(page.locator('[data-trip-id="102"]')).toContainText('Combined 1');
+  expect(state.assignmentBodies).toHaveLength(1);
+});
+
+test('without a trip the invoice queue is a full-width wrapping grid', async ({ page }, testInfo) => {
+  await openBoard(page, { noTrips: true, extraInvoices: 12 });
+  await expect(page.locator('#loadingPlan')).toBeHidden();
+
+  const grid = await invoiceGrid(page);
+  expect(grid.total).toBe(15);
+  expect(grid.rows).toBeGreaterThan(1);
+  if (testInfo.project.name === 'desktop') expect(grid.firstRowCount).toBeGreaterThanOrEqual(4);
+  else expect(grid.firstRowCount).toBe(1);
+
+  const overflow = await page.locator('#unassignedList').evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+
+  const layout = await page.locator('#boardLayout').boundingBox();
+  const queue = await page.locator('.queue-panel').boundingBox();
+  expect(queue.width).toBeGreaterThanOrEqual(layout.width - 1);
+});
+
+test('with a trip the loading plan sits beside the invoices on wide screens and below them on phones', async ({ page }, testInfo) => {
+  await openBoard(page, { extraInvoices: 27 });
+  await expect(page.locator('#loadingPlan')).toBeVisible();
+
+  const queue = await page.locator('.queue-panel').boundingBox();
+  const plan = await page.locator('#loadingPlan').boundingBox();
+  if (testInfo.project.name === 'desktop') {
+    expect(plan.x).toBeGreaterThanOrEqual(queue.x + queue.width);
+    expect(Math.abs(plan.y - queue.y)).toBeLessThan(2);
+    await expect(page.locator('.queue-panel')).toBeInViewport();
+    await expect(page.locator('#loadingPlan')).toBeInViewport();
+  } else {
+    expect(plan.y).toBeGreaterThanOrEqual(queue.y + queue.height);
+    expect(Math.abs(plan.x - queue.x)).toBeLessThan(2);
+  }
+
+  const list = await page.locator('#unassignedList').evaluate((element) => ({
+    scrollsInside: element.scrollHeight > element.clientHeight,
+    height: element.getBoundingClientRect().height,
+  }));
+  expect(list.scrollsInside).toBe(true);
+  expect(list.height).toBeLessThanOrEqual(testInfo.project.name === 'desktop' ? 900 : 520);
 });

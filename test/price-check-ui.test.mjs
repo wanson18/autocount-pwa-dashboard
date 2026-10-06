@@ -151,7 +151,7 @@ test('mobile PWA exposes a fresh protected price view with dashboard login', () 
 });
 
 test('the service worker bumps the cache namespace and lists the price page', () => {
-  assert.match(sw, /const CACHE_NAME = 'sales-dashboard-v18'/);
+  assert.match(sw, /const CACHE_NAME = 'sales-dashboard-v19'/);
   assert.match(sw, /'\/price-check\.html'/);
 });
 

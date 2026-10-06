@@ -91,26 +91,28 @@
             </div>
           </div>
 
-          <div class="board-layout">
+          <div class="board-layout" id="boardLayout" data-has-trips="false">
             <section class="queue-panel panel" aria-labelledby="unassignedTitle">
-              <div class="section-heading">
+              <div class="section-heading queue-heading">
                 <div>
                   <p class="eyebrow">Ready to place</p>
                   <h2 id="unassignedTitle">Unassigned invoices <span class="count-pill" id="unassignedCount">0</span></h2>
                 </div>
-                <span class="queue-key" id="queueKey" aria-label="ALL company queue">ALL</span>
+                <div class="queue-heading-actions">
+                  <span class="queue-key" id="queueKey" aria-label="ALL company queue">ALL</span>
+                  <button class="primary-button" type="button" id="newTripButton">+ New trip</button>
+                </div>
               </div>
-              <p class="section-help">Drag on desktop, or select an invoice and tap a lorry on mobile. Assignments are saved as dispatch records; accounting invoices stay unchanged. Drag an assigned invoice back here or use Remove to return it to this queue.</p>
+              <p class="section-help" id="queueHelp">Add a trip to open the loading plan, then drag invoices into it. Assignments are saved as dispatch records; accounting invoices stay unchanged.</p>
               <div class="invoice-rail" id="unassignedList" data-drop-unassigned="true" aria-label="Unassigned invoices drop zone" aria-live="polite"></div>
             </section>
 
-            <section class="lorry-board-section" aria-labelledby="lorryBoardTitle">
+            <section class="lorry-board-section" id="loadingPlan" aria-labelledby="lorryBoardTitle" hidden>
               <div class="section-heading lorry-board-heading">
                 <div>
                   <p class="eyebrow">Physical loading plan</p>
                   <h2 id="lorryBoardTitle">Lorry lanes</h2>
                 </div>
-                <button class="primary-button" type="button" id="newTripButton">+ New trip</button>
               </div>
               <p class="section-help" id="assignmentExplanation">Select an invoice, then drag it to a lorry lane or tap a lorry lane to assign. Drag an assigned invoice back to the queue or use Remove to return it.</p>
               <div class="lorry-board" id="lorryBoard" aria-label="Lorry lanes"></div>
