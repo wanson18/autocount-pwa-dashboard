@@ -101,7 +101,25 @@ test('renderLorryLane shows the driver select inside the permanent box when a tr
   assert.match(markup, /Driver for lorry WXY 1001/);
   assert.match(markup, /data-trip-id="101"/);
   assert.match(markup, /<option value="1"[^>]*selected>Aiman Driver/);
-  assert.doesNotMatch(markup, /data-start-trip=/);
+  assert.match(markup, /data-start-trip="2"[^>]*aria-label="Add another trip for lorry WXY 1001"/);
+});
+
+test('renderLorryLane numbers each trip of the same lorry and offers Remove trip only on empty trips', () => {
+  const secondTrip = { ...tripWithLorry, id: 102, routeNotes: 'South route', invoiceKeys: [] };
+  const state = createDispatchState({ trips: [{ ...tripWithLorry, invoiceKeys: [] }, secondTrip] });
+  const lane = getLorryLanes(state, { drivers, lorries }).find((candidate) => candidate.lorry.id === 2);
+
+  const markup = renderLorryLane(state, lane, { resources: { drivers, lorries }, writesEnabled: true });
+
+  assert.match(markup, /Trip 1 · Ref 101/);
+  assert.match(markup, /Trip 2 · Ref 102/);
+  assert.match(markup, /data-remove-trip="101"/);
+  assert.match(markup, /data-remove-trip="102"/);
+});
+
+test('cancelled trips are dropped from the board state', () => {
+  const state = createDispatchState({ trips: [tripWithLorry, { ...tripWithLorry, id: 103, status: 'cancelled' }] });
+  assert.deepEqual(state.trips.map((trip) => trip.id), [tripWithLorry.id]);
 });
 
 test('renderLorryLane uses exact trip driver controls when a lorry has multiple trips', () => {

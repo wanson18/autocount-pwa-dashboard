@@ -1299,6 +1299,7 @@ h2 {
 
 .assign-selected-button,
 .assign-button,
+.remove-trip-button,
 .remove-assignment-button {
   min-height: 38px;
   padding: 7px 10px;
@@ -1310,6 +1311,7 @@ h2 {
   font-weight: 800;
 }
 
+.remove-trip-button,
 .remove-assignment-button {
   border-color: var(--rose-line);
   background: var(--rose);
@@ -1318,6 +1320,7 @@ h2 {
 
 .assign-selected-button:disabled,
 .assign-button:disabled,
+.remove-trip-button:disabled,
 .remove-assignment-button:disabled {
   opacity: 0.45;
 }
@@ -1410,4 +1413,9 @@ h2 {
   .resource-fields {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
+}
+
+.remove-trip-button,
+.add-trip-button {
+  min-height: 44px;
 }
