@@ -6,6 +6,7 @@ import vm from 'node:vm';
 const home = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const price = readFileSync(new URL('../public/price-check.html', import.meta.url), 'utf8');
 const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+const theme = readFileSync(new URL('../public/theme.css', import.meta.url), 'utf8');
 
 function createElement(id) {
   const classes = new Set();
@@ -150,7 +151,7 @@ test('mobile PWA exposes a fresh protected price view with dashboard login', () 
 });
 
 test('the service worker bumps the cache namespace and lists the price page', () => {
-  assert.match(sw, /const CACHE_NAME = 'sales-dashboard-v17'/);
+  assert.match(sw, /const CACHE_NAME = 'sales-dashboard-v18'/);
   assert.match(sw, /'\/price-check\.html'/);
 });
 
@@ -394,7 +395,7 @@ test('every status state has its own banner colour and icon, not just text', () 
 
   assert.match(price, /id="priceCheckStatus"[^>]*class="status-banner/);
   for (const state of ['ok', 'alert', 'partial', 'unauthorized', 'offline', 'fail', 'error', 'unavailable']) {
-    assert.match(price, new RegExp(`\\.status-banner\\[data-state='${state}'\\]::before`), `${state} needs an icon`);
+    assert.match(theme, new RegExp(`\\.status-banner\\[data-state='${state}'\\]::before`), `${state} needs an icon`);
   }
 });
 

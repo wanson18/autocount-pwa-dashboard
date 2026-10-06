@@ -1,7 +1,9 @@
-const CACHE_NAME = 'sales-dashboard-v17';
+const CACHE_NAME = 'sales-dashboard-v18';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/theme.css',
+  '/fonts/NunitoSans-latin.woff2',
   '/today-invoices.html',
   '/dispatch.html',
   '/dispatch.css',

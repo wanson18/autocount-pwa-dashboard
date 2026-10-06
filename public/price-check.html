@@ -2,136 +2,91 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#0f172a" />
-    <meta name="description" content="Read-only price-difference check for approved AutoCount invoices" />
-    <title>Price Check — AutoCount Sales Dashboard</title>
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>Price Check — Wanson Companies</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="preload" href="/fonts/NunitoSans-latin.woff2" as="font" type="font/woff2" crossorigin />
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      body {
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
-      }
-      .panel {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 0.75rem;
-      }
-      [data-alert-detail] {
-        line-height: 1.4;
-      }
-      /* Status banner: colour + icon + text, so state never relies on colour alone. */
-      .status-banner {
-        padding: 0.625rem 0.75rem;
-        border: 1px solid #475569;
-        border-left-width: 4px;
-        border-radius: 0.5rem;
-        background-color: #0f172a;
-        color: #e2e8f0;
-        line-height: 1.35;
-      }
-      .status-banner::before {
-        content: '\21bb\00a0\00a0';
-        content: '\21bb\00a0\00a0' / '';
-      }
-      .status-banner[data-state='ok'] {
-        border-color: #10b981;
-        background-color: #052e24;
-        color: #d1fae5;
-      }
-      .status-banner[data-state='ok']::before {
-        content: '\2713\00a0\00a0';
-        content: '\2713\00a0\00a0' / '';
-      }
-      .status-banner[data-state='alert'] {
-        border-color: #38bdf8;
-        background-color: #0c2a3f;
-        color: #e0f2fe;
-      }
-      .status-banner[data-state='alert']::before {
-        content: '\24d8\00a0\00a0';
-        content: '\24d8\00a0\00a0' / '';
-      }
-      .status-banner[data-state='partial'],
-      .status-banner[data-state='unauthorized'],
-      .status-banner[data-state='offline'] {
-        border-color: #f59e0b;
-        background-color: #3b2a05;
-        color: #fef3c7;
-      }
-      .status-banner[data-state='partial']::before,
-      .status-banner[data-state='unauthorized']::before,
-      .status-banner[data-state='offline']::before {
-        content: '\26a0\00a0\00a0';
-        content: '\26a0\00a0\00a0' / '';
-      }
-      .status-banner[data-state='fail'],
-      .status-banner[data-state='error'],
-      .status-banner[data-state='unavailable'] {
-        border-color: #f87171;
-        background-color: #3f1219;
-        color: #fee2e2;
-      }
-      .status-banner[data-state='fail']::before,
-      .status-banner[data-state='error']::before,
-      .status-banner[data-state='unavailable']::before {
-        content: '\2715\00a0\00a0';
-        content: '\2715\00a0\00a0' / '';
-      }
-    </style>
+    <link rel="stylesheet" href="/theme.css" />
   </head>
-  <body class="bg-slate-900 text-white min-h-screen">
-    <div class="max-w-md mx-auto px-4 pb-8">
-      <header class="py-4 flex items-center justify-between border-b border-slate-700">
-        <div class="flex items-center gap-2">
-          <a
-            href="/"
-            class="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 transition text-base"
-            aria-label="Back to Sales Dashboard"
-          >←</a>
-          <div>
-            <p class="text-xs uppercase tracking-wide text-slate-400">Read-only check</p>
-            <h1 class="text-lg font-bold">Price Check</h1>
+  <body class="app">
+    <!-- Wide screens: app bar with the page links. Phones use the back button below. -->
+    <header class="app-bar desktop-only">
+      <div class="app-bar-inner">
+        <a class="brand" href="/" aria-label="Wanson Companies dashboard">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 20v-8" />
+              <path d="M12 20V5" />
+              <path d="M19 20v-5" />
+            </svg>
+          </span>
+          <span class="brand-name">Wanson Companies</span>
+        </a>
+        <nav class="app-nav" aria-label="Main">
+          <a href="/">Dashboard</a>
+          <a href="/today-invoices.html">Today's Invoices</a>
+          <a href="/dispatch.html">Delivery Dispatch</a>
+          <a href="/price-check.html" aria-current="page">Price Check</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      <div class="page-heading">
+        <a
+          href="/"
+          class="back-btn mobile-only min-h-[44px] min-w-[44px]"
+          aria-label="Back to Sales Dashboard"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 19l-7-7 7-7" />
+          </svg>
+        </a>
+        <div class="min-w-0">
+          <p class="eyebrow">Read-only check</p>
+          <h1 class="page-title">Price Check</h1>
+        </div>
+        <div id="priceCheckOnline" class="page-note ml-auto">Fresh on demand</div>
+      </div>
+
+      <div class="pc-layout">
+        <section class="panel panel-pad" aria-label="Price check controls">
+          <label class="field-label" for="priceCheckRange">Monitored window</label>
+          <div class="flex items-center gap-2">
+            <!-- 16px text on the select stops iOS Safari zooming the page when it is tapped. -->
+            <select id="priceCheckRange" class="field min-h-[44px] flex-1 min-w-0 text-base">
+              <option value="today" selected>Today</option>
+              <option value="seven_days">Last 7 days</option>
+            </select>
+            <button
+              id="priceCheckRefresh"
+              type="button"
+              class="btn btn-primary min-h-[44px] shrink-0"
+            >Refresh now</button>
           </div>
-        </div>
-        <div id="priceCheckOnline" class="text-xs text-slate-400">Fresh on demand</div>
-      </header>
+          <p id="priceCheckStatus" role="status" aria-live="polite" data-state="loading" class="status-banner mt-4 text-[15px]">Loading price check…</p>
+          <div id="priceCheckCoverage" class="pc-sources mt-2" aria-live="polite"></div>
+          <div class="pc-times">
+            <span id="priceCheckScannedAt">Scanned: —</span>
+            <span id="priceCheckWindow">Window: —</span>
+          </div>
+          <div id="priceCheckCounts" class="mt-4"></div>
+        </section>
 
-      <section class="panel mt-4 p-3">
-        <label class="block text-xs text-slate-400" for="priceCheckRange">Monitored window</label>
-        <div class="mt-1 flex items-center gap-2">
-          <!-- 16px text on the select stops iOS Safari zooming the page when it is tapped. -->
-          <select id="priceCheckRange" class="min-h-[44px] flex-1 text-base bg-slate-900 border border-slate-600 rounded-lg px-3">
-            <option value="today" selected>Today</option>
-            <option value="seven_days">Last 7 days</option>
-          </select>
-          <button
-            id="priceCheckRefresh"
-            type="button"
-            class="min-h-[44px] rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 px-5 text-sm font-semibold text-white transition"
-          >Refresh now</button>
-        </div>
-        <p id="priceCheckStatus" role="status" aria-live="polite" data-state="loading" class="status-banner mt-3 text-sm font-semibold">Loading price check…</p>
-        <div id="priceCheckCoverage" class="mt-2 text-xs text-slate-400" aria-live="polite"></div>
-        <div class="mt-1 flex flex-wrap justify-between gap-1 text-xs text-slate-400">
-          <span id="priceCheckScannedAt">Scanned: —</span>
-          <span id="priceCheckWindow">Window: —</span>
-        </div>
-        <div id="priceCheckCounts" class="mt-3"></div>
-      </section>
+        <section id="priceCheckResultView">
+          <div id="priceCheckList" class="space-y-3" aria-live="polite"></div>
+        </section>
+      </div>
 
-      <section id="priceCheckResultView" class="mt-4">
-        <div id="priceCheckList" class="space-y-2" aria-live="polite"></div>
-      </section>
-
-      <p class="mt-6 text-xs text-slate-400">
+      <p class="pc-footnote">
         Read-only alert only. It never blocks, approves, amends, or submits an invoice, and it keeps no alert history.
       </p>
-    </div>
+    </main>
 
     <script>
       /* =========================================================================
@@ -245,21 +200,21 @@
         var name = escapeHtml(text(source && source.companyName, 'Unknown company'));
         var ok = Boolean(source && source.ok);
         var label = ok ? 'Verified' : 'Unavailable';
-        var tone = ok ? 'text-emerald-400' : 'text-red-400';
-        var html = '<div class="py-1.5">'
+        var tone = ok ? 'c-pos' : 'c-neg';
+        var html = '<div class="row-line py-2">'
           + '<div class="flex items-center justify-between gap-2">'
-          + '<span class="min-w-0 break-words text-slate-300">' + name + '</span>'
-          + '<span class="shrink-0 font-semibold ' + tone + '">' + label + '</span>'
+          + '<span class="min-w-0 break-words c-ink">' + name + '</span>'
+          + '<span class="shrink-0 font-extrabold ' + tone + '">' + label + '</span>'
           + '</div>';
         if (!ok) {
-          var code = source && source.code ? ' <span class="text-slate-400">(' + escapeHtml(source.code) + ')</span>' : '';
-          html += '<div class="text-red-300">' + escapeHtml(sourceReason(source && source.code)) + code + '</div>';
+          var code = source && source.code ? ' <span class="c-muted">(' + escapeHtml(source.code) + ')</span>' : '';
+          html += '<div class="c-neg text-[13px]">' + escapeHtml(sourceReason(source && source.code)) + code + '</div>';
           var details = describeDetail(source || {});
-          if (details) html += '<div class="text-slate-400">Details: ' + escapeHtml(details) + '</div>';
+          if (details) html += '<div class="c-muted text-[13px]">Details: ' + escapeHtml(details) + '</div>';
         } else if (source && source.strategy === 'windowed') {
-          html += '<div class="text-slate-400">AutoCount\'s invoice list was inconsistent when read page by page, so it was read again in smaller date ranges and re-checked.</div>';
+          html += '<div class="c-muted text-[13px]">AutoCount\'s invoice list was inconsistent when read page by page, so it was read again in smaller date ranges and re-checked.</div>';
         } else if (source && isCount(source.attempts) && source.attempts > 1) {
-          html += '<div class="text-slate-400">The first read was inconsistent, so it was repeated once.</div>';
+          html += '<div class="c-muted text-[13px]">The first read was inconsistent, so it was repeated once.</div>';
         }
         return html + '</div>';
       }
@@ -278,18 +233,18 @@
         var cancelled = Number(data.skippedVoid) || 0;
         var unreadable = (Number(data.skippedInvalidLine) || 0) + (Number(data.skippedInvalidInvoice) || 0);
         var cells = [
-          ['Price changes', price, 'text-red-400'],
-          ['UOM changes', uom, 'text-amber-400'],
-          ['No history', noHistory, 'text-slate-300'],
-          ['Not approved yet', notApproved, 'text-slate-300'],
+          ['Price changes', price, ' is-rose'],
+          ['UOM changes', uom, ' is-butter'],
+          ['No history', noHistory, ''],
+          ['Not approved yet', notApproved, ''],
         ];
-        return '<div class="grid grid-cols-2 gap-2">' + cells.map(function (cell) {
-          return '<div class="bg-slate-900 rounded-lg p-2">'
-            + '<div class="text-xs text-slate-400">' + cell[0] + '</div>'
-            + '<div class="text-lg font-bold ' + cell[2] + '">' + cell[1] + '</div>'
+        return '<div class="count-grid">' + cells.map(function (cell) {
+          return '<div class="count-cell' + cell[2] + '">'
+            + '<div class="count-label">' + cell[0] + '</div>'
+            + '<div class="count-value">' + cell[1] + '</div>'
             + '</div>';
         }).join('') + '</div>'
-          + '<p class="mt-2 text-xs text-slate-400">Cancelled: ' + cancelled
+          + '<p class="mt-3 text-[13px] c-muted">Cancelled: ' + cancelled
           + ' · Unreadable rows: ' + unreadable
           + '. Invoices not approved yet are only checked after approval.</p>';
       }
@@ -360,23 +315,22 @@
             + (alert.differencePercent != null && alert.differencePercent !== ''
               ? ' (' + escapeHtml(alert.differencePercent) + '%)'
               : '');
-        return '<article class="panel" data-alert-card>'
-          + '<button type="button" data-alert-toggle aria-expanded="false" class="w-full min-h-[44px] p-3 text-left">'
-          + '<span class="flex items-start justify-between gap-2">'
-          + '<span class="min-w-0">'
-          + '<span class="block text-sm font-semibold text-white truncate">' + escapeHtml(text(alert.itemCode, 'Unknown item')) + '</span>'
-          + '<span class="flex gap-1 text-xs text-slate-400">'
-          + '<span class="min-w-0 truncate">' + escapeHtml(text(alert.customerName, 'Unknown customer')) + '</span>'
+        return '<article class="panel alert-card" data-alert-card>'
+          + '<button type="button" data-alert-toggle aria-expanded="false" class="alert-head min-h-[44px]">'
+          + '<span class="alert-id">'
+          + '<span class="alert-item">' + escapeHtml(text(alert.itemCode, 'Unknown item')) + '</span>'
+          + '<span class="alert-who">'
+          + '<span class="min-w-0 break-words">' + escapeHtml(text(alert.customerName, 'Unknown customer')) + '</span>'
           + '<span class="shrink-0">· ' + escapeHtml(text(alert.docNo, '—')) + '</span>'
           + '</span>'
           + '</span>'
-          + '<span class="shrink-0 text-xs font-semibold ' + (isUom ? 'text-amber-400' : 'text-red-400') + '">'
+          + '<span class="pill alert-pill ' + (isUom ? 'pill-butter' : 'pill-rose') + '">'
           + (isUom ? 'UOM CHANGED' : 'PRICE CHANGED') + '</span>'
-          + '</span>'
-          + '<span class="mt-1 block text-sm text-slate-100">' + buildChangeSummary(alert) + '</span>'
-          + '<span class="mt-0.5 block text-xs text-slate-400">' + escapeHtml(shortCompany(alert.companyName)) + ' · ' + escapeHtml(text(alert.docDate, '—')) + '</span>'
+          + '<span class="alert-move">' + buildChangeSummary(alert) + '</span>'
+          + '<span class="alert-meta">' + escapeHtml(shortCompany(alert.companyName)) + ' · ' + escapeHtml(text(alert.docDate, '—')) + '</span>'
+          + '<svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 9l-7 7-7-7"></path></svg>'
           + '</button>'
-          + '<div data-alert-detail class="hidden px-3 pb-3 text-xs text-slate-300 space-y-0.5">'
+          + '<div data-alert-detail class="alert-detail hidden">'
           + '<div>Company: ' + escapeHtml(text(alert.companyName, 'Unknown company')) + '</div>'
           + '<div>Invoice: ' + escapeHtml(text(alert.docNo, '—')) + ' · ' + escapeHtml(text(alert.docDate, '—')) + '</div>'
           + '<div>Customer: ' + escapeHtml(text(alert.customerCode, '—')) + ' · ' + escapeHtml(text(alert.customerName, '—')) + '</div>'
@@ -391,7 +345,7 @@
 
       function renderCoverage(sources) {
         var list = Array.isArray(sources) ? sources : [];
-        if (!list.length) return '<span class="text-slate-400">No source coverage reported.</span>';
+        if (!list.length) return '<span class="c-muted">No source coverage reported.</span>';
         return list.map(buildSourceLine).join('');
       }
 
@@ -454,7 +408,7 @@
           if (alerts.length) {
             $('priceCheckList').innerHTML = sortAlerts(alerts).map(buildAlertCard).join('');
           } else if (data.status === 'PASS') {
-            $('priceCheckList').innerHTML = '<div class="panel p-3 text-sm text-slate-300">No price differences in the monitored window.</div>';
+            $('priceCheckList').innerHTML = '<div class="panel panel-pad text-sm c-ink">No price differences in the monitored window.</div>';
           } else {
             $('priceCheckList').innerHTML = '';
           }
@@ -477,7 +431,7 @@
         clearResults();
         setStatus('unauthorized', 'UNAUTHORIZED · Sign in on the dashboard first');
         if ($('priceCheckList')) {
-          $('priceCheckList').innerHTML = '<div class="panel p-3 text-sm text-slate-300">Sign in at the top of the dashboard, then return here. <a href="/" class="text-emerald-400 underline">Back to dashboard</a></div>';
+          $('priceCheckList').innerHTML = '<div class="panel panel-pad text-sm c-ink">Sign in at the top of the dashboard, then return here. <a href="/" class="c-link font-bold underline">Back to dashboard</a></div>';
         }
         showResult();
       }
@@ -547,6 +501,8 @@
         if (!detail) return;
         var expanded = !detail.classList.toggle('hidden');
         toggle.setAttribute('aria-expanded', String(expanded));
+        var chevron = toggle.querySelector ? toggle.querySelector('.chev') : null;
+        if (chevron && chevron.classList) chevron.classList.toggle('rotate-180', expanded);
       }
 
       function bindEvents() {

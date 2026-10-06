@@ -11,7 +11,7 @@ Beyond the dashboard home page the app ships Delivery Dispatch, Price Check, Tod
 - **Middleware:** Node.js serverless functions in `api/` (Vercel, no Express).
 - **AutoCount access:** `axios` + `lossless-json` through `lib/autocount/client.js`.
 - **Dispatch persistence:** PostgreSQL via `pg`; schema in `db/migrations/`.
-- **Frontend:** static HTML5 + Tailwind CSS (CDN) + Chart.js; no build step.
+- **Frontend:** static HTML5 + Tailwind CSS (CDN, spacing and layout helpers) + `public/theme.css` (all colours and components); no build step. Charts are plain HTML/CSS (no Chart.js).
 - **PWA:** `public/manifest.json` plus a versioned service worker cache.
 - **Auth:** clerk ID + PIN session cookie. The home page shows a sign-in screen (browser-side only) and `/api/price-check` enforces a real clerk session on the server. `/api/sales` (home page and Today's Invoices) has no server-side login check, and dispatch honours `DISPATCH_PUBLIC_ACCESS`. The owner accepts this (one sign-in on the home page, not a login on every page), so do not add logins elsewhere without asking.
 
@@ -26,7 +26,7 @@ autocount-pwa-dashboard/
 │   ├── dispatch/        # auth, invoice adapter, loading sheet, repository, service
 │   └── price-check/     # invoice source and price comparison
 ├── public/              # index.html, dispatch.*, loading-sheet.*, price-check.html,
-│                        # today-invoices.html, sw.js, manifest.json, icons/
+│                        # today-invoices.html, theme.css, fonts/, sw.js, manifest.json, icons/
 ├── db/migrations/       # delivery dispatch schema (001-005)
 ├── scripts/             # migrate.js, migrate-preflight.js, remediate-legacy-quantities.js
 ├── test/                # node:test suites, fixtures, Playwright e2e
@@ -59,8 +59,11 @@ autocount-pwa-dashboard/
 
 ## Conventions
 
+- UI: colours and components come from `public/theme.css` (tokens in `:root`); `dispatch.css` and `loading-sheet.css` alias the same tokens. Do not add colour utility classes (`text-slate-*`, `bg-*`) or hard-coded hex values to pages. Keep text at least 12px, tap targets at least 44px, text contrast at least 4.5:1 (see README "Look and feel"), and carry status in text, not colour alone.
+- Layout: phone layout below 960px, desktop from 960px (`.desktop-only` / `.mobile-only`, app bar from `.app-bar`). Every page must work at 390px and 1440px with no sideways scroll; `test/e2e/responsive-layout.spec.js` checks both.
+- The pages must stay usable when the Tailwind CDN script cannot load (offline first visit): keep `.hidden`, box sizing and key layout in `theme.css`, not only in Tailwind classes.
 - Tests first: `node:test` suites live in `api/*.test.js` and `test/*.test.mjs`; Playwright specs in `test/e2e/`.
-- Changing any cached static asset requires bumping `CACHE_NAME` in `public/sw.js` and the expectations in `test/service-worker.test.mjs` and `test/price-check-ui.test.mjs`.
+- Changing any cached static asset (including `theme.css` and the font) requires bumping `CACHE_NAME` in `public/sw.js` and the expectations in `test/service-worker.test.mjs` and `test/price-check-ui.test.mjs`.
 - Money and quantity values round to 2 decimals at output; keep AutoCount decimal strings exact inside adapters.
 - Never commit `.env`, `.env.local`, or credentials; `.env.example` is the contract.
 - Merging to `main` deploys to Production by itself: the Vercel Production Branch is `main` (it was `master` before, which is why merges once did nothing). PRs and other branches only get protected previews. Open PRs against `main`; GitHub's default-branch setting may still say `master`, which is stale. Confirm a deploy with `/version.json` (`target` is `production`, `commit` is the merge commit).

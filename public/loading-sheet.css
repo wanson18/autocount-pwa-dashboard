@@ -1,17 +1,17 @@
 :root {
-  color-scheme: dark;
-  --page: #0f172a;
-  --panel: #1e293b;
-  --panel-raised: #243247;
-  --border: #334155;
-  --border-light: #64748b;
-  --text: #f8fafc;
-  --muted: #cbd5e1;
-  --faint: #94a3b8;
-  --blue: #2563eb;
-  --blue-soft: rgba(59, 130, 246, 0.18);
-  --green-soft: rgba(34, 197, 94, 0.16);
-  --purple-soft: rgba(168, 85, 247, 0.18);
+  color-scheme: light;
+  --page: var(--ground);
+  --panel: var(--card);
+  --panel-raised: var(--card);
+  --border: var(--line);
+  --border-light: var(--line-strong);
+  --text: var(--ink);
+  --muted: var(--ink-2);
+  --faint: var(--ink-3);
+  --blue: var(--primary);
+  --blue-soft: var(--sky);
+  --green-soft: var(--mint);
+  --purple-soft: var(--lilac);
 }
 
 *,
@@ -33,7 +33,7 @@ body {
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   background: var(--page);
   color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font);
   line-height: 1.45;
 }
 
@@ -45,7 +45,7 @@ a {
 
 button:focus-visible,
 a:focus-visible {
-  outline: 3px solid #93c5fd;
+  outline: 3px solid var(--primary-ink);
   outline-offset: 2px;
 }
 
@@ -85,21 +85,21 @@ button:disabled {
 
 .loading-back {
   margin-bottom: 8px;
-  color: #bfdbfe;
-  font-size: 0.78rem;
+  color: var(--primary-ink);
+  font-size: 0.875rem;
   font-weight: 700;
   text-decoration: none;
 }
 
 .loading-back:hover {
-  color: white;
+  color: var(--ink);
   text-decoration: underline;
 }
 
 .eyebrow {
   margin: 0;
   color: var(--faint);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -114,18 +114,19 @@ p {
 
 h1 {
   margin-bottom: 0;
-  font-size: clamp(1.2rem, 3vw, 1.7rem);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 800;
   line-height: 1.15;
 }
 
 h2 {
   margin-bottom: 0;
-  font-size: 1.05rem;
+  font-size: 1.125rem;
 }
 
 h3 {
   margin-bottom: 0;
-  font-size: 0.88rem;
+  font-size: 0.9375rem;
 }
 
 .sheet-controls {
@@ -139,36 +140,36 @@ h3 {
   min-height: 44px;
   padding: 8px 13px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   font-weight: 800;
 }
 
 .primary-button {
   background: var(--blue);
-  color: white;
+  color: #fff;
 }
 
 .secondary-button {
-  border-color: var(--border-light);
-  background: var(--panel-raised);
-  color: #dbeafe;
+  border-color: var(--sky-line);
+  background: var(--sky);
+  color: var(--sky-ink);
 }
 
 .loading-state {
   min-height: 24px;
   margin: 16px 0;
-  color: #fde68a;
-  font-size: 0.8rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
 }
 
 .loading-state.is-error {
   padding: 11px 13px;
-  border: 1px solid rgba(248, 113, 113, 0.42);
-  border-radius: 9px;
-  background: rgba(127, 29, 29, 0.2);
-  color: #fecaca;
+  border: 1px solid var(--rose-line);
+  border-radius: 12px;
+  background: var(--rose);
+  color: var(--rose-ink);
 }
 
 .sheet-content {
@@ -180,9 +181,9 @@ h3 {
   min-width: 0;
   padding: 18px;
   border: 1px solid var(--border);
-  border-radius: 13px;
+  border-radius: 18px;
   background: var(--panel);
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.16);
+  box-shadow: var(--shadow);
 }
 
 .sheet-panel-heading {
@@ -197,8 +198,8 @@ h3 {
   padding: 5px 9px;
   border-radius: 999px;
   background: var(--green-soft);
-  color: #bbf7d0;
-  font-size: 0.68rem;
+  color: var(--mint-ink);
+  font-size: 0.75rem;
   font-weight: 800;
   text-transform: capitalize;
 }
@@ -213,14 +214,14 @@ h3 {
   min-width: 0;
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 9px;
-  background: rgba(15, 23, 42, 0.45);
+  border-radius: 12px;
+  background: var(--ground);
 }
 
 .summary-cell dt {
   margin-bottom: 3px;
   color: var(--faint);
-  font-size: 0.64rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -228,8 +229,8 @@ h3 {
 .summary-cell dd {
   overflow: hidden;
   margin: 0;
-  color: white;
-  font-size: 0.8rem;
+  color: var(--ink);
+  font-size: 0.9375rem;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -238,7 +239,7 @@ h3 {
 .route-notes {
   margin: 14px 0 0;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.875rem;
   white-space: pre-wrap;
 }
 
@@ -250,7 +251,7 @@ h3 {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.76rem;
+  font-size: 0.9375rem;
 }
 
 th,
@@ -263,13 +264,13 @@ td {
 
 th {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 td {
-  color: #e2e8f0;
+  color: var(--ink);
 }
 
 .items-table th:not(:nth-child(2)),
@@ -283,7 +284,7 @@ td {
 }
 
 .quantity-total {
-  color: white;
+  color: var(--ink);
   font-weight: 800;
 }
 
@@ -293,19 +294,19 @@ td {
   align-items: center;
   padding: 4px 8px;
   border-radius: 999px;
-  font-size: 0.63rem;
+  font-size: 0.75rem;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .company-badge.enterprise {
   background: var(--blue-soft);
-  color: #bfdbfe;
+  color: var(--sky-ink);
 }
 
 .company-badge.sdn-bhd {
   background: var(--purple-soft);
-  color: #e9d5ff;
+  color: var(--lilac-ink);
 }
 
 .checklist-table td:first-child {
@@ -324,11 +325,11 @@ td {
 .audit-time {
   display: block;
   color: var(--faint);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .customer-name {
-  color: white;
+  color: var(--ink);
   font-weight: 700;
 }
 
@@ -337,7 +338,7 @@ td {
   align-items: center;
   gap: 8px;
   color: var(--faint);
-  font-size: 0.72rem;
+  font-size: 0.875rem;
   white-space: nowrap;
 }
 
@@ -360,7 +361,7 @@ td {
 .signoff-cell {
   min-width: 0;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: 0.875rem;
 }
 
 .signoff-cell .blank-line {
@@ -390,6 +391,45 @@ td {
   .signoff-grid {
     grid-template-columns: 1fr;
     gap: 14px;
+  }
+}
+
+@media print {
+  .eyebrow,
+  .trip-status,
+  .customer-code,
+  .audit-time {
+    font-size: 0.68rem;
+  }
+  .summary-cell dt {
+    font-size: 0.64rem;
+  }
+  .summary-cell dd {
+    font-size: 0.8rem;
+  }
+  .route-notes {
+    font-size: 0.78rem;
+  }
+  table {
+    font-size: 0.76rem;
+  }
+  th {
+    font-size: 0.65rem;
+  }
+  .check-field {
+    font-size: 0.72rem;
+  }
+  .signoff-cell {
+    font-size: 0.74rem;
+  }
+  .company-badge {
+    font-size: 0.63rem;
+  }
+  h1 {
+    font-size: clamp(1.2rem, 3vw, 1.7rem);
+  }
+  h2 {
+    font-size: 1.05rem;
   }
 }
 
