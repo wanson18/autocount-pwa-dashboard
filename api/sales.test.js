@@ -861,3 +861,168 @@ test('computePaymentSummary excludes unknown invoices from stillUnpaidTotal', ()
   assert.equal(summary.stillUnpaidTotal, 0);
   assert.equal(summary.unknown.total, 5000);
 });
+
+// ---------------------------------------------------------------------------
+// AutoCount listing pages that repeat invoices on large ranges (seen live on a
+// 91-day range: 9 invoices twice, 9 missing, revenue off by 1.3% with no error).
+// ---------------------------------------------------------------------------
+
+const SLICE_COMPANY = {
+  id: 'enterprise',
+  name: 'Wanson Enterprise',
+  accountBookId: '63750',
+  apiUrl: 'https://accounting-api.autocountcloud.com',
+  apiKey: 'enterprise-key',
+  keyId: 'enterprise-id',
+  credentialsConfigured: true,
+};
+
+const sliceDay = (offset) => new Date(Date.UTC(2026, 6, 8 + offset)).toISOString().slice(0, 10);
+
+function invoicesOverDays(perDay) {
+  const rows = [];
+  perDay.forEach((count, day) => {
+    for (let index = 0; index < count; index += 1) {
+      rows.push({
+        master: {
+          docKey: `KEY-${day}-${index}`,
+          docNo: `INV-${day}-${index}`,
+          docDate: sliceDay(day),
+          debtorName: 'Sample Customer',
+          cancelled: false,
+        },
+        details: [{ productCode: 'ITEM-1', qty: '1', unit: 'CTN', unitPrice: '10.00', subTotal: '10.00' }],
+      });
+    }
+  });
+  return rows;
+}
+
+// A fake AutoCount: answers by date range with 100-row pages. `unstablePaging`
+// orders every page after the first differently from page 1, so pages overlap.
+function fakeAutoCount(invoices, { unstablePaging = false, endExclusive = false, dropTrailingRows = 0 } = {}) {
+  let active = 0;
+  const client = {
+    calls: [],
+    maxActive: 0,
+    async get(_url, { params }) {
+      client.calls.push({ ...params });
+      active += 1;
+      client.maxActive = Math.max(client.maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const matching = invoices
+        .filter((row) => row.master.docDate >= params.startDate
+          && (endExclusive ? row.master.docDate < params.endDate : row.master.docDate <= params.endDate))
+        .sort((left, right) => `${left.master.docDate}${left.master.docKey}`.localeCompare(`${right.master.docDate}${right.master.docKey}`));
+      const total = matching.length;
+      let ordered = matching;
+      if (unstablePaging && params.page > 1 && total > 0) {
+        ordered = matching.map((_, index) => matching[(index - 13 * (params.page - 1) + total * 100) % total]);
+      }
+      if (dropTrailingRows) ordered = ordered.slice(0, Math.max(0, ordered.length - dropTrailingRows));
+      return { status: 200, data: { data: ordered.slice((params.page - 1) * 100, params.page * 100), totalCount: total } };
+    },
+  };
+  return client;
+}
+
+const MIXED_DAYS = Array.from({ length: 91 }, (_, day) => (day === 40 ? 60 : 6 + ((day * 7) % 23)));
+const keysOf = (rows) => rows.map((row) => row.master.docKey).sort();
+
+test('fetchAllInvoices returns every invoice exactly once when AutoCount pages repeat invoices', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  assert.ok(invoices.length > 1000, 'fixture must span many pages');
+  const httpClient = fakeAutoCount(invoices, { unstablePaging: true });
+
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+
+  assert.ok(Array.isArray(result), 'a verified result, not null');
+  assert.equal(result.length, invoices.length);
+  assert.deepEqual(keysOf(result), keysOf(invoices));
+  assert.ok(
+    httpClient.calls.some((call) => call.startDate !== sliceDay(0) || call.endDate !== sliceDay(90)),
+    'the range was re-read in narrower date slices',
+  );
+  assert.ok(httpClient.maxActive <= 3, `at most 3 requests at once, saw ${httpClient.maxActive}`);
+});
+
+test('fetchAllInvoices reads a stable AutoCount page by page and makes no extra requests', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  const httpClient = fakeAutoCount(invoices);
+
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+
+  assert.deepEqual(keysOf(result), keysOf(invoices));
+  const pages = Math.ceil(invoices.length / 100);
+  assert.deepEqual(httpClient.calls.map((call) => call.page), Array.from({ length: pages }, (_, index) => index + 1));
+  assert.ok(httpClient.calls.every((call) => call.startDate === sliceDay(0) && call.endDate === sliceDay(90)));
+});
+
+test('fetchAllInvoices does not accept a list whose rows do not add up to the reported total', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  // AutoCount reports N invoices but silently stops short of the last 5, on every kind of read.
+  const httpClient = fakeAutoCount(invoices, { dropTrailingRows: 5 });
+
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+
+  assert.equal(result, null, 'an unprovable result becomes "unavailable", never a wrong total');
+});
+
+test('fetchAllInvoices refuses date slices that do not add up to the overall total', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  const httpClient = fakeAutoCount(invoices, { unstablePaging: true, endExclusive: true });
+
+  assert.equal(await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient), null);
+});
+
+test('loadCompanyInvoices still reports the book unavailable when no proven list can be read', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  const httpClient = fakeAutoCount(invoices, { dropTrailingRows: 5 });
+
+  const result = await loadCompanyInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, false, {
+    httpClient,
+    getProduct: async () => ({}),
+  });
+
+  assert.equal(result.status, 'error');
+  assert.equal(result.error, 'AutoCount API unavailable');
+  assert.deepEqual(result.invoices, []);
+});
+
+test('loadCompanyInvoices returns the full, verified list for a long range with unstable pages', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  const httpClient = fakeAutoCount(invoices, { unstablePaging: true });
+
+  const result = await loadCompanyInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, false, {
+    httpClient,
+    getProduct: async () => ({}),
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.invoices.length, invoices.length);
+  assert.equal(new Set(result.invoices.map((invoice) => invoice.docNo)).size, invoices.length, 'no invoice counted twice');
+});
+
+test('fetchAllInvoices accepts a list when an invoice is saved while the pages are being read', async () => {
+  const invoices = invoicesOverDays(MIXED_DAYS);
+  const newest = invoices[invoices.length - 1];
+  const extra = { ...newest, master: { ...newest.master, docKey: 'KEY-late', docNo: 'INV-late', docDate: sliceDay(90) } };
+  const base = fakeAutoCount(invoices);
+  let requests = 0;
+  const httpClient = {
+    calls: base.calls,
+    async get(url, options) {
+      requests += 1;
+      // From the second request on, AutoCount also lists the newly saved invoice (last in order).
+      if (requests === 2) invoices.push(extra);
+      return base.get(url, options);
+    },
+  };
+
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+
+  assert.ok(Array.isArray(result));
+  assert.equal(result.length, invoices.length);
+  assert.deepEqual(httpClient.calls.map((call) => call.page), httpClient.calls.map((_, index) => index + 1), 'no slice re-read was needed');
+});

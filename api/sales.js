@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const { AutoCountClient } = require('../lib/autocount/client');
+const { readDocKey, readInvoiceRange } = require('../lib/autocount/invoice-reader');
 // Vercel dev does not consistently inject `.env.local` into plain Node
 // serverless functions, so load the local override explicitly before `.env`.
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
@@ -106,6 +107,47 @@ function getCompanyConfigs(env = process.env) {
   });
 }
 
+// AutoCount's invoice listing pages can repeat invoices on large date ranges,
+// which also pushes other invoices out of the list: on a live 91-day range, 9
+// invoices came back twice and 9 were missing, silently skewing every total. When
+// AutoCount reports a totalCount, the rows must add up to it with no invoice
+// repeated. Returns why the rows cannot be trusted, or null when they add up or
+// cannot be checked (AutoCount reported no totalCount).
+function listingProblem(rows, reportedTotal) {
+  if (!Number.isSafeInteger(reportedTotal)) return null;
+  if (rows.length !== reportedTotal) return 'row count does not match totalCount';
+  const seen = new Set();
+  for (const row of rows) {
+    const docKey = readDocKey(row);
+    if (docKey === null) continue;
+    if (seen.has(docKey)) return 'an invoice is listed twice';
+    seen.add(docKey);
+  }
+  return null;
+}
+
+// Re-reads the range in date slices that each fit on one page, so AutoCount
+// never has to order rows across pages. Throws unless completeness is proven.
+async function readInvoicesInDateSlices(url, company, startDate, endDate, httpClient) {
+  const listPage = async ({ page, startDate: from, endDate: to }) => {
+    const response = await httpClient.get(url, {
+      headers: getHeaders(company),
+      timeout: 15000,
+      params: { page, startDate: from, endDate: to },
+    });
+    if (response.status !== 200) throw new Error(`AutoCount listing returned HTTP ${response.status}`);
+    return response.data;
+  };
+  const { rows } = await readInvoiceRange({
+    listPage,
+    accountBookId: company.accountBookId,
+    startDate,
+    endDate,
+    strategy: 'windowed',
+  });
+  return rows;
+}
+
 async function fetchAllInvoices(startDate, endDate, company, httpClient = axios) {
   const baseUrl = (company?.apiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
   const accountBookId = company?.accountBookId;
@@ -116,11 +158,12 @@ async function fetchAllInvoices(startDate, endDate, company, httpClient = axios)
   }
 
   const allInvoices = [];
+  const url = `${baseUrl}/${accountBookId}/invoice/listing`;
   let page = 1;
+  let reportedTotal = null;
 
   try {
     while (true) {
-      const url = `${baseUrl}/${accountBookId}/invoice/listing`;
       const response = await httpClient.get(url, {
         headers: getHeaders(company),
         timeout: 15000,
@@ -131,6 +174,9 @@ async function fetchAllInvoices(startDate, endDate, company, httpClient = axios)
       if (response.status !== 200 || !pageData) return null;
 
       allInvoices.push(...pageData);
+      // The latest total, so an invoice saved while pages are being read does
+      // not make a consistent list look broken.
+      if (typeof response.data.totalCount === 'number') reportedTotal = response.data.totalCount;
       if (pageData.length === 0) break;
 
       const totalCount = Number(response.data.totalCount);
@@ -141,6 +187,16 @@ async function fetchAllInvoices(startDate, endDate, company, httpClient = axios)
 
       page += 1;
       if (page > 100) throw new Error(`AutoCount pagination exceeded 100 pages for ${company.name}`);
+    }
+
+    const problem = listingProblem(allInvoices, reportedTotal);
+    if (problem) {
+      console.error(
+        `AutoCount ${company.name} listing for ${startDate} to ${endDate} cannot be trusted (${problem}); re-reading in date slices`,
+      );
+      const verified = await readInvoicesInDateSlices(url, company, startDate, endDate, httpClient);
+      console.log(`Fetched ${verified.length} invoices for ${startDate} to ${endDate} (verified in date slices)`);
+      return verified;
     }
 
     console.log(`Fetched ${allInvoices.length} invoices for ${startDate} to ${endDate}`);
