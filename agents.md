@@ -44,6 +44,7 @@ autocount-pwa-dashboard/
   - If the product lookup fails, or a unit has no MultiPack that explains it, leave that SKU's quantities raw rather than guessing.
   - `totalCost` stays priced per raw invoice unit.
 - Cancelled invoices are excluded. `USE_MOCK_DATA=true` serves `api/mock-sales.json` for Enterprise only.
+- Invoice reads are verified (`lib/autocount/invoice-reader.js`, shared with Price Check). AutoCount's page-by-page listing can repeat invoices on large ranges (live, 91 days: 9 invoices twice, 9 missing, revenue about 1.3% off, no error). After the normal read, `fetchAllInvoices` checks that the rows equal `totalCount` with no repeated `docKey`; if not, it re-reads in date slices, and if completeness still cannot be proven it returns `null` (the book shows as unavailable) rather than wrong totals. Never loosen this check to make a range load.
 
 ## Delivery Dispatch UOM Rule (contrast)
 
@@ -52,7 +53,7 @@ autocount-pwa-dashboard/
 ## Price Check Rules (`api/price-check.js`, `lib/price-check/`)
 
 - Read-only and protected: it needs a real signed clerk session (`verifySessionCookie`), never the synthetic public-dispatch session, and every response is `no-store`.
-- Each book is read page by page first. AutoCount's paging returned repeated invoices on large date ranges, so a duplicate document, a changing total, or a short or long list triggers one re-read in date slices that each fit on one page. Both reads must prove completeness (no document twice, slice totals equal to the overall total). Never relax these checks to make a failing book pass; fail the book instead.
+- Each book is read page by page first (shared reader: `lib/autocount/invoice-reader.js`). AutoCount's paging returned repeated invoices on large date ranges, so a duplicate document, a changing total, or a short or long list triggers one re-read in date slices that each fit on one page. Both reads must prove completeness (no document twice, slice totals equal to the overall total). Never relax these checks to make a failing book pass; fail the book instead.
 - `counts.skipped*` describe the monitored window only, not the 90-day history baseline.
 - A failed book is `PARTIAL`, never an empty success. Failure details are integers and booleans only (no invoice or customer data).
 
