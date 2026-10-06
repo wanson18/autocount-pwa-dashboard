@@ -249,7 +249,7 @@ export function renderLorryBoard(root, state, { resources = { drivers: [], lorri
   const lanes = getLorryLanes(state, resources);
   board.innerHTML = lanes.length
     ? lanes.map((lane) => renderLorryLane(state, lane, { resources, writesEnabled })).join('')
-    : '<div class="empty-dropzone">No active lorries registered. Add a lorry in Resources to start planning trips.</div>';
+    : '<div class="empty-dropzone">No trips yet. Use + New trip to add a lorry.</div>';
 }
 
 export function renderDispatchBoard(root, state, { writesEnabled = true, resources = { drivers: [], lorries: [] } } = {}) {

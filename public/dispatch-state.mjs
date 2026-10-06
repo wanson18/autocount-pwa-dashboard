@@ -341,7 +341,6 @@ export function getLorryLanes(state, resources = {}) {
     if (!lanes.has(key)) lanes.set(key, { lorry, trips: [] });
     return lanes.get(key);
   };
-  for (const lorry of resources.lorries || []) registerLorry(lorry);
   for (const trip of state.trips) {
     const tripLorryId = lorryIdOf(trip);
     const tripRegistrationNo = trip.lorry?.registrationNo || trip.registrationNo || '';

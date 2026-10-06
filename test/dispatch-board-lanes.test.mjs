@@ -51,14 +51,15 @@ const tripWithLorry = {
   invoiceKeys: [],
 };
 
-test('getLorryLanes keeps every active lorry as a permanent lane, even with no trip', () => {
+test('getLorryLanes shows only lorries that have a trip, never the idle ones', () => {
   const state = createDispatchState({ trips: [] });
 
   const lanes = getLorryLanes(state, { drivers, lorries });
 
-  assert.deepEqual(lanes.map((lane) => lane.lorry.id), [2, 3]);
-  assert.equal(lanes[0].trips.length, 0);
-  assert.equal(lanes[1].trips.length, 0);
+  assert.deepEqual(lanes, []);
+
+  const withTrip = getLorryLanes(createDispatchState({ trips: [tripWithLorry] }), { drivers, lorries });
+  assert.deepEqual(withTrip.map((lane) => lane.lorry.id), [2]);
 });
 
 test('getLorryLanes groups trips under their lorry and keeps mixed-company identity', () => {
@@ -139,9 +140,9 @@ test('renderLorryLane uses exact trip driver controls when a lorry has multiple 
   assert.match(markup, /Choose a driver on each trip below/);
 });
 
-test('renderLorryLane offers a start-trip control for an empty permanent lorry lane', () => {
+test('renderLorryLane offers a start-trip control for a lane without trips', () => {
   const state = createDispatchState({ trips: [] });
-  const lane = getLorryLanes(state, { drivers, lorries }).find((candidate) => candidate.lorry.id === 3);
+  const lane = { lorry: lorries.find((candidate) => candidate.id === 3), trips: [] };
 
   const markup = renderLorryLane(state, lane, { resources: { drivers, lorries }, writesEnabled: true });
 
