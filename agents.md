@@ -13,7 +13,7 @@ Beyond the dashboard home page the app ships Delivery Dispatch, Price Check, Tod
 - **Dispatch persistence:** PostgreSQL via `pg`; schema in `db/migrations/`.
 - **Frontend:** static HTML5 + Tailwind CSS (CDN) + Chart.js; no build step.
 - **PWA:** `public/manifest.json` plus a versioned service worker cache.
-- **Auth:** clerk ID + PIN session cookie gates the dashboard and `/api/price-check`; dispatch honours `DISPATCH_PUBLIC_ACCESS`.
+- **Auth:** clerk ID + PIN session cookie. The home page shows a sign-in screen (browser-side only) and `/api/price-check` enforces a real clerk session on the server. `/api/sales` (home page and Today's Invoices) has no server-side login check, and dispatch honours `DISPATCH_PUBLIC_ACCESS`. The owner accepts this (one sign-in on the home page, not a login on every page), so do not add logins elsewhere without asking.
 
 ## Repository Layout
 
