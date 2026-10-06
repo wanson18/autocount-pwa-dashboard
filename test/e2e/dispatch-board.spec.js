@@ -400,14 +400,17 @@ test('a missing required source is reported as partial instead of healthy', asyn
   await expect(page.locator('#sourceStatus')).not.toContainText('sources ready');
 });
 
-test('HTTP 401 with an arbitrary body clears the Board and returns to login', async ({ page }) => {
+test('HTTP 401 with an arbitrary body clears the Board and hides the authenticated view', async ({ page }) => {
   await openBoard(page, { unauthorizedOnRefresh: true });
+  await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
 
   await page.locator('#refreshBoard').click();
 
-  await expect(page.locator('#loginView')).toBeVisible();
+  // dispatch.html has no #loginView since public-access mode (528d579), so a lost session
+  // clears the Board and hides the authenticated view instead of showing a login form.
+  await expect(page.locator('#loginView')).toHaveCount(0);
   await expect(page.locator('#authenticatedView')).toBeHidden();
-  await expect(page.locator('#loginMessage')).toContainText('session has expired');
+  await expect(page.locator('#dispatchApp')).toHaveAttribute('data-authenticated', 'false');
   await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
 });
 

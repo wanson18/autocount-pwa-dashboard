@@ -113,6 +113,13 @@ async function openDashboard(page) {
       body: JSON.stringify({ success: true, authenticated: true, session: { clerkId: 'clerk-e2e', role: 'clerk' } }),
     }),
   );
+  // The dashboard only loads sales once a clerk session exists.
+  await page.route('**/api/dispatch/session', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true, session: { clerkId: 'e2e-clerk' } }),
+    }),
+  );
   await page.route('**/api/sales**', (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify(SALES_PAYLOAD) }),
   );
