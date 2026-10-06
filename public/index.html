@@ -4,361 +4,254 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#3b82f6" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#ffffff" />
     <title>Wanson Companies — AutoCount Sales Dashboard</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="preload" href="/fonts/NunitoSans-latin.woff2" as="font" type="font/woff2" crossorigin />
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-      body {
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
-      }
-
-      /* --- Loading skeleton --- */
-      .skeleton {
-        background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
-      }
-      @keyframes shimmer {
-        0% {
-          background-position: -200% 0;
-        }
-        100% {
-          background-position: 200% 0;
-        }
-      }
-
-      /* --- Online/offline indicator --- */
-      .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-      }
-      .status-online {
-        background-color: #22c55e;
-      }
-      .status-offline {
-        background-color: #ef4444;
-      }
-
-      /* --- Repeated component styles (avoids duplicating long class lists) --- */
-      .panel {
-        background-color: #1e293b; /* slate-800 */
-        border: 1px solid #334155; /* slate-700 */
-        border-radius: 0.75rem;
-      }
-      .kpi-card {
-        padding: 1rem;
-        box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
-      }
-      .kpi-label {
-        font-size: 0.75rem;
-        color: #94a3b8; /* slate-400 */
-      }
-      .kpi-value {
-        margin-top: 0.25rem;
-        font-size: 1.25rem;
-        font-weight: 700;
-      }
-
-      .preset-btn {
-        font-size: 0.75rem;
-        padding: 0.375rem 0.75rem;
-        border-radius: 0.5rem;
-        font-weight: 500;
-        background-color: #334155; /* slate-700 */
-        color: #cbd5e1; /* slate-300 */
-        transition: background-color 0.15s ease;
-      }
-      .preset-btn:hover {
-        background-color: #475569; /* slate-600 */
-      }
-      .preset-btn.active {
-        background-color: #2563eb; /* blue-600 */
-        color: #ffffff;
-      }
-
-      .field {
-        padding: 0.375rem 0.5rem;
-        font-size: 0.75rem;
-        color: #ffffff;
-        background-color: #0f172a; /* slate-900 */
-        border: 1px solid #475569; /* slate-600 */
-        border-radius: 0.5rem;
-      }
-      .field:focus {
-        outline: none;
-        border-color: #3b82f6; /* blue-500 */
-      }
-      input[type='date']::-webkit-calendar-picker-indicator {
-        filter: invert(0.7);
-      }
-
-      .sku-row:hover {
-        background-color: #334155; /* slate-700 */
-      }
-    </style>
+    <link rel="stylesheet" href="/theme.css" />
   </head>
-  <body class="bg-slate-900 text-white min-h-screen">
-    <div class="max-w-md mx-auto px-4 pb-8">
-      <div id="dashboardLoginView" class="min-h-screen flex items-center">
-        <section class="panel w-full p-5" aria-labelledby="dashboardLoginTitle">
-          <div class="text-center mb-5">
-            <p class="text-[10px] uppercase tracking-[0.2em] text-blue-400">Wanson Companies</p>
-            <h1 id="dashboardLoginTitle" class="text-xl font-bold mt-2">Sign in to continue</h1>
-            <p class="text-xs text-slate-400 mt-2">Your clerk login protects the dashboard and invoice price checks.</p>
-          </div>
-          <form id="dashboardLoginForm" class="space-y-3" novalidate>
-            <label class="block text-xs text-slate-400" for="dashboardClerkId">Clerk ID</label>
-            <input id="dashboardClerkId" type="text" autocomplete="username" class="field w-full" autofocus />
-            <label class="block text-xs text-slate-400" for="dashboardPin">PIN</label>
-            <input id="dashboardPin" type="password" autocomplete="current-password" class="field w-full" />
-            <p id="dashboardLoginMessage" role="status" aria-live="polite" class="text-[10px] text-amber-400 min-h-4"></p>
-            <button id="dashboardLoginButton" type="submit" class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2.5 text-sm font-semibold text-white transition">Sign in</button>
-          </form>
-        </section>
-      </div>
-
-      <div id="dashboardAppView" hidden>
-      <!-- ===== Header ===== -->
-      <header class="py-4 flex items-center justify-between border-b border-slate-700">
-        <div class="flex items-center gap-2">
-          <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-            />
-          </svg>
-          <h1 class="text-lg font-bold">Wanson Companies</h1>
+  <body class="app">
+    <div id="dashboardLoginView" class="login-shell flex items-center">
+      <section class="panel login-card" aria-labelledby="dashboardLoginTitle">
+        <div class="text-center mb-6">
+          <p class="eyebrow eyebrow-brand">Wanson Companies</p>
+          <h1 id="dashboardLoginTitle" class="login-title">Sign in to continue</h1>
+          <p class="login-copy">Your clerk login protects the dashboard and invoice price checks.</p>
         </div>
-        <div class="flex items-center gap-3">
-          <div id="statusIndicator" class="flex items-center gap-1 text-xs text-slate-400">
-            <div id="statusDot" class="status-dot status-online"></div>
-            <span id="statusText">Online</span>
-          </div>
-          <button
-            id="dashboardLogoutButton"
-            type="button"
-            class="rounded-lg bg-slate-800 hover:bg-slate-700 px-2 py-1.5 text-[10px] text-slate-300 transition"
-            hidden
-          >Sign out</button>
-          <button
-            id="refreshBtn"
-            type="button"
-            aria-label="Refresh data"
-            class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
+        <form id="dashboardLoginForm" class="login-form" novalidate>
+          <label class="field-label" for="dashboardClerkId">Clerk ID</label>
+          <input id="dashboardClerkId" type="text" autocomplete="username" class="field w-full" autofocus />
+          <label class="field-label" for="dashboardPin">PIN</label>
+          <input id="dashboardPin" type="password" autocomplete="current-password" class="field w-full" />
+          <p id="dashboardLoginMessage" role="status" aria-live="polite" class="login-message"></p>
+          <button id="dashboardLoginButton" type="submit" class="btn btn-primary w-full">Sign in</button>
+        </form>
+      </section>
+    </div>
+
+    <div id="dashboardAppView" hidden>
+      <!-- ===== App bar: brand on every screen, page links from 960px up ===== -->
+      <header class="app-bar">
+        <div class="app-bar-inner">
+          <a class="brand" href="/" aria-label="Wanson Companies dashboard">
+            <span class="brand-mark" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 20v-8" />
+                <path d="M12 20V5" />
+                <path d="M19 20v-5" />
+              </svg>
+            </span>
+            <span class="brand-name">Wanson Companies</span>
+          </a>
+          <nav class="app-nav" aria-label="Main">
+            <a href="/" aria-current="page">Dashboard</a>
+            <a href="/today-invoices.html">Today's Invoices</a>
+            <a href="/dispatch.html">Delivery Dispatch</a>
+            <a href="/price-check.html">Price Check</a>
+          </nav>
         </div>
       </header>
 
-      <div id="lastUpdated" class="text-xs text-slate-500 mt-2 text-right">Last updated: --</div>
-      <div id="companyCoverage" class="text-[10px] text-slate-400 mt-2" aria-live="polite">Loading both company books…</div>
-
-      <nav class="mt-3 flex justify-end gap-2" aria-label="Operations navigation">
-        <a
-          href="/dispatch.html"
-          class="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500 transition"
-        >
-          Delivery Dispatch <span aria-hidden="true">→</span>
-        </a>
-        <a
-          href="/price-check.html"
-          id="priceCheckLink"
-          class="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 transition"
-          aria-label="Check invoice price differences"
-        >
-          Check Price Differences <span aria-hidden="true">→</span>
-        </a>
-      </nav>
-
-      <!-- ===== Today's Payments ===== -->
-      <section class="panel mt-4 p-3">
-        <div class="flex items-center gap-2 mb-3">
-          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14l-3-2-3 2-3-2-3 2-3-2-3 2V5a2 2 0 012-2z"
-            />
-          </svg>
-          <span class="text-xs font-semibold text-slate-300">Today's Payments · Both Books</span>
-        </div>
-
-        <div id="paymentSkeleton" class="space-y-2">
-          <div class="skeleton h-4 rounded w-full"></div>
-          <div class="skeleton h-4 rounded w-3/4"></div>
-        </div>
-
-        <div id="paymentContent" class="hidden">
-          <div class="grid grid-cols-3 gap-2 mb-3">
-            <a
-              href="today-invoices.html?status=paid"
-              class="bg-slate-900 rounded-lg p-2 text-center hover:bg-slate-700 transition"
-            >
-              <div class="text-[10px] text-slate-400">Paid</div>
-              <div id="paymentPaidCount" class="text-sm font-bold text-emerald-400">--</div>
-              <div id="paymentPaidTotal" class="text-[10px] text-slate-400">--</div>
-            </a>
-            <a
-              href="today-invoices.html?status=partial"
-              class="bg-slate-900 rounded-lg p-2 text-center hover:bg-slate-700 transition"
-            >
-              <div class="text-[10px] text-slate-400">Partial</div>
-              <div id="paymentPartialCount" class="text-sm font-bold text-amber-400">--</div>
-              <div id="paymentPartialTotal" class="text-[10px] text-slate-400">--</div>
-            </a>
-            <a
-              href="today-invoices.html?status=unpaid"
-              class="bg-slate-900 rounded-lg p-2 text-center hover:bg-slate-700 transition"
-            >
-              <div class="text-[10px] text-slate-400">Unpaid</div>
-              <div id="paymentUnpaidCount" class="text-sm font-bold text-red-400">--</div>
-              <div id="paymentUnpaidTotal" class="text-[10px] text-slate-400">--</div>
-            </a>
+      <main class="page dash">
+        <!-- ===== Title, connection status, data coverage ===== -->
+        <section class="area-head page-head" aria-label="Dashboard status">
+          <div class="page-head-row">
+            <h1 class="page-title">Dashboard</h1>
+            <div class="page-head-tools">
+              <div id="statusIndicator" class="status-line">
+                <div id="statusDot" class="status-dot status-online"></div>
+                <span id="statusText">Online</span>
+              </div>
+              <button id="dashboardLogoutButton" type="button" class="btn btn-quiet btn-sm" hidden>Sign out</button>
+              <button id="refreshBtn" type="button" aria-label="Refresh data" class="icon-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
+                  <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
+                  <path d="M21 3v5h-5" />
+                  <path d="M3 21v-5h5" />
+                </svg>
+              </button>
+            </div>
           </div>
+          <div id="lastUpdated" class="page-note">Last updated: --</div>
+          <div id="companyCoverage" class="coverage" aria-live="polite">Loading both company books…</div>
+        </section>
 
-          <div class="flex items-center justify-between px-1 py-2 border-t border-slate-700">
-            <span class="text-xs text-slate-300">Outstanding balance today</span>
-            <span id="stillUnpaidTotal" class="text-base font-bold text-red-400">--</span>
-          </div>
-
-          <div id="paymentUnknownWarning" class="hidden text-[10px] text-amber-400 px-1 pb-2"></div>
-
-          <button
-            type="button"
-            id="toggleInvoiceListBtn"
-            class="w-full flex items-center justify-center gap-1 py-1.5 text-[10px] text-slate-400 hover:text-slate-300 transition"
+        <!-- Phone shortcuts; the app bar carries these links on wide screens. -->
+        <nav class="link-cards mobile-only" aria-label="Operations navigation">
+          <a href="/dispatch.html" class="link-card">Delivery Dispatch <span aria-hidden="true">→</span></a>
+          <a
+            href="/price-check.html"
+            id="priceCheckLink"
+            class="link-card link-mint"
+            aria-label="Check invoice price differences"
           >
-            <span id="toggleInvoiceListLabel">Show today's invoices</span>
-            <svg
-              id="toggleInvoiceListChevron"
-              class="w-3 h-3 transition-transform duration-150"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            Check Price Differences <span aria-hidden="true">→</span>
+          </a>
+        </nav>
+
+        <!-- ===== Today's Payments ===== -->
+        <section class="panel panel-pad area-pay" aria-labelledby="payTitle">
+          <div class="panel-title-row">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 7h6m-6 4h6m-6 4h4M5 3h14a2 2 0 012 2v14l-3-2-3 2-3-2-3 2-3-2-3 2V5a2 2 0 012-2z" />
             </svg>
-          </button>
+            <h2 id="payTitle" class="section-title">Today's Payments · Both Books</h2>
+          </div>
 
-          <div id="paymentInvoiceList" class="hidden divide-y divide-slate-700"></div>
-        </div>
-      </section>
-
-      <!-- ===== Date range picker ===== -->
-      <div class="panel mt-4 p-3">
-        <div class="flex items-center gap-2 mb-2">
-          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-            />
-          </svg>
-          <span class="text-xs font-semibold text-slate-300">Date Range</span>
-        </div>
-        <div class="flex gap-1.5 mb-2">
-          <button type="button" id="btnToday" class="preset-btn active" data-preset="today">Today</button>
-          <button type="button" id="btnYesterday" class="preset-btn" data-preset="yesterday">Yesterday</button>
-          <button type="button" id="btn7days" class="preset-btn" data-preset="7days">7 Days</button>
-          <button type="button" id="btn30days" class="preset-btn" data-preset="30days">30 Days</button>
-          <button type="button" id="btnMonth" class="preset-btn" data-preset="month">This Month</button>
-        </div>
-        <div class="flex items-center gap-2">
-          <input type="date" id="startDate" class="field flex-1" aria-label="Start date" />
-          <span class="text-slate-500 text-xs">to</span>
-          <input type="date" id="endDate" class="field flex-1" aria-label="End date" />
-          <button
-            type="button"
-            id="applyDateBtn"
-            class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition"
-          >
-            Go
-          </button>
-        </div>
-      </div>
-
-      <!-- ===== KPI cards ===== -->
-      <section id="kpiGrid" class="grid grid-cols-2 gap-3 mt-4">
-        <div id="kpiRevenue" class="panel kpi-card">
-          <div class="kpi-label">Total Revenue</div>
-          <div id="kpiRevenueValue" class="kpi-value text-emerald-400">--</div>
-        </div>
-        <div id="kpiInvoices" class="panel kpi-card">
-          <div class="kpi-label">Invoices</div>
-          <div id="kpiInvoicesValue" class="kpi-value text-blue-400">--</div>
-        </div>
-        <div id="kpiUnits" class="panel kpi-card">
-          <div class="kpi-label">Units Sold</div>
-          <div id="kpiUnitsValue" class="kpi-value text-purple-400">--</div>
-        </div>
-        <div id="kpiCustomer" class="panel kpi-card">
-          <div class="kpi-label">Top Customer</div>
-          <div id="kpiCustomerValue" class="kpi-value text-sm text-amber-400 truncate">--</div>
-        </div>
-      </section>
-
-      <!-- ===== Charts ===== -->
-      <section class="mt-6">
-        <h2 class="text-sm font-semibold text-slate-300 mb-2">Top 5 Products by Revenue</h2>
-        <div class="panel p-4">
-          <canvas id="barChart" height="160"></canvas>
-        </div>
-      </section>
-
-      <section class="mt-6">
-        <h2 class="text-sm font-semibold text-slate-300 mb-2">Units by SKU</h2>
-        <div class="panel p-4 flex justify-center">
-          <canvas id="doughnutChart" height="200" width="200"></canvas>
-        </div>
-      </section>
-
-      <!-- ===== Product breakdown table ===== -->
-      <section class="mt-6">
-        <h2 class="text-sm font-semibold text-slate-300 mb-2">Product Breakdown</h2>
-        <input
-          id="searchInput"
-          type="text"
-          placeholder="Search product name or SKU..."
-          aria-label="Search products"
-          class="w-full px-3 py-2 mb-3 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-blue-500"
-        />
-        <div class="panel overflow-hidden">
-          <div id="tableSkeleton" class="p-4 space-y-2">
+          <div id="paymentSkeleton" class="space-y-2">
             <div class="skeleton h-4 rounded w-full"></div>
             <div class="skeleton h-4 rounded w-3/4"></div>
-            <div class="skeleton h-4 rounded w-5/6"></div>
           </div>
-          <table id="skuTable" class="w-full text-sm hidden">
-            <thead class="bg-slate-900">
-              <tr>
-                <th class="px-3 py-2 text-left text-xs text-slate-400">Product</th>
-                <th class="px-3 py-2 text-right text-xs text-slate-400">Units</th>
-                <th class="px-3 py-2 text-right text-xs text-slate-400">Revenue</th>
-              </tr>
-            </thead>
-            <tbody id="skuTableBody" class="divide-y divide-slate-700"></tbody>
-          </table>
-        </div>
-      </section>
-      </div>
+
+          <div id="paymentContent" class="hidden">
+            <div class="pay-tiles">
+              <a href="today-invoices.html?status=paid" class="tile tile-mint">
+                <div class="tile-label">Paid</div>
+                <div id="paymentPaidCount" class="tile-value">--</div>
+                <div id="paymentPaidTotal" class="tile-sub">--</div>
+              </a>
+              <a href="today-invoices.html?status=partial" class="tile tile-butter">
+                <div class="tile-label">Partial</div>
+                <div id="paymentPartialCount" class="tile-value">--</div>
+                <div id="paymentPartialTotal" class="tile-sub">--</div>
+              </a>
+              <a href="today-invoices.html?status=unpaid" class="tile tile-rose">
+                <div class="tile-label">Unpaid</div>
+                <div id="paymentUnpaidCount" class="tile-value">--</div>
+                <div id="paymentUnpaidTotal" class="tile-sub">--</div>
+              </a>
+            </div>
+
+            <div class="pay-outstanding">
+              <span class="pay-outstanding-label">Outstanding balance today</span>
+              <span id="stillUnpaidTotal" class="pay-outstanding-value">--</span>
+            </div>
+
+            <div id="paymentUnknownWarning" class="hidden pay-warning"></div>
+
+            <button
+              type="button"
+              id="toggleInvoiceListBtn"
+              class="link-btn mt-2"
+              aria-expanded="false"
+              aria-controls="paymentInvoiceList"
+            >
+              <span id="toggleInvoiceListLabel">Show today's invoices</span>
+              <svg
+                id="toggleInvoiceListChevron"
+                class="chev w-4 h-4 transition-transform duration-150"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <div id="paymentInvoiceList" class="hidden divide-line"></div>
+          </div>
+        </section>
+
+        <!-- ===== Date range picker ===== -->
+        <section class="panel panel-pad area-range range-bar" aria-labelledby="rangeTitle">
+          <div class="panel-title-row">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <h2 id="rangeTitle" class="section-title">Date Range</h2>
+          </div>
+          <div class="chip-row">
+            <button type="button" id="btnToday" class="preset-btn active" data-preset="today" aria-pressed="true">Today</button>
+            <button type="button" id="btnYesterday" class="preset-btn" data-preset="yesterday" aria-pressed="false">Yesterday</button>
+            <button type="button" id="btn7days" class="preset-btn" data-preset="7days" aria-pressed="false">7 Days</button>
+            <button type="button" id="btn30days" class="preset-btn" data-preset="30days" aria-pressed="false">30 Days</button>
+            <button type="button" id="btnMonth" class="preset-btn" data-preset="month" aria-pressed="false">This Month</button>
+          </div>
+          <div class="date-grid">
+            <input type="date" id="startDate" class="field" aria-label="Start date" />
+            <span class="date-sep">to</span>
+            <input type="date" id="endDate" class="field" aria-label="End date" />
+            <button type="button" id="applyDateBtn" class="btn btn-secondary">Apply dates</button>
+          </div>
+        </section>
+
+        <!-- ===== KPI cards ===== -->
+        <section id="kpiGrid" class="area-kpi kpi-grid" aria-label="Key figures">
+          <div id="kpiRevenue" class="kpi kpi-sky kpi-wide">
+            <div class="kpi-label">Total Revenue</div>
+            <div id="kpiRevenueValue" class="kpi-value">--</div>
+          </div>
+          <div id="kpiInvoices" class="kpi kpi-lilac">
+            <div class="kpi-label">Invoices</div>
+            <div id="kpiInvoicesValue" class="kpi-value">--</div>
+          </div>
+          <div id="kpiUnits" class="kpi kpi-mint">
+            <div class="kpi-label">Units Sold</div>
+            <div id="kpiUnitsValue" class="kpi-value">--</div>
+          </div>
+          <div id="kpiCustomer" class="kpi kpi-butter kpi-wide kpi-text">
+            <div class="kpi-label">Top Customer</div>
+            <div id="kpiCustomerValue" class="kpi-value">--</div>
+          </div>
+        </section>
+
+        <!-- ===== Charts (plain HTML so every value is readable text) ===== -->
+        <section class="panel panel-pad area-top" aria-labelledby="topTitle">
+          <h2 id="topTitle" class="section-title mb-4">Top 5 Products by Revenue</h2>
+          <ul id="topProducts" class="bar-list">
+            <li class="c-muted text-sm">Loading…</li>
+          </ul>
+        </section>
+
+        <section class="panel panel-pad area-units" aria-labelledby="unitsTitle">
+          <h2 id="unitsTitle" class="section-title mb-4">Units by SKU</h2>
+          <div class="donut-wrap">
+            <div id="unitsDonut" class="donut" role="img" aria-label="Share of units by SKU, listed beside the chart" style="background: var(--mist)">
+              <div class="donut-hole">
+                <span class="donut-hole-label">SKUs</span>
+                <span id="unitsDonutCount" class="donut-hole-value">--</span>
+              </div>
+            </div>
+            <ul id="unitsLegend" class="legend"></ul>
+          </div>
+        </section>
+
+        <!-- ===== Product breakdown table ===== -->
+        <section class="panel panel-pad area-table" aria-labelledby="breakTitle">
+          <div class="table-head-row">
+            <h2 id="breakTitle" class="section-title">Product Breakdown</h2>
+            <input
+              id="searchInput"
+              type="search"
+              placeholder="Search product name or SKU..."
+              aria-label="Search products"
+              class="field search-field"
+            />
+          </div>
+          <div class="table-card">
+            <div id="tableSkeleton" class="p-4 space-y-2">
+              <div class="skeleton h-4 rounded w-full"></div>
+              <div class="skeleton h-4 rounded w-3/4"></div>
+              <div class="skeleton h-4 rounded w-5/6"></div>
+            </div>
+            <table id="skuTable" class="data-table hidden">
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col">Units</th>
+                  <th scope="col">Revenue</th>
+                </tr>
+              </thead>
+              <tbody id="skuTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
     </div>
 
     <script>
@@ -369,16 +262,21 @@
 
       /* ----------------------------- Config ---------------------------------- */
 
-      const CHART_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
-      const AXIS_COLOR = '#94a3b8';
-      const GRID_COLOR = '#334155';
-      const BAR_LABEL_MAX = 25;
-      const DOUGHNUT_LABEL_MAX = 20;
+      // Chart colours live in theme.css (each is at least 3:1 on a white card).
+      const CHART_COLORS = [
+        'var(--chart-1)',
+        'var(--chart-2)',
+        'var(--chart-3)',
+        'var(--chart-4)',
+        'var(--chart-5)',
+        'var(--chart-6)',
+      ];
+      const CHART_OTHER = 'var(--chart-other)';
+      // The doughnut names this many SKUs; the rest are grouped as "Other".
+      const DONUT_SLICES = CHART_COLORS.length;
 
       /* ------------------------------ State ---------------------------------- */
 
-      let barChart = null;
-      let doughnutChart = null;
       let allSKUData = [];
       let customerItemsByKey = Object.create(null);
       let currentStartDate = '';
@@ -443,10 +341,9 @@
         return String(str ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
       }
 
-      /** Display label for a SKU, truncated for chart axes. */
-      function skuLabel(sku, maxLength) {
-        const text = sku.description || sku.sku || '';
-        return maxLength && text.length > maxLength ? text.slice(0, maxLength) : text;
+      /** Display label for a SKU: its description, else its code. */
+      function skuLabel(sku) {
+        return sku.description || sku.sku || '';
       }
 
       /* --------------------------- Date presets ------------------------------ */
@@ -460,9 +357,15 @@
       };
 
       function setActivePreset(buttonId) {
-        document.querySelectorAll('.preset-btn').forEach((btn) => btn.classList.remove('active'));
+        document.querySelectorAll('.preset-btn').forEach((btn) => {
+          btn.classList.remove('active');
+          btn.setAttribute('aria-pressed', 'false');
+        });
         const active = buttonId ? $(buttonId) : null;
-        if (active) active.classList.add('active');
+        if (active) {
+          active.classList.add('active');
+          active.setAttribute('aria-pressed', 'true');
+        }
       }
 
       function setPreset(preset) {
@@ -518,7 +421,8 @@
         const requestId = ++requestSequence;
         const today = todayISO();
 
-        btn.classList.add('animate-spin');
+        btn.classList.add('is-loading');
+        btn.disabled = true;
         try {
           const rangeRequest = requestSales(start, end);
           const todayRequest = start === today && end === today ? rangeRequest : requestSales(today, today);
@@ -541,7 +445,8 @@
             renderTodayPaymentsError();
           }
         } finally {
-          btn.classList.remove('animate-spin');
+          btn.classList.remove('is-loading');
+          btn.disabled = false;
         }
       }
 
@@ -555,8 +460,8 @@
         renderKPIs(data.kpis || {});
         renderTable(breakdown);
 
-        // Charts depend on the Chart.js CDN — never let a chart failure
-        // take down the KPIs and table, which are the critical numbers.
+        // Never let a chart failure take down the KPIs and table, which are
+        // the critical numbers.
         try {
           renderBarChart(data.topSKUs || []);
           renderDoughnutChart(breakdown);
@@ -582,13 +487,13 @@
 
         const companies = Array.isArray(data?.companies) ? data.companies : [];
         if (companies.length === 0) {
-          coverageEl.className = 'text-[10px] text-red-400 mt-2';
+          coverageEl.className = 'coverage is-error';
           coverageEl.textContent = data?.error || 'Both company books are unavailable';
           return;
         }
 
         const allUnavailable = companies.every((company) => company.status !== 'ok');
-        coverageEl.className = `${data.complete ? 'text-slate-400' : 'text-red-400'} text-[10px] mt-2`;
+        coverageEl.className = `coverage${data.complete ? '' : ' is-bad'}`;
         const label = data.complete
           ? 'Both books loaded'
           : allUnavailable
@@ -600,7 +505,7 @@
             return `${escapeHtml(company.name)}: ${escapeHtml(value)}`;
           })
           .join(' · ');
-        coverageEl.innerHTML = `<span class="font-semibold">${label}</span> · ${details}`;
+        coverageEl.innerHTML = `<span class="coverage-label">${label}</span><span>${details}</span>`;
       }
 
       function renderKPIs(kpis) {
@@ -610,83 +515,95 @@
         $('kpiCustomerValue').textContent = kpis.topCustomer ? kpis.topCustomer.name : '--';
       }
 
-      /** Shared tooltip title: always show the untruncated product name. */
-      function tooltipTitle(skus) {
-        return (items) => {
-          const sku = skus[items[0].dataIndex];
-          return sku ? sku.description || sku.sku : '';
-        };
-      }
+      /* ------------------------------ Charts --------------------------------- */
 
+      /** Top products by revenue: one labelled bar each, with the value as text. */
       function renderBarChart(skus) {
-        if (barChart) barChart.destroy();
-
-        barChart = new Chart($('barChart').getContext('2d'), {
-          type: 'bar',
-          data: {
-            labels: skus.map((s) => skuLabel(s, BAR_LABEL_MAX)),
-            datasets: [
-              {
-                label: 'Revenue (RM)',
-                data: skus.map((s) => s.totalRevenue),
-                backgroundColor: skus.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
-                borderRadius: 6,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  title: tooltipTitle(skus),
-                  label: (item) => formatMYR(item.raw),
-                },
-              },
-            },
-            scales: {
-              y: { ticks: { color: AXIS_COLOR }, grid: { color: GRID_COLOR } },
-              x: {
-                ticks: { color: AXIS_COLOR, font: { size: 10 }, maxRotation: 45 },
-                grid: { display: false },
-              },
-            },
-          },
-        });
+        const list = $('topProducts');
+        if (!list) return;
+        if (skus.length === 0) {
+          list.innerHTML = '<li class="c-muted text-sm">No sales in this range</li>';
+          return;
+        }
+        const max = Math.max(...skus.map((sku) => Number(sku.totalRevenue) || 0), 0);
+        list.innerHTML = skus
+          .map((sku, i) => {
+            const revenue = Number(sku.totalRevenue) || 0;
+            const width = max > 0 && revenue > 0 ? Math.max((revenue / max) * 100, 1) : 0;
+            return `
+        <li>
+          <div class="bar-head">
+            <span class="bar-name">${escapeHtml(skuLabel(sku))}</span>
+            <span class="bar-value">${formatMYR(revenue)}</span>
+          </div>
+          <div class="bar-track" aria-hidden="true"><div class="bar-fill" style="width:${width.toFixed(1)}%;background:${CHART_COLORS[i % CHART_COLORS.length]}"></div></div>
+        </li>`;
+          })
+          .join('');
       }
 
+      /** Units by SKU: the biggest SKUs get a slice each, the rest share "Other". */
       function renderDoughnutChart(skus) {
-        if (doughnutChart) doughnutChart.destroy();
+        const donut = $('unitsDonut');
+        const legend = $('unitsLegend');
+        if (!donut || !legend) return;
+        $('unitsDonutCount').textContent = formatNumber(skus.length);
 
-        doughnutChart = new Chart($('doughnutChart').getContext('2d'), {
-          type: 'doughnut',
-          data: {
-            labels: skus.map((s) => skuLabel(s, DOUGHNUT_LABEL_MAX)),
-            datasets: [
-              {
-                data: skus.map((s) => s.totalUnits),
-                backgroundColor: skus.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
-                borderWidth: 0,
-              },
-            ],
-          },
-          options: {
-            responsive: false,
-            plugins: {
-              legend: { position: 'bottom', labels: { color: AXIS_COLOR, font: { size: 10 } } },
-              tooltip: {
-                callbacks: {
-                  title: tooltipTitle(skus),
-                  label: (item) => {
-                    const sku = skus[item.dataIndex];
-                    return sku && sku.unit ? `${formatNumber(item.raw)} ${sku.unit}` : `${formatNumber(item.raw)} units`;
-                  },
-                },
-              },
-            },
-          },
+        const ranked = skus
+          .map((sku) => ({ sku, units: Number(sku.totalUnits) || 0 }))
+          .filter((entry) => entry.units > 0)
+          .sort((a, b) => b.units - a.units);
+        const total = ranked.reduce((sum, entry) => sum + entry.units, 0);
+        if (total <= 0) {
+          donut.style.background = 'var(--mist)';
+          donut.setAttribute('aria-label', 'No units sold in this range');
+          legend.innerHTML = '<li class="c-muted text-sm">No units sold in this range</li>';
+          return;
+        }
+
+        const slices = ranked.slice(0, DONUT_SLICES).map((entry, i) => ({
+          label: skuLabel(entry.sku),
+          units: entry.units,
+          valueText: formatQuantity(entry.units, entry.sku.unit),
+          color: CHART_COLORS[i % CHART_COLORS.length],
+        }));
+        const rest = ranked.slice(DONUT_SLICES);
+        if (rest.length > 0) {
+          const otherUnits = rest.reduce((sum, entry) => sum + entry.units, 0);
+          slices.push({
+            label: `Other (${rest.length} SKUs)`,
+            units: otherUnits,
+            valueText: formatNumber(otherUnits),
+            color: CHART_OTHER,
+          });
+        }
+
+        // A thin white gap between slices keeps neighbouring colours distinct.
+        const gap = slices.length > 1 ? 0.4 : 0;
+        let cursor = 0;
+        const stops = [];
+        slices.forEach((slice) => {
+          const end = cursor + (slice.units / total) * 100;
+          const visibleEnd = Math.max(cursor, end - gap);
+          stops.push(`${slice.color} ${cursor.toFixed(2)}% ${visibleEnd.toFixed(2)}%`);
+          if (visibleEnd < end) stops.push(`#fff ${visibleEnd.toFixed(2)}% ${end.toFixed(2)}%`);
+          cursor = end;
         });
+        donut.style.background = `conic-gradient(${stops.join(', ')})`;
+        donut.setAttribute(
+          'aria-label',
+          `Share of units by SKU: ${slices.map((slice) => `${slice.label} ${Math.round((slice.units / total) * 100)} percent`).join(', ')}`,
+        );
+        legend.innerHTML = slices
+          .map(
+            (slice) => `
+        <li>
+          <span class="legend-swatch" style="background:${slice.color}"></span>
+          <span class="legend-name">${escapeHtml(slice.label)}</span>
+          <span class="legend-value">${slice.valueText}</span>
+        </li>`,
+          )
+          .join('');
       }
 
       function customerKey(customer) {
@@ -721,14 +638,14 @@
 
       function buildCustomerItems(items) {
         if (!items || items.length === 0) {
-          return '<div class="text-slate-500 text-[10px] px-2 py-1">No item data</div>';
+          return '<div class="c-muted text-xs px-2 py-1">No item data</div>';
         }
         return items
           .map(
             (item) => `
-        <div class="flex items-center justify-between gap-2 px-2 py-1 text-[10px]">
-          <span class="text-slate-400 truncate">${escapeHtml(item.description || item.sku)}<span class="text-slate-600"> · ${escapeHtml(item.sku)}</span></span>
-          <span class="text-slate-300 shrink-0">${formatQuantity(item.quantity, item.unit)}</span>
+        <div class="flex items-center justify-between gap-3 px-2 py-1.5 text-xs">
+          <span class="c-muted truncate">${escapeHtml(item.description || item.sku)} · ${escapeHtml(item.sku)}</span>
+          <span class="c-ink font-semibold shrink-0">${formatQuantity(item.quantity, item.unit)}</span>
         </div>`,
           )
           .join('');
@@ -736,27 +653,27 @@
 
       function buildCustomerList(customers, companyId = '', unit = '') {
         if (!customers || customers.length === 0) {
-          return '<div class="text-slate-500 text-xs px-2 py-1">No customer data</div>';
+          return '<div class="c-muted text-sm px-2 py-1">No customer data</div>';
         }
         return customers
           .map(
             (c) => {
               const items = customerItemsByKey[customerKey({ ...c, companyId: c.companyId || companyId })] || [];
               return `
-        <div data-customer-entry class="border-t border-slate-800 first:border-t-0">
-          <button type="button" data-customer-toggle aria-expanded="false" class="w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-800/70 rounded">
-            <span class="flex items-center gap-1.5 min-w-0">
-              <svg data-customer-chevron class="w-3 h-3 text-slate-500 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        <div data-customer-entry class="row-line">
+          <button type="button" data-customer-toggle aria-expanded="false" class="row-hover w-full min-h-[44px] flex items-center justify-between gap-2 px-2 py-1.5 text-left text-sm rounded-lg">
+            <span class="flex items-center gap-2 min-w-0">
+              <svg data-customer-chevron class="chev w-4 h-4 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M9 5l7 7-7 7"/>
               </svg>
               <span class="min-w-0">
-                <span class="block text-slate-300 truncate">${escapeHtml(c.name)}</span>
-                ${c.companyName ? `<span class="block text-slate-600 text-[10px] truncate">${escapeHtml(c.companyName)}</span>` : ''}
+                <span class="block c-ink font-semibold truncate">${escapeHtml(c.name)}</span>
+                ${c.companyName ? `<span class="block c-muted text-xs truncate">${escapeHtml(c.companyName)}</span>` : ''}
               </span>
             </span>
-            <span class="text-slate-400 shrink-0">${formatQuantity(c.quantity, unit)}</span>
+            <span class="c-ink font-semibold shrink-0">${formatQuantity(c.quantity, unit)}</span>
           </button>
-          <div data-customer-detail class="hidden pl-5 pr-2 pb-1">${buildCustomerItems(items)}</div>
+          <div data-customer-detail class="hidden pl-6 pr-2 pb-2">${buildCustomerItems(items)}</div>
         </div>`;
             },
           )
@@ -768,22 +685,22 @@
           .map(
             (s, i) => `
         <tr class="sku-row cursor-pointer" data-row="${i}">
-          <td class="px-3 py-2 text-xs">
-            <div class="flex items-center gap-1.5">
-              <svg id="chevron-${i}" class="w-3 h-3 text-slate-500 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          <td>
+            <div class="flex items-center gap-2">
+              <svg id="chevron-${i}" class="chev w-4 h-4 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M9 5l7 7-7 7"/>
               </svg>
-              <div>
-                <div class="text-white font-medium">${escapeHtml(s.description || s.sku)}</div>
-                <div class="text-slate-500 text-[10px] mt-0.5">${escapeHtml(s.companyName ? `${s.companyName} · ${s.sku}` : s.sku)}</div>
+              <div class="min-w-0">
+                <div class="c-ink font-bold">${escapeHtml(s.description || s.sku)}</div>
+                <div class="cell-sub">${escapeHtml(s.companyName ? `${s.companyName} · ${s.sku}` : s.sku)}</div>
               </div>
             </div>
           </td>
-          <td class="px-3 py-2 text-right">${formatQuantity(s.totalUnits, s.unit)}</td>
-          <td class="px-3 py-2 text-right text-emerald-400">${formatMYR(s.totalRevenue)}</td>
+          <td class="text-right font-bold whitespace-nowrap">${formatQuantity(s.totalUnits, s.unit)}</td>
+          <td class="text-right font-extrabold whitespace-nowrap">${formatMYR(s.totalRevenue)}</td>
         </tr>
-        <tr id="detail-${i}" class="hidden bg-slate-900/50">
-          <td colspan="3" class="px-3 pb-2 pt-1">${buildCustomerList(s.customers, s.companyId, s.unit)}</td>
+        <tr id="detail-${i}" class="hidden row-detail">
+          <td colspan="3" class="px-3 pb-3 pt-1">${buildCustomerList(s.customers, s.companyId, s.unit)}</td>
         </tr>`,
           )
           .join('');
@@ -815,10 +732,10 @@
       /* ------------------------- Today's Payments ----------------------------- */
 
       const PAYMENT_STATUS_META = {
-        paid: { label: 'Paid', badgeClass: 'bg-emerald-500/20 text-emerald-400' },
-        partial: { label: 'Partial', badgeClass: 'bg-amber-500/20 text-amber-400' },
-        unpaid: { label: 'Unpaid', badgeClass: 'bg-red-500/20 text-red-400' },
-        unknown: { label: 'Unknown', badgeClass: 'bg-slate-500/20 text-slate-400' },
+        paid: { label: 'Paid', badgeClass: 'pill pill-mint' },
+        partial: { label: 'Partial', badgeClass: 'pill pill-butter' },
+        unpaid: { label: 'Unpaid', badgeClass: 'pill pill-rose' },
+        unknown: { label: 'Unknown', badgeClass: 'pill pill-mist' },
       };
 
       const EMPTY_PAYMENT_SUMMARY = {
@@ -840,7 +757,7 @@
         $('paymentUnpaidTotal').textContent = '--';
         $('stillUnpaidTotal').textContent = '--';
         $('paymentInvoiceList').innerHTML =
-          '<div class="text-amber-400 text-xs px-1 py-2">Today\'s payments could not be loaded for both books</div>';
+          '<div class="c-warn text-sm font-semibold px-1 py-3">Today\'s payments could not be loaded for both books</div>';
       }
 
       function sortByOutstandingDesc(invoices) {
@@ -849,14 +766,14 @@
 
       function buildInvoiceItems(lineItems) {
         if (!lineItems || lineItems.length === 0) {
-          return '<div class="text-slate-500 text-[10px] px-2 py-1">No item data</div>';
+          return '<div class="c-muted text-xs px-2 py-1">No item data</div>';
         }
         return lineItems
           .map(
             (item) => `
-        <div class="flex items-center justify-between gap-2 px-2 py-1 text-[10px]">
-          <span class="text-slate-400 truncate">${escapeHtml(item.description || item.sku)}<span class="text-slate-600"> · ${escapeHtml(item.sku)}</span></span>
-          <span class="text-slate-300 shrink-0">${formatQuantity(item.quantity, item.unit)} · ${formatMYR(item.total)}</span>
+        <div class="flex items-center justify-between gap-3 px-2 py-1.5 text-xs">
+          <span class="c-muted truncate">${escapeHtml(item.description || item.sku)} · ${escapeHtml(item.sku)}</span>
+          <span class="c-ink font-semibold shrink-0">${formatQuantity(item.quantity, item.unit)} · ${formatMYR(item.total)}</span>
         </div>`,
           )
           .join('');
@@ -866,25 +783,25 @@
         const meta = PAYMENT_STATUS_META[invoice.paymentStatus] || PAYMENT_STATUS_META.unknown;
         return `
         <div data-invoice-entry>
-          <button type="button" data-invoice-toggle aria-expanded="false" class="w-full flex items-center justify-between gap-2 px-1 py-1.5 text-left text-xs hover:bg-slate-800/70">
-            <span class="flex items-center gap-1.5 min-w-0">
-              <svg data-invoice-chevron class="w-3 h-3 text-slate-500 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          <button type="button" data-invoice-toggle aria-expanded="false" class="row-hover w-full min-h-[44px] flex items-center justify-between gap-3 px-1 py-2 text-left rounded-lg">
+            <span class="flex items-center gap-2 min-w-0">
+              <svg data-invoice-chevron class="chev w-4 h-4 transition-transform duration-150 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" d="M9 5l7 7-7 7"/>
               </svg>
               <span class="min-w-0">
-                <span class="block text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</span>
-                <span class="block text-slate-500 text-[10px]">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</span>
+                <span class="block c-ink text-sm font-bold truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</span>
+                <span class="block c-muted text-xs">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</span>
               </span>
             </span>
-            <span class="flex items-center gap-2 shrink-0">
-              <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
-              <span class="${meta.badgeClass} px-1.5 py-0.5 rounded text-[10px] font-medium">${meta.label}</span>
+            <span class="flex flex-col items-end gap-1 shrink-0">
+              <span class="c-ink text-sm font-extrabold">${formatMYR(invoice.grandTotal)}</span>
+              <span class="${meta.badgeClass}">${meta.label}</span>
             </span>
           </button>
-          <div data-invoice-detail class="hidden px-5 pb-2">
-            <div class="flex items-center justify-between gap-2 pb-1 text-[10px]">
-              <span class="text-slate-500">Payment status</span>
-              <span class="${meta.badgeClass} px-1.5 py-0.5 rounded font-medium">${meta.label}</span>
+          <div data-invoice-detail class="hidden px-6 pb-3">
+            <div class="flex items-center justify-between gap-2 pb-1 text-xs">
+              <span class="c-muted">Payment status</span>
+              <span class="${meta.badgeClass}">${meta.label}</span>
             </div>
             ${buildInvoiceItems(invoice.lineItems)}
           </div>
@@ -942,7 +859,7 @@
         const listEl = $('paymentInvoiceList');
         const allTodayInvoices = Array.isArray(invoices) ? invoices : [];
         if (allTodayInvoices.length === 0) {
-          listEl.innerHTML = '<div class="text-slate-500 text-xs px-1 py-2">No invoices today</div>';
+          listEl.innerHTML = '<div class="c-muted text-sm px-1 py-3">No invoices today</div>';
           return;
         }
         listEl.innerHTML = sortByOutstandingDesc(allTodayInvoices).map(buildPaymentRow).join('');
@@ -950,10 +867,9 @@
 
       /* -------------------------- Price Check access ------------------------- */
 
-      function setDashboardLoginMessage(message, tone = 'text-amber-400') {
+      function setDashboardLoginMessage(message) {
         const element = $('dashboardLoginMessage');
         if (!element) return;
-        element.className = `text-[10px] ${tone}`;
         element.textContent = message || '';
       }
 
@@ -1070,6 +986,7 @@
         $('toggleInvoiceListBtn').addEventListener('click', () => {
           const collapsed = $('paymentInvoiceList').classList.toggle('hidden');
           $('toggleInvoiceListLabel').textContent = collapsed ? "Show today's invoices" : "Hide today's invoices";
+          $('toggleInvoiceListBtn').setAttribute('aria-expanded', String(!collapsed));
           $('toggleInvoiceListChevron').classList.toggle('rotate-180', !collapsed);
         });
 

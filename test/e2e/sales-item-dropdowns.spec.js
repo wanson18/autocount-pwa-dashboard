@@ -102,12 +102,16 @@ const SALES_PAYLOAD = {
 };
 
 async function openDashboard(page) {
-  // Stub the Tailwind and Chart.js CDNs so the page renders without network access.
+  // Stub the Tailwind CDN so the page renders without network access.
   await page.route('https://cdn.tailwindcss.com/**', (route) =>
     route.fulfill({ contentType: 'application/javascript', body: '' }),
   );
-  await page.route('https://cdn.jsdelivr.net/**', (route) =>
-    route.fulfill({ contentType: 'application/javascript', body: '' }),
+  // The dashboard only loads data for a signed-in clerk (the public dispatch session does not count).
+  await page.route('**/api/dispatch/session', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, authenticated: true, session: { clerkId: 'clerk-e2e', role: 'clerk' } }),
+    }),
   );
   await page.route('**/api/sales**', (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify(SALES_PAYLOAD) }),

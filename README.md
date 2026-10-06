@@ -1,21 +1,23 @@
 # Wanson Companies AutoCount Sales Dashboard (iPhone PWA)
 
-A lightweight mobile-first sales dashboard that fetches real-time invoice data from AutoCount Cloud API, aggregates by product, and displays clean KPI cards, charts, and tables. Designed as an iPhone PWA (Progressive Web App) for Home Screen access.
+A lightweight sales dashboard for phone and desktop that fetches real-time invoice data from AutoCount Cloud API, aggregates by product, and displays clean KPI cards, charts, and tables. Designed as an iPhone PWA (Progressive Web App) for Home Screen access.
 
 ## Features
 
 - **Real-time data** — Pulls live invoices from AutoCount Cloud Accounting API
 - **Date range selector** — Today, Yesterday, Last 7/30 Days, This Month, or custom range
 - **KPI cards** — Total Revenue, Invoices, Units Sold, Top Customer
-- **Bar chart** — Top 5 products by revenue
-- **Doughnut chart** — Units distribution by product
+- **Top 5 products** — Labelled bars with the revenue printed beside each one
+- **Units by SKU** — Doughnut with a legend that lists every value
 - **Product breakdown table** — Searchable, sorted by revenue
 - **Offline support** — Service Worker caches static assets for offline viewing; sales API failures stay visible instead of showing stale data
 - **iPhone PWA** — Add to Home Screen for standalone app experience
+- **Phone and desktop layouts** — One page that adapts: a single column on phones, and from 960px up an app bar with the page links and multi-column pages that use the screen width
+- **Soft pastel theme** — Light background, pastel status colours, dark readable text (see "Look and feel")
 
 ## Tech Stack
 
-- **Frontend**: HTML5 + Tailwind CSS (CDN) + Chart.js
+- **Frontend**: HTML5 + Tailwind CSS (CDN) for spacing helpers + `public/theme.css` for colours and components; charts are plain HTML/CSS
 - **Backend**: Vercel Serverless Function (Node.js)
 - **PWA**: Service Worker + `manifest.json` with iOS standalone tags
 - **Data Source**: AutoCount Cloud Accounting API
@@ -28,7 +30,9 @@ autocount-pwa-dashboard/
 │   ├── sales.js           # Serverless middleware (AutoCount API fetcher & aggregator)
 │   └── mock-sales.json    # Mock data for offline/fallback
 ├── public/
-│   ├── index.html         # iPhone-optimized single-page web app
+│   ├── index.html         # Sales dashboard (phone and desktop layouts)
+│   ├── theme.css          # Shared colours, components and responsive rules
+│   ├── fonts/             # Self-hosted Nunito Sans (SIL Open Font License)
 │   ├── manifest.json      # PWA metadata for iOS Home Screen
 │   ├── sw.js              # Service worker for offline caching
 │   └── icons/
@@ -39,7 +43,20 @@ autocount-pwa-dashboard/
 └── agents.md              # Project blueprint
 ```
 
-## Setup
+## Look and feel
+
+The whole app shares one soft pastel look: a pale blue-white background, white cards, pastel tiles for status and key figures, one solid blue for the main action on each screen, and dark navy text. Colours, components and the phone/desktop switch live in `public/theme.css`; `dispatch.css` and `loading-sheet.css` use the same tokens. Nunito Sans is hosted in `public/fonts/`, so there is no third-party font request and it works offline.
+
+Readability rules to keep when changing a colour:
+
+- Body text is `--ink` on white or the page background (14 to 15:1). Secondary text is `--ink-2` (at least 6:1 on every surface).
+- Text on a pastel fill uses that pastel's own `-ink` colour (at least 6:1). Never grey text on a pastel.
+- Control borders are `--line-strong` (3.4:1 on white). Chart colours are at least 3:1 on a white card and every value is also printed as text.
+- Nothing is smaller than 12px and every tap target is at least 44px.
+- Status is never colour alone: pills, banners and charts always carry a text label.
+
+Layout: below 960px every page is one column and the Dashboard shows two shortcut cards (Delivery Dispatch, Check Price Differences). From 960px up an app bar with Dashboard, Today's Invoices, Delivery Dispatch and Price Check replaces the shortcuts and back buttons, and the pages become grids (Dashboard: date range, key figures, payments beside top products, units beside the product table; Price Check: controls beside the results; Dispatch: invoice queue beside the lorry lanes). Print output of the Loading Sheet is unchanged.
+
 
 ### 1. Clone & Install
 

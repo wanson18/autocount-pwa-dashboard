@@ -4,9 +4,9 @@
   "description": "AutoCount Sales Invoice Dashboard - iPhone PWA",
   "start_url": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0f172a",
-  "theme_color": "#3b82f6",
+  "orientation": "any",
+  "background_color": "#f6f7fc",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "/icons/icon-192.png",

@@ -61,7 +61,7 @@ test('service worker installs a new cache namespace and activation removes every
   let installPromise;
   worker.listeners.get('install')({ waitUntil(promise) { installPromise = promise; } });
   await installPromise;
-  assert.equal(worker.openedCaches[0], 'sales-dashboard-v17');
+  assert.equal(worker.openedCaches[0], 'sales-dashboard-v18');
 
   let activationPromise;
   worker.listeners.get('activate')({ waitUntil(promise) { activationPromise = promise; } });
@@ -122,4 +122,11 @@ test('document navigations prefer fresh network HTML over cached pages', async (
   assert.equal(worker.fetchedRequests.length, 1);
   assert.equal(worker.fetchedRequests[0].options.cache, 'no-store');
   assert.equal(worker.putRequests.length, 1);
+});
+
+test('the shared theme stylesheet and its self-hosted font are cached for offline use', () => {
+  assert.match(serviceWorkerSource, /'\/theme\.css'/);
+  assert.match(serviceWorkerSource, /'\/fonts\/NunitoSans-latin\.woff2'/);
+  assert.equal(fs.existsSync(path.join(root, '..', 'public', 'theme.css')), true);
+  assert.equal(fs.existsSync(path.join(root, '..', 'public', 'fonts', 'NunitoSans-latin.woff2')), true);
 });

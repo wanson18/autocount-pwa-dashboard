@@ -4,97 +4,91 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#3b82f6" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#ffffff" />
     <title>Today's Invoices — Wanson Companies</title>
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="preload" href="/fonts/NunitoSans-latin.woff2" as="font" type="font/woff2" crossorigin />
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      body {
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
-      }
-
-      .skeleton {
-        background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
-      }
-      @keyframes shimmer {
-        0% {
-          background-position: -200% 0;
-        }
-        100% {
-          background-position: 200% 0;
-        }
-      }
-
-      .panel {
-        background-color: #1e293b; /* slate-800 */
-        border: 1px solid #334155; /* slate-700 */
-        border-radius: 0.75rem;
-      }
-
-      .tab-btn {
-        font-size: 0.75rem;
-        padding: 0.375rem 0.75rem;
-        border-radius: 0.5rem;
-        font-weight: 500;
-        background-color: #334155; /* slate-700 */
-        color: #cbd5e1; /* slate-300 */
-        transition: background-color 0.15s ease;
-      }
-      .tab-btn:hover {
-        background-color: #475569; /* slate-600 */
-      }
-      .tab-btn.active {
-        background-color: #2563eb; /* blue-600 */
-        color: #ffffff;
-      }
-    </style>
+    <link rel="stylesheet" href="/theme.css" />
   </head>
-  <body class="bg-slate-900 text-white min-h-screen">
-    <div class="max-w-md mx-auto px-4 pb-8">
-      <!-- ===== Header ===== -->
-      <header class="py-4 flex items-center gap-2 border-b border-slate-700">
-        <a href="/" aria-label="Back to dashboard" class="p-2 -ml-2 rounded-lg hover:bg-slate-800 transition">
-          <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-          </svg>
+  <body class="app">
+    <!-- Wide screens: app bar with the page links. Phones use the back button below. -->
+    <header class="app-bar desktop-only">
+      <div class="app-bar-inner">
+        <a class="brand" href="/" aria-label="Wanson Companies dashboard">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 20v-8" />
+              <path d="M12 20V5" />
+              <path d="M19 20v-5" />
+            </svg>
+          </span>
+          <span class="brand-name">Wanson Companies</span>
         </a>
-        <h1 class="text-lg font-bold">Wanson Companies · Today's Invoices</h1>
-      </header>
+        <nav class="app-nav" aria-label="Main">
+          <a href="/">Dashboard</a>
+          <a href="/today-invoices.html" aria-current="page">Today's Invoices</a>
+          <a href="/dispatch.html">Delivery Dispatch</a>
+          <a href="/price-check.html">Price Check</a>
+        </nav>
+      </div>
+    </header>
 
-      <!-- ===== Status tabs ===== -->
-      <div class="flex gap-1.5 mt-4">
-        <button type="button" id="tabAll" class="tab-btn" data-status="all">All</button>
-        <button type="button" id="tabPaid" class="tab-btn" data-status="paid">Paid</button>
-        <button type="button" id="tabPartial" class="tab-btn" data-status="partial">Partial</button>
-        <button type="button" id="tabUnpaid" class="tab-btn" data-status="unpaid">Unpaid</button>
+    <main class="page">
+      <div class="inv-top">
+        <div class="page-heading">
+          <a href="/" aria-label="Back to dashboard" class="back-btn mobile-only">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+          <div class="min-w-0">
+            <p class="eyebrow">Wanson Companies</p>
+            <h1 class="page-title">Today's Invoices</h1>
+          </div>
+        </div>
+
+        <!-- ===== Status tabs ===== -->
+        <div class="inv-tabs" role="group" aria-label="Payment status">
+          <button type="button" id="tabAll" class="tab-btn" data-status="all" aria-pressed="false">All</button>
+          <button type="button" id="tabPaid" class="tab-btn" data-status="paid" aria-pressed="false">Paid</button>
+          <button type="button" id="tabPartial" class="tab-btn" data-status="partial" aria-pressed="false">Partial</button>
+          <button type="button" id="tabUnpaid" class="tab-btn" data-status="unpaid" aria-pressed="false">Unpaid</button>
+        </div>
       </div>
 
-      <div id="summaryLine" class="text-xs text-slate-400 mt-3 mb-2">Loading…</div>
-      <div id="coverageLine" class="text-[10px] text-slate-400 mb-2" aria-live="polite">Loading both company books…</div>
+      <div class="inv-info">
+        <div id="summaryLine" class="inv-summary">Loading…</div>
+        <div id="coverageLine" class="coverage" aria-live="polite">Loading both company books…</div>
+      </div>
 
       <div class="panel overflow-hidden">
+        <div id="invoiceHead" class="inv-head hidden" aria-hidden="true">
+          <span>Customer</span>
+          <span>Company</span>
+          <span>Invoice</span>
+          <span>Status</span>
+          <span>Total</span>
+        </div>
         <div id="listSkeleton" class="p-4 space-y-2">
           <div class="skeleton h-4 rounded w-full"></div>
           <div class="skeleton h-4 rounded w-3/4"></div>
           <div class="skeleton h-4 rounded w-5/6"></div>
         </div>
-        <div id="invoiceList" class="hidden divide-y divide-slate-700"></div>
+        <div id="invoiceList" class="hidden"></div>
       </div>
-    </div>
+    </main>
 
     <script>
       const $ = (id) => document.getElementById(id);
 
       const PAYMENT_STATUS_META = {
-        paid: { label: 'Paid', badgeClass: 'bg-emerald-500/20 text-emerald-400' },
-        partial: { label: 'Partial', badgeClass: 'bg-amber-500/20 text-amber-400' },
-        unpaid: { label: 'Unpaid', badgeClass: 'bg-red-500/20 text-red-400' },
-        unknown: { label: 'Unknown', badgeClass: 'bg-slate-500/20 text-slate-400' },
+        paid: { label: 'Paid', badgeClass: 'pill pill-mint' },
+        partial: { label: 'Partial', badgeClass: 'pill pill-butter' },
+        unpaid: { label: 'Unpaid', badgeClass: 'pill pill-rose' },
+        unknown: { label: 'Unknown', badgeClass: 'pill pill-mist' },
       };
 
       const TAB_IDS = { all: 'tabAll', paid: 'tabPaid', partial: 'tabPartial', unpaid: 'tabUnpaid' };
@@ -115,13 +109,13 @@
       function renderCoverage(data) {
         const companies = Array.isArray(data?.companies) ? data.companies : [];
         if (companies.length === 0) {
-          $('coverageLine').className = 'text-[10px] text-red-400 mb-2';
+          $('coverageLine').className = 'coverage is-error';
           $('coverageLine').textContent = data?.error || 'Both company books are unavailable';
           return;
         }
 
         const allUnavailable = companies.every((company) => company.status !== 'ok');
-        $('coverageLine').className = `${data.complete ? 'text-slate-400' : 'text-red-400'} text-[10px] mb-2`;
+        $('coverageLine').className = `coverage${data.complete ? '' : ' is-bad'}`;
         const label = data.complete
           ? 'Both books loaded'
           : allUnavailable
@@ -133,7 +127,7 @@
             return `${escapeHtml(company.name)}: ${escapeHtml(value)}`;
           })
           .join(' · ');
-        $('coverageLine').innerHTML = `<span class="font-semibold">${label}</span> · ${details}`;
+        $('coverageLine').innerHTML = `<span class="coverage-label">${label}</span><span>${details}</span>`;
       }
 
       let allInvoices = [];
@@ -148,6 +142,7 @@
         activeStatus = status;
         Object.entries(TAB_IDS).forEach(([key, id]) => {
           $(id).classList.toggle('active', key === status);
+          $(id).setAttribute('aria-pressed', String(key === status));
         });
       }
 
@@ -155,18 +150,24 @@
         return [...invoices].sort((a, b) => (b.outstandingAmount || 0) - (a.outstandingAmount || 0));
       }
 
+      function shortCompany(name) {
+        const value = String(name ?? '') || 'Unknown company';
+        if (/sdn/i.test(value)) return 'Sdn Bhd';
+        if (/^wanson enterprise$/i.test(value.trim())) return 'Enterprise';
+        return value;
+      }
+
       function buildInvoiceRow(invoice) {
         const meta = PAYMENT_STATUS_META[invoice.paymentStatus] || PAYMENT_STATUS_META.unknown;
+        const company = invoice.companyName || 'Unknown company';
         return `
-        <div class="flex items-center justify-between px-3 py-2.5 text-xs">
-          <div class="min-w-0">
-            <div class="text-white truncate">${escapeHtml(invoice.customerName || 'Unknown customer')}</div>
-            <div class="text-slate-500 text-[10px]">${escapeHtml(invoice.companyName || 'Unknown company')} · ${escapeHtml(invoice.docNo)}</div>
+        <div class="inv-row row-line">
+          <div class="inv-name c-ink">${escapeHtml(invoice.customerName || 'Unknown customer')}</div>
+          <div class="inv-meta">
+            <span class="inv-company${/sdn/i.test(company) ? ' is-sdn' : ''}" title="${escapeHtml(company)}">${escapeHtml(shortCompany(company))}</span><span class="inv-sep"> · </span><span class="inv-doc">${escapeHtml(invoice.docNo)}</span>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-slate-300">${formatMYR(invoice.grandTotal)}</span>
-            <span class="${meta.badgeClass} px-1.5 py-0.5 rounded text-[10px] font-medium">${meta.label}</span>
-          </div>
+          <div class="inv-total c-ink">${formatMYR(invoice.grandTotal)}</div>
+          <span class="inv-status ${meta.badgeClass}">${meta.label}</span>
         </div>`;
       }
 
@@ -184,12 +185,13 @@
 
         const listEl = $('invoiceList');
         if (filtered.length === 0) {
-          listEl.innerHTML = '<div class="text-slate-500 text-xs px-3 py-4 text-center">No invoices in this view</div>';
+          listEl.innerHTML = '<div class="c-muted text-sm px-3 py-6 text-center">No invoices in this view</div>';
         } else {
           listEl.innerHTML = sortByOutstandingDesc(filtered).map(buildInvoiceRow).join('');
         }
 
         $('listSkeleton').classList.add('hidden');
+        $('invoiceHead').classList.toggle('hidden', filtered.length === 0);
         listEl.classList.remove('hidden');
       }
 
