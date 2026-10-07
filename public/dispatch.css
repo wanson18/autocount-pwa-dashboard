@@ -1448,9 +1448,8 @@ h2 {
 
 .invoice-card--compact .invoice-customer {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .invoice-card--compact .remove-assignment-button {

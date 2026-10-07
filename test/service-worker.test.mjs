@@ -61,7 +61,7 @@ test('service worker installs a new cache namespace and activation removes every
   let installPromise;
   worker.listeners.get('install')({ waitUntil(promise) { installPromise = promise; } });
   await installPromise;
-  assert.equal(worker.openedCaches[0], 'sales-dashboard-v25');
+  assert.equal(worker.openedCaches[0], 'sales-dashboard-v26');
 
   let activationPromise;
   worker.listeners.get('activate')({ waitUntil(promise) { activationPromise = promise; } });
