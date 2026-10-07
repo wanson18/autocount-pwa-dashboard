@@ -155,6 +155,12 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
       <label class="assign-trip-picker"><span class="assign-trip-label">Assign to</span><select class="assign-trip-select" data-assign-trip-select aria-label="Trip for invoice ${escapeHtml(invoice.docNo)}" ${!writesEnabled || pending ? 'disabled' : ''}>${tripOptions.map((option) => `<option value="${escapeHtml(option.id)}"${String(option.id) === String(assignTripId) ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>
       <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to the chosen trip">Assign to this trip</button>` : '');
   const dragHint = showAssignControls ? '<span class="drag-affordance" aria-label="Drag invoice to a lorry">↔ Drag / select</span>' : '';
+  if (inTrip) {
+    return `
+    <article class="invoice-card invoice-card--compact${selectedClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}" title="${escapeHtml(`Invoice ${invoice.docNo}`)}">
+      <span class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</span>${action}
+    </article>`;
+  }
   return `
     <article class="invoice-card${selectedClass}${railClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}">
       <div class="invoice-heading">

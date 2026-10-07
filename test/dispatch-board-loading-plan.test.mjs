@@ -124,6 +124,8 @@ test('assigned invoice cards stay removable regardless of assignable', () => {
   const markup = renderInvoiceCard(state.invoices[0], { inTrip: true, assignable: false, tripId: 101 });
 
   assert.match(markup, /data-remove-assignment=/);
-  assert.match(markup, /Drag \/ select/);
+  assert.match(markup, /invoice-card--compact/);
+  assert.match(markup, new RegExp(invoice.customer.name));
+  assert.doesNotMatch(markup, /invoice-address|invoice-items/);
   assert.match(markup, /draggable="true"/);
 });
