@@ -119,9 +119,14 @@ function companyBadge(invoice) {
   return `<span class="company-badge ${className}">${escapeHtml(COMPANY_BADGES[companyKey] || companyKey)}</span>`;
 }
 
+export function formatQuantity(value) {
+  const text = String(value ?? '').trim();
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/\.?0+$/, '') : text;
+}
+
 function itemSummary(invoice) {
   return (invoice.items || []).map((item) => (
-    `<strong>${escapeHtml(item.quantity)} ${escapeHtml(item.uom || 'UOM review')}</strong> ${escapeHtml(item.itemCode)}`
+    `<strong>${escapeHtml(formatQuantity(item.quantity))} ${escapeHtml(item.uom || 'UOM review')}</strong> ${escapeHtml(item.itemCode)}`
   )).join(' · ') || 'No item lines';
 }
 
@@ -137,7 +142,7 @@ function loadingSheetHref(tripId) {
   return `/loading-sheet.html?trip_id=${encodeURIComponent(String(tripId))}`;
 }
 
-export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true } = {}) {
+export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true, tripOptions = [], assignTripId = null } = {}) {
   const key = getInvoiceKey(invoice);
   const selectedClass = selected ? ' is-selected' : '';
   const railClass = rail ? ' invoice-card--rail' : '';
@@ -147,7 +152,8 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
   const removeLabel = tripId == null ? `Remove invoice ${invoice.docNo} from trip` : `Remove invoice ${invoice.docNo} from trip ${tripId}`;
   const action = inTrip ? (removeAllowed ? `
       <button class="remove-assignment-button" type="button" data-remove-assignment="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="${escapeHtml(removeLabel)}">Remove</button>` : '') : (assignable ? `
-      <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-describedby="assignmentExplanation" aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to selected trip">Assign to selected trip</button>` : '');
+      <label class="assign-trip-picker"><span class="assign-trip-label">Assign to</span><select class="assign-trip-select" data-assign-trip-select aria-label="Trip for invoice ${escapeHtml(invoice.docNo)}" ${!writesEnabled || pending ? 'disabled' : ''}>${tripOptions.map((option) => `<option value="${escapeHtml(option.id)}"${String(option.id) === String(assignTripId) ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>
+      <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to the chosen trip">Assign to this trip</button>` : '');
   const dragHint = showAssignControls ? '<span class="drag-affordance" aria-label="Drag invoice to a lorry">↔ Drag / select</span>' : '';
   return `
     <article class="invoice-card${selectedClass}${railClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}">
@@ -252,6 +258,8 @@ export function renderLorryBoard(root, state, { resources = { drivers: [], lorri
     : '<div class="empty-dropzone">No trips yet. Use + New trip to add a lorry.</div>';
 }
 
+let assignTripChoice = null;
+
 export function renderDispatchBoard(root, state, { writesEnabled = true, resources = { drivers: [], lorries: [] } } = {}) {
   const unassigned = visibleUnassignedInvoices(state);
   const hasTrips = state.trips.length > 0;
@@ -261,6 +269,13 @@ export function renderDispatchBoard(root, state, { writesEnabled = true, resourc
   if (boardLayout) boardLayout.dataset.hasTrips = String(hasTrips);
   if (loadingPlan) loadingPlan.hidden = !hasTrips;
   if (queueHelp) queueHelp.textContent = hasTrips ? QUEUE_HELP_WITH_TRIPS : QUEUE_HELP_NO_TRIPS;
+  const tripOptions = getLorryLanes(state, resources).flatMap((lane) => lane.trips.map((trip, index) => ({
+    id: trip.id,
+    label: `${lane.lorry?.registrationNo || 'Lorry'} · Trip ${index + 1} · Ref ${trip.id}`,
+  })));
+  const assignTripId = tripOptions.some((option) => String(option.id) === String(assignTripChoice))
+    ? assignTripChoice
+    : (tripOptions.some((option) => String(option.id) === String(state.selectedTripId)) ? state.selectedTripId : tripOptions[0]?.id ?? null);
   const unassignedList = $(root, '#unassignedList');
   const companyFilter = $(root, '#companyFilter');
   const queueKey = $(root, '#queueKey');
@@ -274,7 +289,7 @@ export function renderDispatchBoard(root, state, { writesEnabled = true, resourc
     unassignedList.setAttribute('data-drop-unassigned', 'true');
     unassignedList.setAttribute('aria-label', 'Unassigned invoices drop zone');
     unassignedList.innerHTML = unassigned.length
-      ? unassigned.map((invoice) => renderInvoiceCard(invoice, { selected: state.selectedInvoiceKey === invoice.key, pending: Boolean(state.pendingMove), writesEnabled, rail: true, assignable: hasTrips })).join('')
+      ? unassigned.map((invoice) => renderInvoiceCard(invoice, { selected: state.selectedInvoiceKey === invoice.key, pending: Boolean(state.pendingMove), writesEnabled, rail: true, assignable: hasTrips, tripOptions, assignTripId })).join('')
       : (state.searchQuery || '').trim()
         ? '<div class="empty-dropzone">No invoices match this search.</div>'
         : '<div class="empty-dropzone">No unassigned invoices in this company view.</div>';
@@ -994,10 +1009,17 @@ export function createDispatchApp({
   exportReportButton?.addEventListener('click', () => exportReport().catch((error) => { if (error.code === 'unauthorized') handleSessionLoss(); else { const status = $(root, '#reportState'); if (status) status.textContent = 'The report could not be exported. Try again.'; } }));
   resourceType?.addEventListener('change', updateResourceTypeFields); showInactiveResources?.addEventListener('change', () => loadResources().catch(() => {}));
 
+  root.addEventListener('change', (event) => {
+    const picker = event.target.closest?.('[data-assign-trip-select]');
+    if (!picker) return;
+    assignTripChoice = picker.value;
+    for (const other of root.querySelectorAll('[data-assign-trip-select]')) other.value = picker.value;
+  });
+
   root.addEventListener('click', (event) => {
     const removeTripButton = event.target.closest?.('[data-remove-trip]'); if (removeTripButton) { removeTrip(removeTripButton.dataset.removeTrip).catch(() => {}); return; }
     const remove = event.target.closest?.('[data-remove-assignment]'); if (remove) { removeAssignedInvoice(remove.dataset.removeAssignment).catch(() => {}); return; }
-    const assign = event.target.closest?.('[data-assign-invoice]'); if (assign) { const tripId = state.selectedTripId || state.trips[0]?.id; if (tripId !== undefined) assignInvoice(assign.dataset.assignInvoice, tripId, assign).catch(() => {}); return; }
+    const assign = event.target.closest?.('[data-assign-invoice]'); if (assign) { const picked = assign.closest('.invoice-card')?.querySelector('[data-assign-trip-select]')?.value; const tripId = picked || state.selectedTripId || state.trips[0]?.id; if (tripId !== undefined) assignInvoice(assign.dataset.assignInvoice, tripId, assign).catch(() => {}); return; }
     const assignSelected = event.target.closest?.('[data-assign-selected]'); if (assignSelected) { if (state.selectedInvoiceKey) assignInvoice(state.selectedInvoiceKey, assignSelected.dataset.assignSelected, assignSelected).catch(() => {}); return; }
     const startTrip = event.target.closest?.('[data-start-trip]'); if (startTrip) { const lorryId = startTrip.dataset.startTrip; if (state.selectedInvoiceKey) stageInvoiceForLorry(state.selectedInvoiceKey, lorryId); else openTripDialog(startTrip, { lorryId }).catch((error) => { if (error.code !== 'unauthorized') $(root, '#statusMessage').textContent = 'Resources could not be loaded. Try again.'; }); return; }
     if (state.selectedInvoiceKey) {

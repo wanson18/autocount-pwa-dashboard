@@ -1424,3 +1424,16 @@ h2 {
 .add-trip-button {
   min-height: 44px;
 }
+
+.assign-trip-picker {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+
+.assign-trip-select {
+  width: 100%;
+  min-height: 40px;
+  font: inherit;
+}

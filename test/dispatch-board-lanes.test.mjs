@@ -174,7 +174,21 @@ test('rail invoice card keeps every Board assignment hook and the company badge'
   assert.match(markup, /data-select-invoice=/);
   assert.match(markup, /data-assign-invoice=/);
   assert.match(markup, /class="company-badge enterprise"/);
-  assert.match(markup, /Assign to selected trip/);
+  assert.match(markup, /Assign to this trip/);
+});
+
+test('invoice card offers a trip picker and quantities drop trailing zeros', () => {
+  const invoice = { ...enterpriseInvoice, items: [{ itemCode: 'OIL', uom: 'CTN', quantity: '100.000000' }, { itemCode: 'SALT', uom: 'BAG', quantity: '2.500000' }] };
+  const state = createDispatchState({ invoices: [invoice] });
+  const tripOptions = [{ id: 101, label: 'AAA 1 · Trip 1 · Ref 101' }, { id: 102, label: 'AAA 1 · Trip 2 · Ref 102' }];
+
+  const markup = renderInvoiceCard(state.invoices[0], { tripOptions, assignTripId: 102 });
+
+  assert.match(markup, /data-assign-trip-select/);
+  assert.match(markup, /<option value="101">AAA 1 · Trip 1 · Ref 101<\/option>/);
+  assert.match(markup, /<option value="102" selected>/);
+  assert.match(markup, /<strong>100 CTN<\/strong>/);
+  assert.match(markup, /<strong>2\.5 BAG<\/strong>/);
 });
 
 test('trips transport updateTrip sends only the approved driver mutation fields', async () => {

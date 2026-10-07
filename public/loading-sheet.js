@@ -34,6 +34,11 @@ function companyBadge(companyKey) {
   return `<span class="company-badge ${className}">${escapeHtml(COMPANY_BADGES[companyKey] || companyKey)}</span>`;
 }
 
+export function formatQuantity(value) {
+  const text = String(value ?? '').trim();
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/\.?0+$/, '') : text;
+}
+
 function displayTripValue(value, fallback = 'Not recorded') {
   return escapeHtml(value || fallback);
 }
@@ -78,7 +83,7 @@ function renderLoadingSheet(root, sheet) {
       <div class="items-table-wrap">
         <table class="items-table">
           <thead><tr><th scope="col">Item code</th><th scope="col">Description</th><th scope="col">UOM</th><th scope="col">Enterprise</th><th scope="col">Sdn Bhd</th><th scope="col">Total loaded</th></tr></thead>
-          <tbody>${items.length ? items.map((item) => `<tr><td>${escapeHtml(item.itemCode)}</td><td>${escapeHtml(item.description)}</td><td>${escapeHtml(item.uom)}</td><td>${escapeHtml(item.enterprise)}</td><td>${escapeHtml(item.sdn_bhd)}</td><td class="quantity-total">${escapeHtml(item.total)}</td></tr>`).join('') : '<tr><td colspan="6">No persisted item snapshots remain on this trip.</td></tr>'}</tbody>
+          <tbody>${items.length ? items.map((item) => `<tr><td>${escapeHtml(item.itemCode)}</td><td>${escapeHtml(item.description)}</td><td>${escapeHtml(item.uom)}</td><td>${escapeHtml(formatQuantity(item.enterprise))}</td><td>${escapeHtml(formatQuantity(item.sdn_bhd))}</td><td class="quantity-total">${escapeHtml(formatQuantity(item.total))}</td></tr>`).join('') : '<tr><td colspan="6">No persisted item snapshots remain on this trip.</td></tr>'}</tbody>
         </table>
       </div>
       <div class="signoff-grid" aria-label="Loading sign-off fields">
