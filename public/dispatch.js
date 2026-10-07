@@ -271,7 +271,7 @@ export function renderDispatchBoard(root, state, { writesEnabled = true, resourc
   if (queueHelp) queueHelp.textContent = hasTrips ? QUEUE_HELP_WITH_TRIPS : QUEUE_HELP_NO_TRIPS;
   const tripOptions = getLorryLanes(state, resources).flatMap((lane) => lane.trips.map((trip, index) => ({
     id: trip.id,
-    label: `${lane.lorry?.registrationNo || 'Lorry'} · Trip ${index + 1} · Ref ${trip.id}`,
+    label: `${lane.lorry?.registrationNo || 'Lorry'} · ${trip.driver?.name || trip.driverName || 'No driver'} · Trip ${index + 1} · Ref ${trip.id}`,
   })));
   const assignTripId = tripOptions.some((option) => String(option.id) === String(assignTripChoice))
     ? assignTripChoice
