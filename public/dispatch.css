@@ -1437,3 +1437,28 @@ h2 {
   min-height: 40px;
   font: inherit;
 }
+
+.invoice-card--compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.invoice-card--compact .invoice-customer {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.invoice-card--compact .remove-assignment-button {
+  flex: none;
+  min-height: 32px;
+  margin: 0;
+}
+
+.invoice-card--rail .invoice-customer {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
