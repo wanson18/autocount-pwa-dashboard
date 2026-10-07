@@ -161,6 +161,13 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
       <span class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</span>${action}
     </article>`;
   }
+  if (rail) {
+    return `
+    <article class="invoice-card${selectedClass}${railClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}" title="${escapeHtml(`Invoice ${invoice.docNo}`)}">
+      <div class="invoice-customer">${companyBadge(invoice)} ${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</div>
+      <button class="invoice-select-button" type="button" data-select-invoice="${escapeHtml(key)}" aria-pressed="${String(selected)}" aria-label="Select invoice ${escapeHtml(invoice.docNo)} from ${escapeHtml(COMPANY_BADGES[companyKeyOf(invoice)] || companyKeyOf(invoice))}">Select invoice</button>${action}
+    </article>`;
+  }
   return `
     <article class="invoice-card${selectedClass}${railClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}">
       <div class="invoice-heading">

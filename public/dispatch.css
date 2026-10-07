@@ -1457,3 +1457,8 @@ h2 {
   min-height: 32px;
   margin: 0;
 }
+
+.invoice-card--rail .invoice-customer {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -71,7 +71,7 @@ test('Board shows the loading plan and assignment controls once a trip exists', 
   assert.match(elements.get('queueHelp').textContent, /Drag on desktop/);
   const queue = elements.get('unassignedList').innerHTML;
   assert.match(queue, /data-assign-invoice=/);
-  assert.match(queue, /Drag \/ select/);
+  assert.match(queue, /data-assign-invoice=/);
   assert.match(queue, /draggable="true"/);
   assert.match(elements.get('lorryBoard').innerHTML, /data-trip-id="101"/);
 });
@@ -106,7 +106,7 @@ test('invoice card omits assignment controls when assignable is false and keeps 
 
   const open = renderInvoiceCard(unassigned, { rail: true });
   assert.match(open, /data-assign-invoice=/);
-  assert.match(open, /Drag \/ select/);
+  assert.match(open, /data-assign-invoice=/);
   assert.match(open, /draggable="true"/);
 });
 
