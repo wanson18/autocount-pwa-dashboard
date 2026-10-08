@@ -418,3 +418,74 @@ test('trip GET rejects an over-bound limit before reading the repository', async
   assert.equal(response.body.error.code, 'invalid_request');
   assert.equal(called, false);
 });
+
+test('trip POST with the same date, driver and lorry but different request_ids creates separate trips', async () => {
+  const api = requireTripsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const { driver, vehicle } = await seedResources(repository, 'MULTI');
+    const service = implementation.createDispatchService({ repository });
+    const handler = api.createDispatchTripsHandler({ service, getSession: async () => SESSION });
+    const body = (requestId) => ({
+      trip_date: '2026-10-08', driver_id: driver.id, vehicle_id: vehicle.id,
+      route_notes: 'Same lorry, second run', request_id: requestId,
+    });
+
+    const first = responseRecorder();
+    await handler(jsonRequest('POST', body('trip-multi-request-001')), first);
+    const second = responseRecorder();
+    await handler(jsonRequest('POST', body('trip-multi-request-002')), second);
+
+    assert.equal(first.statusCode, 201);
+    assert.equal(second.statusCode, 201);
+    assert.notEqual(first.body.trip.id, second.body.trip.id);
+    assert.equal((await database.pool.query(
+      'SELECT count(*)::int AS count FROM delivery_trips WHERE trip_date = $1 AND driver_id = $2 AND vehicle_id = $3',
+      ['2026-10-08', driver.id, vehicle.id],
+    )).rows[0].count, 2);
+
+    const listed = responseRecorder();
+    await handler({ method: 'GET', query: { startDate: '2026-10-08', endDate: '2026-10-08' }, headers: {} }, listed);
+    assert.deepEqual(
+      listed.body.trips.filter((trip) => trip.vehicleId === vehicle.id).map((trip) => trip.id),
+      [first.body.trip.id, second.body.trip.id],
+    );
+  } finally {
+    await database.close();
+  }
+});
+
+test('trip POST retried with the same request_id replays the original trip instead of creating another', async () => {
+  const api = requireTripsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const { driver, vehicle } = await seedResources(repository, 'RETRY');
+    const service = implementation.createDispatchService({ repository });
+    const handler = api.createDispatchTripsHandler({ service, getSession: async () => SESSION });
+    const body = {
+      trip_date: '2026-10-08', driver_id: driver.id, vehicle_id: vehicle.id,
+      route_notes: '', request_id: 'trip-retry-request-001',
+    };
+
+    const first = responseRecorder();
+    await handler(jsonRequest('POST', body), first);
+    const retry = responseRecorder();
+    await handler(jsonRequest('POST', body), retry);
+
+    assert.equal(first.statusCode, 201);
+    assert.equal(retry.statusCode, 201);
+    assert.equal(retry.body.trip.id, first.body.trip.id);
+    assert.equal((await database.pool.query(
+      'SELECT count(*)::int AS count FROM delivery_trips WHERE vehicle_id = $1',
+      [vehicle.id],
+    )).rows[0].count, 1);
+  } finally {
+    await database.close();
+  }
+});
