@@ -6,6 +6,7 @@ import {
   getInvoiceKey,
   getLorryLanes,
   getTripInvoices,
+  getTripNumbers,
   lorryIdOf,
 } from '../public/dispatch-state.mjs';
 import {
@@ -211,4 +212,32 @@ test('trips transport updateTrip sends only the approved driver mutation fields'
   assert.equal(body.ignored, undefined);
   assert.equal(body.driver_id, 4);
   assert.equal(body.expected_revision, 2);
+});
+
+test('trip numbers count per lorry per day by trip ID, so a second trip never reuses Trip 1', () => {
+  const trips = [
+    { ...tripWithLorry, id: 205, tripDate: '2026-08-29' },
+    { ...tripWithLorry, id: 103, tripDate: '2026-08-28' },
+    { ...tripWithLorry, id: 101, tripDate: '2026-08-28' },
+    { ...tripWithLorry, id: 104, tripDate: '2026-08-28', vehicleId: 3, lorry: lorries[1] },
+  ];
+  const numbers = getTripNumbers(trips);
+  assert.equal(numbers.get('101'), 1);
+  assert.equal(numbers.get('103'), 2);
+  assert.equal(numbers.get('205'), 1, 'a new day restarts at Trip 1');
+  assert.equal(numbers.get('104'), 1, 'another lorry has its own numbering');
+});
+
+test('several trips for one lorry share one lane and Select trip / Print Items address each by trip ID', () => {
+  const second = { ...tripWithLorry, id: 102, invoiceKeys: [] };
+  const state = createDispatchState({ trips: [{ ...tripWithLorry, invoiceKeys: [] }, second] });
+  const lanes = getLorryLanes(state, { drivers, lorries });
+  assert.equal(lanes.filter((lane) => lane.lorry.id === 2).length, 1);
+  assert.deepEqual(lanes.find((lane) => lane.lorry.id === 2).trips.map((trip) => trip.id), [101, 102]);
+
+  const markup = renderLorryLane(state, lanes.find((lane) => lane.lorry.id === 2), { resources: { drivers, lorries }, writesEnabled: true });
+  for (const id of [101, 102]) {
+    assert.match(markup, new RegExp(`data-select-trip="${id}"`));
+    assert.match(markup, new RegExp(`href="/loading-sheet\\.html\\?trip_id=${id}"`));
+  }
 });

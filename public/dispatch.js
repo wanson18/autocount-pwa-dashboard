@@ -13,6 +13,7 @@ import {
   getTripInvoices,
   getTabNavigationIndex,
   getLorryLanes,
+  getTripNumbers,
   lorryIdOf,
   reloadDispatchState,
   rejectMoveResponse,
@@ -249,8 +250,9 @@ export function renderLorryLane(state, lane, { resources = { drivers: [], lorrie
     ? '<span class="lorry-driver-note">Choose a driver on each trip below.</span>'
     : '';
   const effectiveDriverControl = hasTrip && !hasSingleTrip ? multiTripDriverNote : driverSelect;
+  const tripNumbers = getTripNumbers(lane.trips);
   const tripsArea = hasTrip
-    ? lane.trips.map((trip, index) => renderTripCard(state, trip, { writesEnabled, drivers: hasSingleTrip ? null : resources.drivers || [], tripNumber: index + 1 })).join('')
+    ? lane.trips.map((trip) => renderTripCard(state, trip, { writesEnabled, drivers: hasSingleTrip ? null : resources.drivers || [], tripNumber: tripNumbers.get(String(trip.id)) })).join('')
     : `<div class="empty-lane" data-drop-lorry-id="${escapeHtml(String(lorry.id))}" aria-label="Drop an invoice here to start a trip for lorry ${escapeHtml(reg)}"><p class="section-help">No trip planned for this lorry yet.</p><button class="secondary-button" type="button" data-start-trip="${escapeHtml(String(lorry.id))}" ${writesEnabled ? '' : 'disabled'} aria-label="Start a trip for lorry ${escapeHtml(reg)}">Start trip for this lorry</button></div>`;
   return `<section class="lorry-lane panel" data-lorry-id="${escapeHtml(String(lorry.id))}" aria-label="Lorry ${escapeHtml(reg)} lane">
     <div class="lorry-lane-header">
@@ -282,9 +284,10 @@ export function renderDispatchBoard(root, state, { writesEnabled = true, resourc
   if (boardLayout) boardLayout.dataset.hasTrips = String(hasTrips);
   if (loadingPlan) loadingPlan.hidden = !hasTrips;
   if (queueHelp) queueHelp.textContent = hasTrips ? QUEUE_HELP_WITH_TRIPS : QUEUE_HELP_NO_TRIPS;
-  const tripOptions = getLorryLanes(state, resources).flatMap((lane) => lane.trips.map((trip, index) => ({
+  const tripNumbers = getTripNumbers(state.trips);
+  const tripOptions = getLorryLanes(state, resources).flatMap((lane) => lane.trips.map((trip) => ({
     id: trip.id,
-    label: `${lane.lorry?.registrationNo || 'Lorry'} · ${trip.driver?.name || trip.driverName || 'No driver'} · Trip ${index + 1} · Ref ${trip.id}`,
+    label: `${lane.lorry?.registrationNo || 'Lorry'} · ${trip.driver?.name || trip.driverName || 'No driver'} · Trip ${tripNumbers.get(String(trip.id))} · Ref ${trip.id}`,
   })));
   const assignTripId = tripOptions.some((option) => String(option.id) === String(assignTripChoice))
     ? assignTripChoice

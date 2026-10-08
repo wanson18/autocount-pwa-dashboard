@@ -132,6 +132,7 @@ test('migration creates the dispatch tables and is idempotent', async () => {
     '003_dispatch_login_throttling.sql',
     '004_dispatch_resource_idempotency.sql',
     '005_dispatch_mutation_idempotency.sql',
+    '006_allow_multiple_trips_per_lorry_day.sql',
   ]);
 
   const { migrate } = require('../scripts/migrate');
@@ -166,6 +167,7 @@ test('migration upgrades the exact 5fe2aa9 schema with hardening exactly once', 
         '003_dispatch_login_throttling.sql',
         '004_dispatch_resource_idempotency.sql',
         '005_dispatch_mutation_idempotency.sql',
+        '006_allow_multiple_trips_per_lorry_day.sql',
       ],
       'an existing 001 database must receive the additive hardening migration',
     );
@@ -484,6 +486,7 @@ test('explicit audited remediation archives originals and permits hardening', as
       '003_dispatch_login_throttling.sql',
       '004_dispatch_resource_idempotency.sql',
       '005_dispatch_mutation_idempotency.sql',
+      '006_allow_multiple_trips_per_lorry_day.sql',
     ]);
   } finally {
     await legacyDatabase.close();
