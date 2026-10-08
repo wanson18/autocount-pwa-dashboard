@@ -86,6 +86,20 @@ test('report records retain company-scoped identity, statuses, route, resources,
   assert.equal(JSON.stringify(result).includes('100.00'), false);
 });
 
+test('removed invoices are hidden from reports unless the removed status is requested', () => {
+  const { buildReport } = requireReport();
+  const records = [...recordsFixture(), { ...recordsFixture()[1], assignmentId: 11, docNo: 'SDN-002', assignmentStatus: 'removed' }];
+
+  const defaultReport = buildReport(records, { startDate: '2026-08-28', endDate: '2026-08-28' });
+  assert.deepEqual(defaultReport.records.map((row) => row.docNo), ['ENT,001', 'SDN-001']);
+
+  const tripStatusReport = buildReport(records, { startDate: '2026-08-28', endDate: '2026-08-28', status: 'completed' });
+  assert.deepEqual(tripStatusReport.records.map((row) => row.docNo), ['ENT,001', 'SDN-001']);
+
+  const removedReport = buildReport(records, { startDate: '2026-08-28', endDate: '2026-08-28', status: 'removed' });
+  assert.deepEqual(removedReport.records.map((row) => row.docNo), ['SDN-002']);
+});
+
 test('report CSV uses deterministic RFC 4180 quoting and neutralizes spreadsheet formulas', () => {
   const { buildReport, reportToCsv } = requireReport();
   const result = buildReport(recordsFixture(), { startDate: '2026-08-28', endDate: '2026-08-28' });

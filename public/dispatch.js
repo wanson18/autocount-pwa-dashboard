@@ -562,20 +562,49 @@ function reportCompanyBadge(companyKey) {
   return `<span class="company-badge ${className}">${escapeHtml(COMPANY_BADGES[companyKey] || companyKey)}</span>`;
 }
 
+function groupReportRecordsByTrip(reportRecords) {
+  const groups = new Map();
+  for (const record of reportRecords) {
+    const key = `${record.tripDate}|${record.tripId}`;
+    if (!groups.has(key)) groups.set(key, { first: record, records: [] });
+    groups.get(key).records.push(record);
+  }
+  return [...groups.values()];
+}
+
+function reportStatusLabel(status) {
+  return String(status || '').replaceAll('_', ' ');
+}
+
 export function renderReportTable(root, reportRecords = []) {
   const table = $(root, '#reportTable');
   if (!table) return;
   const body = table.querySelector('tbody');
   if (!body) return;
-  body.innerHTML = reportRecords.length ? reportRecords.map((record) => `<tr>
-    <td><strong>Trip ${escapeHtml(record.tripId)}</strong><span class="report-secondary">${escapeHtml(record.tripStatus)}</span></td>
-    <td>${escapeHtml(formatKualaLumpurDate(record.tripDate) || record.tripDate)}</td>
+  if (!reportRecords.length) {
+    body.innerHTML = '<tr><td colspan="4">No invoices match these filters.</td></tr>';
+    return;
+  }
+  body.innerHTML = groupReportRecordsByTrip(reportRecords).map(({ first, records }) => {
+    const resource = [first.driver?.name, first.lorry?.registrationNo].filter(Boolean).join(' · ') || 'No driver / lorry';
+    const count = `${records.length} invoice${records.length === 1 ? '' : 's'}`;
+    const header = `<tr class="report-trip-row"><th scope="rowgroup" colspan="4">
+      <span class="report-trip-title">Trip ${escapeHtml(first.tripId)} · ${escapeHtml(formatKualaLumpurDate(first.tripDate) || first.tripDate)}</span>
+      <span class="report-trip-meta">${escapeHtml(resource)} · <span class="report-trip-status">${escapeHtml(reportStatusLabel(first.tripStatus))}</span> · ${count}</span>
+    </th></tr>`;
+    const rows = records.map((record) => `<tr>
     <td>${reportCompanyBadge(record.companyKey)}</td>
-    <td><strong>${escapeHtml(record.docNo)}</strong><span class="report-secondary">${escapeHtml(record.invoiceId)}</span></td>
+    <td><strong>${escapeHtml(record.docNo)}</strong></td>
     <td><strong>${escapeHtml(record.customer?.name)}</strong><span class="report-secondary">${escapeHtml(record.customer?.code)}</span></td>
-    <td>${escapeHtml(record.driver?.name)}<span class="report-secondary">${escapeHtml(record.lorry?.registrationNo)}</span></td>
-    <td><strong>${escapeHtml(record.assignmentStatus)}</strong><span class="report-secondary">Updated ${escapeHtml(formatKualaLumpurDateTime(record.updatedAt))}</span></td>
-  </tr>`).join('') : '<tr><td colspan="7">No persisted records match these filters.</td></tr>';
+    <td><span class="report-status report-status-${escapeHtml(record.assignmentStatus)}">${escapeHtml(reportStatusLabel(record.assignmentStatus))}</span><span class="report-secondary">${escapeHtml(formatKualaLumpurDateTime(record.updatedAt))}</span></td>
+  </tr>`).join('');
+    return header + rows;
+  }).join('');
+}
+
+function reportSummary(records) {
+  const trips = groupReportRecordsByTrip(records).length;
+  return `${records.length} invoice${records.length === 1 ? '' : 's'} across ${trips} trip${trips === 1 ? '' : 's'}.`;
 }
 
 function renderReportView(root, reportState) {
@@ -583,7 +612,7 @@ function renderReportView(root, reportState) {
   if (state) {
     state.textContent = reportState.status === 'loading' ? 'Loading persisted report records…'
       : reportState.status === 'error' ? 'The report could not be loaded. Check the filters and retry.'
-        : reportState.status === 'ready' ? `${reportState.records.length} persisted record${reportState.records.length === 1 ? '' : 's'} loaded.`
+        : reportState.status === 'ready' ? reportSummary(reportState.records)
           : 'Choose filters and load a report.';
   }
   renderReportTable(root, reportState.records);

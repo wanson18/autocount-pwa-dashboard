@@ -955,7 +955,7 @@ h2 {
 }
 
 .report-table {
-  min-width: 760px;
+  min-width: 560px;
   border-collapse: collapse;
   width: 100%;
   font-size: 0.8125rem;
@@ -982,6 +982,46 @@ h2 {
 
 .report-table td strong {
   color: var(--ink);
+}
+
+.report-table .report-trip-row th {
+  padding: 14px 9px 8px;
+  background: var(--ground);
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 0.875rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.report-trip-title {
+  font-weight: 800;
+}
+
+.report-trip-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.report-trip-status,
+.report-status {
+  text-transform: capitalize;
+}
+
+.report-status {
+  font-weight: 800;
+}
+
+.report-status-delivered {
+  color: #1d7a46;
+}
+
+.report-status-failed,
+.report-status-returned {
+  color: #b42318;
 }
 
 .report-secondary {
