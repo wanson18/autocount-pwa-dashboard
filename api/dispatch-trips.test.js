@@ -489,3 +489,43 @@ test('trip POST retried with the same request_id replays the original trip inste
     await database.close();
   }
 });
+
+test('migration 006 drops a hand-made unique index and constraint on (trip_date, driver_id, vehicle_id)', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'db', 'migrations', '006_allow_multiple_trips_per_lorry_day.sql'),
+    'utf8',
+  );
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const { driver, vehicle } = await seedResources(repository, 'UNIQ');
+    const insert = () => database.pool.query(
+      "INSERT INTO delivery_trips (trip_date, driver_id, vehicle_id) VALUES ('2026-10-08', $1, $2)",
+      [driver.id, vehicle.id],
+    );
+    const uniqueCount = async () => (await database.pool.query(`
+      SELECT count(*)::int AS count FROM pg_indexes
+      WHERE tablename = 'delivery_trips' AND indexdef LIKE 'CREATE UNIQUE INDEX%'
+        AND indexname <> 'delivery_trips_pkey'
+    `)).rows[0].count;
+
+    await database.pool.query('CREATE UNIQUE INDEX trips_manual_unique_idx ON delivery_trips (trip_date, driver_id, vehicle_id)');
+    await database.pool.query('ALTER TABLE delivery_trips ADD CONSTRAINT trips_manual_unique UNIQUE (vehicle_id, driver_id, trip_date)');
+    await insert();
+    await assert.rejects(insert, /duplicate key/);
+
+    await database.pool.query(sql);
+    await insert();
+    assert.equal(await uniqueCount(), 0);
+    // Re-running is a no-op, and the primary key survives.
+    await database.pool.query(sql);
+    assert.equal((await database.pool.query(
+      "SELECT count(*)::int AS count FROM pg_indexes WHERE tablename = 'delivery_trips' AND indexname = 'delivery_trips_pkey'",
+    )).rows[0].count, 1);
+  } finally {
+    await database.close();
+  }
+});
