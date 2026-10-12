@@ -1,5 +1,11 @@
 # Project Blueprint: AutoCount Sales Dashboard (iPhone PWA)
 
+## Shared Wanson rules
+
+Rules that apply across all Wanson repos (company separation, draft-only, no secrets) live in the **private** repo `wanson18/Wanson_Automation`, at `Wanson-Context/README.md`. Read it when you have access. This file keeps only this app's own rules.
+
+This repo is **public**: never add business rules, customer data, credentials or internal workflows here. Link to the private hub instead.
+
 ## System Overview
 
 Mobile-first operations PWA for Wanson Companies. A Vercel serverless middleware reads sales invoices from the AutoCount Cloud Accounting API for both fixed company books (Wanson Enterprise `63750`, Wanson Sdn Bhd `63688`), aggregates line items by SKU, and serves KPI cards, charts, payment status, and per-item/customer breakdowns to a static iPhone-optimized frontend.
