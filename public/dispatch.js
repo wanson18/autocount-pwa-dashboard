@@ -433,13 +433,27 @@ export function createFetchTransport({ fetchImpl = globalThis.fetch } = {}) {
       const [invoicePayload, tripPayload, assignmentPayload] = await Promise.all([
         getJson(fetchImpl, `/api/dispatch/invoices?${invoiceQuery.toString()}`, 'The board could not be loaded.'),
         getJson(fetchImpl, `/api/dispatch/trips?${tripQuery.toString()}`, 'The trips could not be loaded.'),
-        getJson(fetchImpl, '/api/dispatch/assignments?limit=100', 'The assignments could not be loaded.'),
+        getJson(fetchImpl, `/api/dispatch/assignments?${new URLSearchParams({ doc_date: startDate, limit: '1000' }).toString()}`, 'The assignments could not be loaded.'),
       ]);
       return {
         invoices: invoicePayload?.invoices || [], trips: tripPayload?.trips || [],
         assignments: assignmentPayload?.assignments || [], sources: invoicePayload?.sources || {},
         quarantinedCount: Number(invoicePayload?.quarantinedCount) || 0,
         dateRange: invoicePayload?.dateRange || { startDate, endDate },
+      };
+    },
+    async loadPickerInvoices({ date, company = 'all' } = {}) {
+      if (!COMPANY_FILTERS.includes(company)) throw new Error(`invalid company filter: ${company}`);
+      const invoiceQuery = new URLSearchParams({ startDate: date, endDate: date, company });
+      const assignmentQuery = new URLSearchParams({ doc_date: date, limit: '1000' });
+      const [invoicePayload, assignmentPayload] = await Promise.all([
+        getJson(fetchImpl, `/api/dispatch/invoices?${invoiceQuery.toString()}`, 'The invoices could not be loaded.'),
+        getJson(fetchImpl, `/api/dispatch/assignments?${assignmentQuery.toString()}`, 'The assignments could not be loaded.'),
+      ]);
+      return {
+        invoices: invoicePayload?.invoices || [],
+        assignments: assignmentPayload?.assignments || [],
+        sources: invoicePayload?.sources || {},
       };
     },
   };

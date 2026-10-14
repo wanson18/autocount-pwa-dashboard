@@ -9,6 +9,7 @@ import {
   getInvoiceDateTag,
   shiftDate,
 } from '../public/dispatch-state.mjs';
+import { createFetchTransport } from '../public/dispatch.js';
 
 const KL_NOON_14_OCT = new Date('2026-10-14T04:00:00Z');
 const KL_JUST_AFTER_MIDNIGHT_15_OCT = new Date('2026-10-14T16:05:00Z');
@@ -64,4 +65,36 @@ test('getInvoiceDateTag labels older and later invoice dates against the trip da
   const newer = getInvoiceDateTag('2026-10-15', '2026-10-14');
   assert.equal(newer.kind, 'newer');
   assert.match(newer.label, /^Dated · 15 Oct$/);
+});
+
+function recordingFetch(payloadFor) {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    return { ok: true, status: 200, async json() { return payloadFor(url); } };
+  };
+  return { calls, fetchImpl };
+}
+
+test('board transport asks for assignments by the board date instead of the latest 100', async () => {
+  const { calls, fetchImpl } = recordingFetch((url) => (
+    url.includes('/invoices?') ? { success: true, invoices: [], sources: {}, dateRange: { startDate: '2026-10-13', endDate: '2026-10-13' } }
+      : url.includes('/trips?') ? { success: true, trips: [] }
+        : { success: true, assignments: [] }));
+  await createFetchTransport({ fetchImpl }).loadBoard({ startDate: '2026-10-13', endDate: '2026-10-13', company: 'all' });
+  const assignmentUrl = calls.find((url) => url.startsWith('/api/dispatch/assignments'));
+  assert.equal(assignmentUrl, '/api/dispatch/assignments?doc_date=2026-10-13&limit=1000');
+});
+
+test('picker transport reads one date of invoices and that date’s active assignments', async () => {
+  const invoices = [{ companyKey: 'enterprise', invoiceId: 'E1', docNo: 'IV-1' }];
+  const assignments = [{ companyKey: 'enterprise', invoiceId: 'E9', status: 'assigned' }];
+  const { calls, fetchImpl } = recordingFetch((url) => (
+    url.includes('/invoices?') ? { success: true, invoices, sources: { enterprise: { status: 'ok' } } } : { success: true, assignments }));
+  const result = await createFetchTransport({ fetchImpl }).loadPickerInvoices({ date: '2026-10-12', company: 'enterprise' });
+  assert.deepEqual(calls.sort(), [
+    '/api/dispatch/assignments?doc_date=2026-10-12&limit=1000',
+    '/api/dispatch/invoices?startDate=2026-10-12&endDate=2026-10-12&company=enterprise',
+  ]);
+  assert.deepEqual(result, { invoices, assignments, sources: { enterprise: { status: 'ok' } } });
 });
