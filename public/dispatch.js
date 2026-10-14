@@ -4,8 +4,11 @@ import {
   createDispatchState,
   beginOptimisticMove,
   beginOptimisticRemoval,
+  clampToDispatchWindow,
   getCompanyFilterLabel,
   getDefaultDateRange,
+  getDispatchWindow,
+  getInvoiceDateTag,
   getInvoiceKey,
   getSourceMessage,
   isCurrentEligibleUnassignedInvoice,
@@ -22,8 +25,10 @@ import {
   setCompanyFilter,
   setSearchQuery,
   settleMoveResponse,
+  shiftDate,
   visibleUnassignedInvoices,
 } from './dispatch-state.mjs';
+import { createInvoicePickerModel, mountInvoicePicker } from './dispatch-invoice-picker.mjs';
 
 const COMPANY_BADGES = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
 const REMOVABLE_ASSIGNMENT_STATUSES = new Set(['assigned', 'loaded']);
@@ -143,7 +148,7 @@ function loadingSheetHref(tripId) {
   return `/loading-sheet.html?trip_id=${encodeURIComponent(String(tripId))}`;
 }
 
-export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true, tripOptions = [], assignTripId = null } = {}) {
+export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true, tripOptions = [], assignTripId = null, referenceDate = null } = {}) {
   const key = getInvoiceKey(invoice);
   const selectedClass = selected ? ' is-selected' : '';
   const railClass = rail ? ' invoice-card--rail' : '';
@@ -156,10 +161,12 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
       <label class="assign-trip-picker"><span class="assign-trip-label">Assign to</span><select class="assign-trip-select" data-assign-trip-select aria-label="Trip for invoice ${escapeHtml(invoice.docNo)}" ${!writesEnabled || pending ? 'disabled' : ''}>${tripOptions.map((option) => `<option value="${escapeHtml(option.id)}"${String(option.id) === String(assignTripId) ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>
       <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to the chosen trip">Assign to this trip</button>` : '');
   const dragHint = showAssignControls ? '<span class="drag-affordance" aria-label="Drag invoice to a lorry">↔ Drag / select</span>' : '';
+  const dateTag = getInvoiceDateTag(invoice.docDate, referenceDate);
+  const dateTagHtml = dateTag ? `<span class="invoice-date-tag invoice-date-tag-${dateTag.kind}">${escapeHtml(dateTag.label)}</span>` : '';
   if (inTrip) {
     return `
     <article class="invoice-card invoice-card--compact${selectedClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}" title="${escapeHtml(`Invoice ${invoice.docNo}`)}">
-      <span class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</span>${action}
+      <span class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</span>${dateTagHtml}${action}
     </article>`;
   }
   if (rail) {
@@ -206,7 +213,7 @@ export function renderTripCard(state, trip, { writesEnabled = true, drivers = nu
       <p class="trip-route">${escapeHtml(trip.routeNotes || 'Route notes not set')}</p>
       <button class="trip-select-button" type="button" data-select-trip="${escapeHtml(trip.id)}" aria-pressed="${String(selected)}" aria-label="Select trip ${escapeHtml(trip.id)} with ${counts.total} invoice${counts.total === 1 ? '' : 's'}">Select trip</button>
       <div class="trip-invoices" data-drop-trip-id="${escapeHtml(trip.id)}" aria-label="Invoices assigned to trip ${escapeHtml(trip.id)}">
-        ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key, pending, writesEnabled, tripId: trip.id })).join('') : '<div class="empty-dropzone">Select an invoice above, then assign it here.</div>'}
+        ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key, pending, writesEnabled, tripId: trip.id, referenceDate: trip.tripDate })).join('') : '<div class="empty-dropzone">Select an invoice above, then assign it here.</div>'}
       </div>
       <div class="trip-actions"><span class="trip-subtotal"><strong>Enterprise ${counts.enterprise}</strong> · <strong>Sdn Bhd ${counts.sdn_bhd}</strong> · Combined ${counts.total}</span>
         <span class="trip-action-buttons">${removableTrip ? `<button class="remove-trip-button" type="button" data-remove-trip="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Remove trip ${escapeHtml(tripNumber || trip.id)} for lorry ${escapeHtml(lorryNumber)}">Remove trip</button>` : ''}<a class="future-print-button" data-print-items-trip="${escapeHtml(trip.id)}" href="${escapeHtml(loadingSheetHref(trip.id))}">Print Items</a><button class="assign-selected-button" type="button" data-assign-selected="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Assign selected invoice to trip ${escapeHtml(trip.id)}">Assign selected invoice</button></span></div>
@@ -433,13 +440,27 @@ export function createFetchTransport({ fetchImpl = globalThis.fetch } = {}) {
       const [invoicePayload, tripPayload, assignmentPayload] = await Promise.all([
         getJson(fetchImpl, `/api/dispatch/invoices?${invoiceQuery.toString()}`, 'The board could not be loaded.'),
         getJson(fetchImpl, `/api/dispatch/trips?${tripQuery.toString()}`, 'The trips could not be loaded.'),
-        getJson(fetchImpl, '/api/dispatch/assignments?limit=100', 'The assignments could not be loaded.'),
+        getJson(fetchImpl, `/api/dispatch/assignments?${new URLSearchParams({ doc_date: startDate, limit: '1000' }).toString()}`, 'The assignments could not be loaded.'),
       ]);
       return {
         invoices: invoicePayload?.invoices || [], trips: tripPayload?.trips || [],
         assignments: assignmentPayload?.assignments || [], sources: invoicePayload?.sources || {},
         quarantinedCount: Number(invoicePayload?.quarantinedCount) || 0,
         dateRange: invoicePayload?.dateRange || { startDate, endDate },
+      };
+    },
+    async loadPickerInvoices({ date, company = 'all' } = {}) {
+      if (!COMPANY_FILTERS.includes(company)) throw new Error(`invalid company filter: ${company}`);
+      const invoiceQuery = new URLSearchParams({ startDate: date, endDate: date, company });
+      const assignmentQuery = new URLSearchParams({ doc_date: date, limit: '1000' });
+      const [invoicePayload, assignmentPayload] = await Promise.all([
+        getJson(fetchImpl, `/api/dispatch/invoices?${invoiceQuery.toString()}`, 'The invoices could not be loaded.'),
+        getJson(fetchImpl, `/api/dispatch/assignments?${assignmentQuery.toString()}`, 'The assignments could not be loaded.'),
+      ]);
+      return {
+        invoices: invoicePayload?.invoices || [],
+        assignments: assignmentPayload?.assignments || [],
+        sources: invoicePayload?.sources || {},
       };
     },
   };
@@ -622,19 +643,23 @@ function renderReportView(root, reportState) {
   if (exportButton) exportButton.disabled = reportState.status === 'loading';
 }
 
-function syncDefaultDateControls(root, dateRange = getDefaultDateRange()) {
-  const formattedDate = formatKualaLumpurDate(dateRange.startDate) || dateRange.startDate;
+function syncBoardDateControls(root, date) {
+  const formattedDate = formatKualaLumpurDate(date) || date;
   const updatedAt = $(root, '#updatedAt');
   if (updatedAt) {
-    updatedAt.setAttribute('datetime', dateRange.startDate);
+    updatedAt.setAttribute('datetime', date);
     updatedAt.textContent = formattedDate;
   }
+  const tripDialogHelp = $(root, '#tripDialogHelp');
+  if (tripDialogHelp) tripDialogHelp.textContent = `Choose an active driver and lorry for ${formattedDate}.`;
+}
+
+function syncDefaultDateControls(root, dateRange = getDefaultDateRange()) {
+  syncBoardDateControls(root, dateRange.startDate);
   const reportStartDate = $(root, '#reportStartDate');
   const reportEndDate = $(root, '#reportEndDate');
   if (reportStartDate) reportStartDate.value = dateRange.startDate;
   if (reportEndDate) reportEndDate.value = dateRange.endDate;
-  const tripDialogHelp = $(root, '#tripDialogHelp');
-  if (tripDialogHelp) tripDialogHelp.textContent = `Choose an active driver and lorry for ${formattedDate}.`;
 }
 
 export function createDispatchApp({
@@ -649,7 +674,8 @@ export function createDispatchApp({
   if (!documentRef) throw new Error('a document is required');
   const root = documentRef.querySelector('#dispatchApp');
   if (!root) throw new Error('dispatch app root is required');
-  const initialDateRange = getDefaultDateRange();
+  let selectedDate = getDefaultDateRange().startDate;
+  const initialDateRange = { startDate: selectedDate, endDate: selectedDate };
   let state = createDispatchState({ dateRange: initialDateRange });
   let resources = { drivers: [], lorries: [] };
   let boardRequestSequence = 0;
@@ -678,11 +704,11 @@ export function createDispatchApp({
   function setAuthenticated(next, nextSession = null) { authenticated = next; session = next ? nextSession : null; if (loginView) loginView.hidden = next; if (authenticatedView) authenticatedView.hidden = !next; root.dataset.authenticated = String(next); }
   function setLoginMessage(message) { if (loginMessage) loginMessage.textContent = message; }
   function setResourceMessage(message) { if (resourceStatus) resourceStatus.textContent = message; }
-  function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled(), resources }); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
-  function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
+  function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled(), resources }); renderDateBar(); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
+  function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; const older = $(root, '#addOlderInvoiceButton'); if (older) older.disabled = !writesEnabled(); root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
-  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; state = createDispatchState({ boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
+  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; selectedDate = getDefaultDateRange().startDate; state = createDispatchState({ dateRange: { startDate: selectedDate, endDate: selectedDate }, boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); syncBoardDateControls(root, selectedDate); renderDateBar(); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
   function handleSessionLoss() { clearSensitiveState(); setLoginMessage('Your session has expired. Sign in again.'); setResourceMessage('Your session has expired. Sign in again.'); }
 
   async function runMutation(operation, canWrite = writesEnabled) {
@@ -704,28 +730,27 @@ export function createDispatchApp({
     if (!authenticated) return state;
     if (mutationInFlight && !allowDuringMutation) { boardLoadQueued = true; return state; }
     if (allowDuringMutation) boardLoadQueued = false;
-    const requestSequence = ++boardRequestSequence; const requestedCompany = state.companyFilter; const previousMessage = state.statusMessage;
+    const requestSequence = ++boardRequestSequence; const requestedCompany = state.companyFilter; const requestedDate = selectedDate; const previousMessage = state.statusMessage;
     boardAuthoritative = false;
     state = { ...state, boardStatus: 'loading', statusMessage: preserveMessage ? previousMessage : 'Loading the authenticated Board…' }; render();
     try {
-      const dateRange = getDefaultDateRange();
-      const board = await transport.loadBoard({ startDate: dateRange.startDate, endDate: dateRange.endDate, company: requestedCompany });
-      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
+      const board = await transport.loadBoard({ startDate: requestedDate, endDate: requestedDate, company: requestedCompany });
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany || selectedDate !== requestedDate) return state;
       let boardResources = resources;
       if (authenticated && $(root, '#driverList') && boardNeedsResourceCatalog(board)) {
         const loadedResources = await loadResources({ boardSequence: requestSequence });
         boardResources = loadedResources ? normalizeResources(loadedResources) : resources;
       }
-      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
-      state = reloadDispatchState(state, { ...board, resources: boardResources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany || selectedDate !== requestedDate) return state;
+      state = reloadDispatchState(state, { ...board, dateRange: board.dateRange || { startDate: requestedDate, endDate: requestedDate }, resources: boardResources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
       boardAuthoritative = true;
       if (preserveMessage) state.statusMessage = previousMessage;
       render();
       return state;
     } catch (error) {
-      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany || selectedDate !== requestedDate) return state;
       if (error.code === 'unauthorized') { handleSessionLoss(); $(root, '#statusMessage').textContent = 'Your session has expired. Sign in again.'; }
-      else { boardAuthoritative = false; state = createDispatchState({ companyFilter: requestedCompany, boardStatus: 'error' }); state.statusMessage = 'The Board could not be loaded. Use Retry board to try again.'; render(); }
+      else { boardAuthoritative = false; state = createDispatchState({ companyFilter: requestedCompany, dateRange: { startDate: requestedDate, endDate: requestedDate }, boardStatus: 'error' }); state.statusMessage = 'The Board could not be loaded. Use Retry board to try again.'; render(); }
       throw error;
     }
   }
@@ -860,7 +885,7 @@ export function createDispatchApp({
   async function createTrip() {
     if (!writesEnabled()) return;
     return runMutation(async () => {
-      const body = { trip_date: getDefaultDateRange().startDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
+      const body = { trip_date: selectedDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
       const submit = $(root, '#createTripSubmit'); if (submit) submit.disabled = true; $(root, '#tripDialogMessage').textContent = 'Creating trip…';
       const stagedKey = stagedInvoiceKey;
       try {
@@ -1033,15 +1058,50 @@ export function createDispatchApp({
     return accepted;
   }
 
+  function renderDateBar() {
+    const { today, minDate, maxDate } = getDispatchWindow();
+    const input = $(root, '#boardDate'); if (input) { input.min = minDate; input.max = maxDate; input.value = selectedDate; }
+    const prev = $(root, '#boardPrevDay'); if (prev) prev.disabled = selectedDate <= minDate;
+    const next = $(root, '#boardNextDay'); if (next) next.disabled = selectedDate >= maxDate;
+    const todayButton = $(root, '#boardToday'); if (todayButton) todayButton.disabled = selectedDate === today;
+    const banner = $(root, '#boardDateBanner'); if (banner) { banner.hidden = selectedDate === today; banner.textContent = selectedDate === today ? '' : `Viewing ${formatKualaLumpurDate(selectedDate) || selectedDate} — not today`; }
+  }
+  async function setBoardDate(date) {
+    selectedDate = clampToDispatchWindow(date);
+    syncBoardDateControls(root, selectedDate); state = { ...state, dateRange: { startDate: selectedDate, endDate: selectedDate } }; renderDateBar();
+    try { return await loadBoard(); } catch { return state; }
+  }
+
   async function login() { if (!clerkIdInput || !clerkPinInput) return; if (loginSubmit) loginSubmit.disabled = true; setLoginMessage('Signing in…'); try { const result = await sessionTransport.login({ clerkId: clerkIdInput.value.trim(), pin: clerkPinInput.value }); if (!result?.authenticated || !result.session) throw new Error('Sign-in could not be completed.'); setAuthenticated(true, result.session); setLoginMessage(''); clerkPinInput.value = ''; await loadBoard(); root.querySelector('[role="tab"]')?.focus?.(); } catch (error) { setAuthenticated(false); setLoginMessage(error.code === 'invalid_credentials' ? 'Invalid clerk ID or PIN.' : 'Sign-in could not be completed. Try again.'); clerkPinInput.value = ''; clerkPinInput.focus?.(); throw error; } finally { if (loginSubmit) loginSubmit.disabled = false; } }
   async function logout() { try { const result = await sessionTransport.logout(); if (!result || result.authenticated !== false || result.success === false) { const error = new Error('sign-out was not confirmed by the server'); error.code = 'logout_not_confirmed'; throw error; } } catch (error) { $(root, '#statusMessage').textContent = 'Sign-out could not be completed. Try again.'; setResourceMessage('Sign-out could not be completed. Try again.'); throw error; } clearSensitiveState(); setLoginMessage('You have been signed out.'); clerkIdInput?.focus?.(); }
   async function initializeSession() { if (!loginView && authenticatedView) { setAuthenticated(true, { clerkId: 'public-dispatch', role: 'admin' }); await loadBoard(); return; } if (!loginView || !authenticatedView || !loginForm) return; setAuthenticated(false); setLoginMessage('Checking sign-in…'); try { const result = await sessionTransport.getSession(); if (result?.authenticated && result.session) { setAuthenticated(true, result.session); setLoginMessage(''); await loadBoard(); } else setLoginMessage('Sign in to continue.'); } catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setLoginMessage('Sign-in is temporarily unavailable. Try again.'); } }
   function activateTab(tabName, { focus = false } = {}) { root.querySelectorAll('[role="tab"]').forEach((tab) => { const active = tab.dataset.tab === tabName; tab.classList.toggle('is-active', active); tab.setAttribute('aria-selected', String(active)); tab.setAttribute('tabindex', active ? '0' : '-1'); if (active && focus) tab.focus(); }); root.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = panel.id !== `${tabName}View`; }); }
 
+  const invoicePicker = mountInvoicePicker(root, {
+    model: createInvoicePickerModel({
+      transport,
+      assignmentsTransport,
+      createRequestId,
+      reloadTrip: async (tripId) => {
+        await loadBoard({ preserveMessage: true });
+        return state.trips.find((trip) => String(trip.id) === String(tripId)) || null;
+      },
+    }),
+    getBoardDate: () => selectedDate,
+    getTrips: () => state.trips,
+    canWrite: writesEnabled,
+    onAssigned: async () => { state.statusMessage = 'Older invoice added to the trip.'; try { await loadBoard({ preserveMessage: true }); } catch { /* loadBoard renders the failure. */ } },
+    onSessionLoss: handleSessionLoss,
+  });
+  $(root, '#addOlderInvoiceButton')?.addEventListener('click', (event) => { invoicePicker.open(event.currentTarget).catch(() => {}); });
   root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => { activateTab(tab.dataset.tab); if (tab.dataset.tab === 'resources' && authenticated) loadResources().catch(() => {}); if (tab.dataset.tab === 'reports' && authenticated) openReports().catch(() => {}); }));
   $(root, '#companyFilter')?.addEventListener('change', (event) => { setState(setCompanyFilter(state, event.target.value)); loadBoard().catch(() => {}); });
   $(root, '#invoiceSearch')?.addEventListener('input', (event) => { setState(setSearchQuery(state, event.target.value)); });
   $(root, '#refreshBoard')?.addEventListener('click', () => loadBoard().catch(() => {}));
+  $(root, '#boardDate')?.addEventListener('change', (event) => { if (event.target.value) setBoardDate(event.target.value); });
+  $(root, '#boardPrevDay')?.addEventListener('click', () => setBoardDate(shiftDate(selectedDate, -1)));
+  $(root, '#boardNextDay')?.addEventListener('click', () => setBoardDate(shiftDate(selectedDate, 1)));
+  $(root, '#boardToday')?.addEventListener('click', () => setBoardDate(getDispatchWindow().today));
   $(root, '#refreshTrips')?.addEventListener('click', () => loadBoard().catch(() => {}));
   $(root, '#logoutButton')?.addEventListener('click', () => logout().catch(() => {}));
   $(root, '#newTripButton')?.addEventListener('click', (event) => openTripDialog(event.currentTarget).catch((error) => { if (error.code !== 'unauthorized') $(root, '#statusMessage').textContent = 'Resources could not be loaded. Try again.'; }));
@@ -1111,8 +1171,11 @@ export function createDispatchApp({
   });
   root.addEventListener('keydown', (event) => { const tab = event.target.closest?.('[role="tab"]'); if (tab) { const tabs = [...root.querySelectorAll('[role="tab"]')]; const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length); if (nextIndex !== null) { event.preventDefault(); activateTab(tabs[nextIndex].dataset.tab, { focus: true }); } return; } const assign = event.target.closest?.('[data-assign-selected], [data-assign-invoice]'); if (assign && event.key === 'Enter') { event.preventDefault(); assign.click(); } });
   globalThis.addEventListener?.('online', render); globalThis.addEventListener?.('offline', render);
-  syncDefaultDateControls(root, initialDateRange); activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
-  return { getState: () => state, getSession: () => session, loadBoard, loadResources, loadReports, exportReport, assignInvoice, removeAssignedInvoice, render, activateTab, login, logout };
+  // Keep Today and the not-today banner correct across Kuala Lumpur midnight while the board stays open.
+  documentRef.addEventListener?.('visibilitychange', renderDateBar); globalThis.addEventListener?.('focus', renderDateBar);
+  globalThis.setInterval?.(renderDateBar, 60_000)?.unref?.();
+  syncDefaultDateControls(root, initialDateRange); renderDateBar(); activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
+  return { getState: () => state, getSession: () => session, loadBoard, setBoardDate, getBoardDate: () => selectedDate, loadResources, loadReports, exportReport, assignInvoice, removeAssignedInvoice, render, activateTab, login, logout };
 }
 
 if (typeof document !== 'undefined') window.addEventListener('DOMContentLoaded', () => { window.dispatchApp = createDispatchApp(); }, { once: true });

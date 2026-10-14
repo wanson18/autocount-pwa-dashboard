@@ -45,6 +45,7 @@ function createServerState() {
     drivers: [{ type: 'driver', id: 1, name: 'Aiman Driver', licenseNo: 'D-1001', active: true }],
     lorries: [{ type: 'lorry', id: 2, registrationNo: 'WXY 1001', description: '10-ton lorry', active: true }],
     assignmentBodies: [], tripBodies: [], counts: { trips: 0, assignments: 0, invoiceReads: 0, resources: 0 },
+    servedOlderInvoices: [], olderInvoicesByDate: null,
   };
 }
 
@@ -128,6 +129,12 @@ async function installFixtureApi(page, {
       state.counts.invoiceReads += 1;
       const requestedCompany = url.searchParams.get('company') || 'all';
       state.invoiceCompanies.push(requestedCompany);
+      const startDate = url.searchParams.get('startDate');
+      const olderRows = state.olderInvoicesByDate ? state.olderInvoicesByDate[startDate] : undefined;
+      if (olderRows) {
+        state.servedOlderInvoices.push(...olderRows);
+        return json(route, { success: true, dateRange: { startDate, endDate: startDate }, company: requestedCompany, invoices: olderRows, sources: { enterprise: { status: 'ok' }, sdn_bhd: { status: 'ok' } } });
+      }
       if (state.initialBoardGate && state.counts.invoiceReads === 1) await state.initialBoardGate.promise;
       if (state.enterpriseFilterGate && requestedCompany === 'enterprise') await state.enterpriseFilterGate.promise;
       if (unauthorizedOnRefresh && state.counts.invoiceReads === 2) {
@@ -170,7 +177,7 @@ async function installFixtureApi(page, {
         state.trips[0].revision += 1;
         return json(route, { success: false, error: { code: 'stale_trip' } }, 409);
       }
-      const invoice = state.invoices.find((row) => row.companyKey === body.company_key && row.invoiceId === body.invoice_id);
+      const invoice = [...state.invoices, ...state.servedOlderInvoices].find((row) => row.companyKey === body.company_key && row.invoiceId === body.invoice_id);
       const target = state.trips.find((row) => String(row.id) === String(body.trip_id));
       const created = makeAssignment(invoice, state.assignmentBodies.length + 40, target.id);
       state.assignments.push(created);
@@ -539,4 +546,142 @@ test('with a trip the loading plan sits beside the invoices on wide screens and 
   }));
   expect(list.scrollsInside).toBe(true);
   expect(list.height).toBeLessThanOrEqual(testInfo.project.name === 'desktop' ? 900 : 520);
+});
+
+test('board date picker switches day, shows the not-today banner, and creates trips on the chosen day', async ({ page }) => {
+  const state = await openBoard(page);
+  const banner = page.locator('#boardDateBanner');
+  await expect(banner).toBeHidden();
+  await expect(page.locator('#boardDate')).toHaveValue(currentKualaLumpurDate());
+  await page.locator('#boardPrevDay').click();
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('not today');
+  const chosen = await page.locator('#boardDate').inputValue();
+  expect(chosen).not.toBe(currentKualaLumpurDate());
+  await page.locator('#newTripButton').click();
+  await expect(page.getByRole('dialog', { name: 'Create trip' })).toBeVisible();
+  await page.locator('#createTripSubmit').click();
+  await expect.poll(() => state.tripBodies.at(-1)?.trip_date).toBe(chosen);
+  await page.locator('#boardToday').click();
+  await expect(banner).toBeHidden();
+});
+
+test('older invoice picker adds a previous-day invoice to the current trip with an Older tag', async ({ page }) => {
+  const state = await openBoard(page);
+  const OLD = { ...ENTERPRISE, invoiceId: 'enterprise-old-001', docKey: 'enterprise-old-001', docNo: 'ENT-OLD-001',
+    customer: { code: 'OLD', name: 'Kedai Semalam' } };
+  state.trips[0].tripDate = currentKualaLumpurDate();
+  state.olderInvoicesByDate = new Proxy({}, { get: (_target, date) => (typeof date === 'string' && date < currentKualaLumpurDate() ? [{ ...OLD, docDate: date }] : undefined) });
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
+  await page.locator('#olderInvoiceSearch').fill('semalam');
+  await page.locator('[data-older-invoice-key] input[type="checkbox"]').first().check();
+  await page.locator('#olderInvoiceSubmit').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeHidden();
+  await expect.poll(() => state.assignmentBodies.at(-1)?.invoice_id).toBe('enterprise-old-001');
+  await expect(page.locator('.invoice-date-tag-older').first()).toBeVisible();
+});
+
+test('older invoice picker tells the clerk to create a trip first when the day has none', async ({ page }) => {
+  const state = await openBoard(page);
+  state.trips.length = 0;
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceMessage')).toHaveText('Create a trip for this day first.');
+  await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
+});
+
+test('older invoice picker hides the previous rows and blocks adding while a new selection loads', async ({ page }) => {
+  const state = await openBoard(page);
+  const OLD = { ...ENTERPRISE, invoiceId: 'enterprise-old-001', docKey: 'enterprise-old-001', docNo: 'ENT-OLD-001',
+    customer: { code: 'OLD', name: 'Kedai Semalam' } };
+  state.olderInvoicesByDate = new Proxy({}, { get: (_target, date) => (typeof date === 'string' && date < currentKualaLumpurDate() ? [{ ...OLD, docDate: date }] : undefined) });
+  let releaseSdnBhd;
+  const sdnBhdGate = new Promise((resolve) => { releaseSdnBhd = resolve; });
+  await page.route('**/api/dispatch/invoices?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('company') === 'sdn_bhd') await sdnBhdGate;
+    return route.fallback();
+  });
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('[data-older-invoice-key]')).toHaveCount(1);
+  await page.locator('#olderInvoiceCompany').selectOption('sdn_bhd');
+  await page.locator('#olderInvoiceSearch').fill('semalam');
+  await expect(page.locator('[data-older-invoice-key]')).toHaveCount(0);
+  await expect(page.locator('#olderInvoiceList')).toContainText('Loading invoices');
+  await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
+  releaseSdnBhd();
+  await expect(page.locator('#olderInvoiceList')).not.toContainText('Loading invoices');
+});
+
+test('date bar notices Kuala Lumpur midnight while the board stays open', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-14T15:58:00Z') });
+  await openBoard(page);
+  await expect(page.locator('#boardDate')).toHaveValue('2026-10-14');
+  await expect(page.locator('#boardToday')).toBeDisabled();
+  await page.clock.runFor(3 * 60_000);
+  await expect(page.locator('#boardToday')).toBeEnabled();
+  await expect(page.locator('#boardDateBanner')).toBeVisible();
+  await expect(page.locator('#boardDateBanner')).toContainText('not today');
+  await page.locator('#boardToday').click();
+  await expect(page.locator('#boardDate')).toHaveValue('2026-10-15');
+  await expect(page.locator('#boardDateBanner')).toBeHidden();
+});
+
+test('older invoice picker keeps a reopened dialog when an earlier Add finishes late', async ({ page }) => {
+  const state = await openBoard(page);
+  const OLD = { ...ENTERPRISE, invoiceId: 'enterprise-old-001', docKey: 'enterprise-old-001', docNo: 'ENT-OLD-001',
+    customer: { code: 'OLD', name: 'Kedai Semalam' } };
+  state.olderInvoicesByDate = new Proxy({}, { get: (_target, date) => (typeof date === 'string' && date < currentKualaLumpurDate() ? [{ ...OLD, docDate: date }] : undefined) });
+  let releaseAdd;
+  const addGate = new Promise((resolve) => { releaseAdd = resolve; });
+  await page.route('**/api/dispatch/assignments', async (route) => {
+    if (route.request().method() === 'POST') await addGate;
+    return route.fallback();
+  });
+  await page.locator('#addOlderInvoiceButton').click();
+  await page.locator('[data-older-invoice-key] input[type="checkbox"]').first().check();
+  await page.locator('#olderInvoiceSubmit').click();
+  await page.locator('#closeOlderInvoice').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeHidden();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
+  await page.locator('#olderInvoiceSearch').fill('semalam');
+  releaseAdd();
+  await expect.poll(() => state.assignmentBodies.length).toBe(1);
+  await expect(page.locator('.invoice-date-tag').first()).toBeVisible();
+  await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
+  await expect(page.locator('#olderInvoiceSearch')).toHaveValue('semalam');
+});
+
+test('older invoice picker offers only trips still being planned or loaded', async ({ page }) => {
+  const state = await openBoard(page);
+  state.trips.unshift({ ...state.trips[0], id: 100, status: 'completed', assignments: [] });
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceTrip option')).toHaveCount(1);
+  await expect(page.locator('#olderInvoiceTrip')).toHaveValue('101');
+});
+
+test('older invoice picker explains when every trip for the day is finished', async ({ page }) => {
+  const state = await openBoard(page);
+  state.trips[0].status = 'completed';
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceMessage')).toHaveText('No trips can accept invoices. Create a new trip or choose a trip that is still being planned or loaded.');
+  await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
+});
+
+test('older invoice picker numbers trips the same way as the board', async ({ page }) => {
+  const state = await openBoard(page);
+  const base = state.trips[0];
+  state.trips.splice(0, state.trips.length,
+    { ...base, id: 100, status: 'completed', assignments: [] },
+    { ...base, id: 101, status: 'planned', assignments: [] },
+    { ...base, id: 102, status: 'planned', assignments: [] });
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  const labels = await page.locator('#olderInvoiceTrip option').allTextContents();
+  expect(labels.map((label) => label.split(' · ')[0])).toEqual(['Trip 2', 'Trip 3']);
+  await expect(page.locator('#olderInvoiceTrip')).toHaveValue('101');
 });

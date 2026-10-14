@@ -1502,3 +1502,50 @@ h2 {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.board-date-block { display: grid; gap: 6px; min-width: 0; }
+.board-date-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.board-date-step { min-width: 44px; }
+.board-date-input { width: auto; min-width: 150px; }
+.board-date-banner {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--butter-line);
+  border-radius: 8px;
+  background: var(--butter);
+  color: var(--butter-ink);
+  font-weight: 600;
+}
+.board-date-banner[hidden] { display: none; }
+
+.invoice-date-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.invoice-date-tag-older { background: var(--butter); color: var(--butter-ink); border: 1px solid var(--butter-line); }
+.invoice-date-tag-newer { background: var(--blue-soft); color: var(--blue); }
+
+.older-invoice-dialog { width: min(100%, 640px); }
+.older-invoice-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.older-invoice-list { display: grid; gap: 6px; max-height: 45vh; overflow-y: auto; margin: 10px 0; }
+.older-invoice-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.older-invoice-row input { width: 20px; height: 20px; }
+.older-invoice-main { min-width: 0; overflow-wrap: anywhere; }
+.older-invoice-date { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.older-invoice-error { grid-column: 2 / -1; color: var(--amber); font-weight: 600; font-size: 0.85rem; }
+.older-invoice-actions { display: flex; justify-content: flex-end; gap: 8px; }

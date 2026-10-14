@@ -878,3 +878,71 @@ test('non-weight UOMs do not become capacity or lorry-weight calculations', asyn
     await database.close();
   }
 });
+
+test('assignment GET with doc_date returns only active assignments for that invoice date', async () => {
+  const api = requireAssignmentsApi();
+  const implementation = requireService();
+  const database = await createTestDatabase();
+  try {
+    await migrate({ pool: database.pool, skipAdvisoryLock: database.embedded });
+    const repository = createRepository(database.pool);
+    const { trip } = await seedTrip(repository, '101');
+    const source = createSource({
+      enterprise: [
+        invoice({ companyKey: 'enterprise', invoiceId: 'DOC-OLD-1', docNo: 'ENT-OLD-1', docDate: '2026-08-27' }),
+        invoice({ companyKey: 'enterprise', invoiceId: 'DOC-OLD-2', docNo: 'ENT-OLD-2', docDate: '2026-08-27' }),
+        invoice({ companyKey: 'enterprise', invoiceId: 'DOC-NEW-1', docNo: 'ENT-NEW-1', docDate: '2026-08-28' }),
+      ],
+    });
+    const service = implementation.createDispatchService({ repository, invoiceAdapter: source, configs: COMPANY_CONFIGS });
+    const handler = api.createDispatchAssignmentsHandler({ service, getSession: async () => SESSION });
+    let revision = 1;
+    const created = [];
+    for (const [invoiceId, docNo, docDate] of [
+      ['DOC-OLD-1', 'ENT-OLD-1', '2026-08-27'],
+      ['DOC-OLD-2', 'ENT-OLD-2', '2026-08-27'],
+      ['DOC-NEW-1', 'ENT-NEW-1', '2026-08-28'],
+    ]) {
+      const response = responseRecorder();
+      await handler(jsonRequest('POST', {
+        trip_id: trip.id, company_key: 'enterprise', invoice_id: invoiceId, doc_no: docNo,
+        doc_date: docDate, expected_trip_revision: revision, request_id: `doc-date-filter-${invoiceId}`,
+      }), response);
+      assert.equal(response.statusCode, 201);
+      revision = response.body.tripRevision;
+      created.push(response.body.assignment);
+    }
+    const remove = responseRecorder();
+    await handler(jsonRequest('PATCH', {
+      assignment_id: created[1].id, operation: 'remove', expected_trip_revision: revision,
+      request_id: 'doc-date-filter-remove-old-2',
+    }), remove);
+    assert.equal(remove.statusCode, 200);
+
+    const listed = responseRecorder();
+    await handler({ method: 'GET', headers: {}, query: { doc_date: '2026-08-27' } }, listed);
+    assert.equal(listed.statusCode, 200);
+    assert.deepEqual(listed.body.assignments.map((row) => row.invoiceId), ['DOC-OLD-1']);
+  } finally {
+    await database.close();
+  }
+});
+
+test('assignment GET validates doc_date and allows a 1000 limit only with doc_date', () => {
+  const { normalizeQuery } = requireAssignmentsApi();
+  assert.deepEqual(normalizeQuery({ query: { doc_date: '2026-08-27' } }), {
+    assignmentId: null, tripId: null, docDate: '2026-08-27', limit: 1000,
+  });
+  assert.deepEqual(normalizeQuery({ query: { doc_date: '2026-08-27', limit: '1000' } }).limit, 1000);
+  assert.equal(normalizeQuery({ query: {} }).limit, 100);
+  assert.equal(normalizeQuery({ query: {} }).docDate, null);
+  for (const query of [
+    { doc_date: '2026-02-30' },
+    { doc_date: '27-08-2026' },
+    { limit: '1000' },
+    { doc_date: '2026-08-27', limit: '1001' },
+    { doc_date: '2026-08-27', assignment_id: '1' },
+  ]) {
+    assert.throws(() => normalizeQuery({ query }), (error) => error.status === 400, JSON.stringify(query));
+  }
+});

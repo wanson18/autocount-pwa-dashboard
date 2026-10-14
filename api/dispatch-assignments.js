@@ -24,9 +24,10 @@ const ASSIGNMENT_CREATE_KEYS = [
 const ASSIGNMENT_PATCH_KEYS = [
   'assignment_id', 'operation', 'trip_id', 'status', 'expected_trip_revision', 'request_id',
 ];
-const ASSIGNMENT_QUERY_KEYS = ['assignment_id', 'trip_id', 'limit'];
+const ASSIGNMENT_QUERY_KEYS = ['assignment_id', 'trip_id', 'doc_date', 'limit'];
 const OPERATIONS = new Set(['move', 'remove', 'status']);
 const MAX_LIMIT = 100;
+const DOC_DATE_MAX_LIMIT = 1000;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function idField(value) {
@@ -90,13 +91,13 @@ function queryValue(query, key) {
   return value;
 }
 
-function limitField(value) {
-  if (value === undefined) return MAX_LIMIT;
+function limitField(value, max = MAX_LIMIT) {
+  if (value === undefined) return max;
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {
     throw new DispatchHttpError(400, 'invalid_request');
   }
   const limit = Number(value);
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > max) {
     throw new DispatchHttpError(400, 'invalid_request');
   }
   return limit;
@@ -151,13 +152,15 @@ function normalizeQuery(req) {
   }
   const assignmentId = queryValue(query, 'assignment_id');
   const tripId = queryValue(query, 'trip_id');
-  if (assignmentId !== undefined && tripId !== undefined) {
+  const docDate = queryValue(query, 'doc_date');
+  if (assignmentId !== undefined && (tripId !== undefined || docDate !== undefined)) {
     throw new DispatchHttpError(400, 'invalid_request');
   }
   return {
     assignmentId: assignmentId === undefined ? null : idField(assignmentId),
     tripId: tripId === undefined ? null : idField(tripId),
-    limit: limitField(queryValue(query, 'limit')),
+    docDate: docDate === undefined ? null : dateField(docDate),
+    limit: limitField(queryValue(query, 'limit'), docDate === undefined ? MAX_LIMIT : DOC_DATE_MAX_LIMIT),
   };
 }
 

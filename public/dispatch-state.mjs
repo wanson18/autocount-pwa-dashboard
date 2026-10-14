@@ -24,6 +24,46 @@ export function getDefaultDateRange(now = new Date()) {
   return { startDate: date, endDate: date };
 }
 
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+export const DISPATCH_WINDOW_DAYS = 7;
+const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+
+function parseIsoDate(value) {
+  if (typeof value !== 'string' || !ISO_DATE_PATTERN.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date : null;
+}
+
+export function shiftDate(date, days) {
+  const parsed = parseIsoDate(date);
+  if (!parsed) throw new Error(`invalid date: ${date}`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+export function getDispatchWindow(now = new Date()) {
+  const today = getDefaultDateRange(now).startDate;
+  return { today, minDate: shiftDate(today, -DISPATCH_WINDOW_DAYS), maxDate: shiftDate(today, DISPATCH_WINDOW_DAYS) };
+}
+
+export function clampToDispatchWindow(date, now = new Date()) {
+  const { today, minDate, maxDate } = getDispatchWindow(now);
+  if (!parseIsoDate(date)) return today;
+  if (date < minDate) return minDate;
+  if (date > maxDate) return maxDate;
+  return date;
+}
+
+export function getInvoiceDateTag(docDate, referenceDate) {
+  const doc = parseIsoDate(docDate);
+  if (!doc || !parseIsoDate(referenceDate) || docDate === referenceDate) return null;
+  const shortDate = SHORT_DATE_FORMATTER.format(doc);
+  return docDate < referenceDate
+    ? { kind: 'older', label: `Older · ${shortDate}` }
+    : { kind: 'newer', label: `Dated · ${shortDate}` };
+}
+
 export const DEFAULT_DATE_RANGE = getDefaultDateRange();
 
 export const COMPANY_NAMES = {
@@ -33,6 +73,8 @@ export const COMPANY_NAMES = {
 
 const SOURCE_LABELS = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
 const NON_ACTIVE_ASSIGNMENT_STATUSES = new Set(['removed']);
+// Statuses that free the invoice for a new trip (same rule as the database's active-invoice unique index).
+const HOLDING_ASSIGNMENT_EXCLUDED_STATUSES = new Set(['removed', 'failed', 'returned']);
 
 export function getSourceMessage(sources = {}) {
   const unavailable = COMPANY_KEYS
@@ -104,6 +146,10 @@ function isActiveAssignment(assignment) {
   return !NON_ACTIVE_ASSIGNMENT_STATUSES.has(assignmentStatusOf(assignment));
 }
 
+function isHoldingAssignment(assignment) {
+  return !HOLDING_ASSIGNMENT_EXCLUDED_STATUSES.has(assignmentStatusOf(assignment));
+}
+
 export function getInvoiceKey(invoiceOrCompanyKey, maybeInvoiceId) {
   const companyKey = typeof invoiceOrCompanyKey === 'object'
     ? companyKeyOf(invoiceOrCompanyKey)
@@ -146,12 +192,12 @@ function normalizeAssignment(assignment) {
   };
 }
 
-function normalizeTrip(trip, assignments, resources = {}) {
+function normalizeTrip(trip, assignments, resources = {}, isShown = isActiveAssignment) {
   const tripAssignments = assignments.filter((assignment) => String(assignment.tripId) === String(trip.id));
   const invoiceKeys = [
     ...(trip.invoiceKeys || []),
     ...(trip.invoices || []).map(getInvoiceKey),
-    ...(trip.assignments || []).filter(isActiveAssignment).map(getInvoiceKey),
+    ...(trip.assignments || []).filter(isShown).map(getInvoiceKey),
     ...tripAssignments.map(getInvoiceKey),
   ].filter(Boolean);
   const driver = trip.driver || resources.drivers?.find((candidate) => String(candidate.id) === String(trip.driverId ?? trip.driver_id));
@@ -196,7 +242,10 @@ export function createDispatchState({
   if (!COMPANY_FILTERS.includes(companyFilter)) throw new Error(`invalid company filter: ${companyFilter}`);
   const nestedAssignments = trips.flatMap((trip) => trip.assignments || []).map(normalizeAssignment);
   const allAssignments = [...assignments.map(normalizeAssignment), ...nestedAssignments];
-  const activeAssignments = allAssignments.filter(isActiveAssignment);
+  // A failed/returned outcome stays visible on its trip as history, unless the invoice has since been put on another trip.
+  const heldKeys = new Set(allAssignments.filter(isHoldingAssignment).map(getInvoiceKey).filter(Boolean));
+  const isShown = (assignment) => isActiveAssignment(assignment) && (isHoldingAssignment(assignment) || !heldKeys.has(getInvoiceKey(assignment)));
+  const activeAssignments = allAssignments.filter(isShown);
   const activeAssignmentKeys = new Set(activeAssignments.map(getInvoiceKey).filter(Boolean));
   const removedAssignmentKeys = new Set(allAssignments
     .filter((assignment) => !isActiveAssignment(assignment))
@@ -207,7 +256,7 @@ export function createDispatchState({
     const key = getInvoiceKey(assignment);
     if (key) assignedByKey.set(key, assignment);
   });
-  const normalizedTrips = trips.filter((trip) => trip.status !== 'cancelled').map((trip) => normalizeTrip(trip, activeAssignments, resources))
+  const normalizedTrips = trips.filter((trip) => trip.status !== 'cancelled').map((trip) => normalizeTrip(trip, activeAssignments, resources, isShown))
     .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }));
   const normalizedInvoices = invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips, assignedByKey));
   const invoiceKeys = new Set(normalizedInvoices.map((invoice) => invoice.key));
@@ -266,6 +315,25 @@ export function invoiceMatchesSearch(invoice, query) {
     haystacks.push(item?.itemCode, item?.item_code, item?.description);
   }
   return haystacks.some((field) => typeof field === 'string' && field.toLowerCase().includes(text));
+}
+
+export function filterUnassignedForDate(invoices = [], assignments = []) {
+  const taken = new Set(assignments
+    .filter((assignment) => !HOLDING_ASSIGNMENT_EXCLUDED_STATUSES.has(assignmentStatusOf(assignment)))
+    .map((assignment) => getInvoiceKey(companyKeyOf(assignment), invoiceIdOf(assignment)))
+    .filter(Boolean));
+  return invoices.filter((invoice) => (
+    invoice.cancelled !== true
+    && invoice.eligibility === 'eligible'
+    && !taken.has(getInvoiceKey(companyKeyOf(invoice), invoiceIdOf(invoice)))
+  ));
+}
+
+export function filterPickerInvoices(invoices = [], search = '') {
+  const text = String(search ?? '').trim().toLowerCase();
+  if (!text) return invoices;
+  return invoices.filter((invoice) => [invoice.docNo, invoice.doc_no, invoice.customer?.name, invoice.customerName]
+    .some((field) => typeof field === 'string' && field.toLowerCase().includes(text)));
 }
 
 export function reloadDispatchState(previousState, board) {

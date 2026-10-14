@@ -1277,3 +1277,28 @@ test('project and lockfile declare the Node 20 runtime required by Vercel Functi
   assert.equal(packageJson.engines.node, '>=20.0.0');
   assert.equal(packageLock.packages[''].engines.node, '>=20.0.0');
 });
+
+test('trip reads include every assignment row, even past 100 rows of removed history', async () => {
+  resourceSequence += 1;
+  const driver = await repository.createDriver({ name: `Busy Driver ${resourceSequence}`, licenseNo: `D-BUSY-${resourceSequence}` });
+  const vehicle = await repository.createVehicle({ registrationNo: `BUSY-${resourceSequence}`, description: 'Busy lorry' });
+  const trip = await repository.createTrip({ tripDate: '2026-10-14', driverId: driver.id, vehicleId: vehicle.id });
+  await pool.query(`
+    INSERT INTO delivery_assignments (trip_id, company_key, invoice_id, doc_no, doc_date, invoice_header, status)
+    SELECT $1, 'enterprise', 'CHURN-' || n, 'IV-CHURN-' || n, DATE '2026-10-14', '{}'::jsonb, 'removed'
+    FROM generate_series(1, 120) AS n
+  `, [trip.id]);
+  await pool.query(`
+    INSERT INTO delivery_assignments (trip_id, company_key, invoice_id, doc_no, doc_date, invoice_header, status)
+    VALUES ($1, 'enterprise', 'OLDER-1', 'IV-OLDER-1', DATE '2026-10-12', '{}'::jsonb, 'assigned')
+  `, [trip.id]);
+
+  const [listed] = (await repository.listTrips({ startDate: '2026-10-14', endDate: '2026-10-14' }))
+    .filter((row) => row.id === trip.id);
+  assert.equal(listed.assignments.length, 121);
+  assert.ok(listed.assignments.some((row) => row.invoiceId === 'OLDER-1' && row.status === 'assigned'));
+
+  const details = await repository.getTripDetails(trip.id);
+  assert.equal(details.assignments.length, 121);
+  assert.ok(details.assignments.some((row) => row.invoiceId === 'OLDER-1'));
+});
