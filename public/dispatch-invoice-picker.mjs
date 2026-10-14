@@ -98,7 +98,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
   const searchInput = $('#olderInvoiceSearch'); const list = $('#olderInvoiceList');
   const tripSelect = $('#olderInvoiceTrip'); const message = $('#olderInvoiceMessage');
   const submit = $('#olderInvoiceSubmit'); const retry = $('#olderInvoiceRetry');
-  let invoices = []; let ticked = new Set(); let rowMessages = new Map(); let loadSequence = 0; let invoker = null; let busy = false; let loading = false;
+  let invoices = []; let ticked = new Set(); let rowMessages = new Map(); let loadSequence = 0; let invoker = null; let busy = false; let loading = false; let openSequence = 0;
 
   function trips() { return (getTrips() || []).filter((trip) => trip.status !== 'cancelled'); }
   function updateSubmit() { submit.disabled = busy || loading || !canWrite() || !ticked.size || !tripSelect.value; }
@@ -150,6 +150,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
 
   async function open(button = null) {
     if (!canWrite()) return;
+    openSequence += 1;
     invoker = button;
     const { minDate, maxDate } = getDispatchWindow();
     dateInput.min = minDate; dateInput.max = maxDate;
@@ -168,9 +169,15 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
     const trip = trips().find((candidate) => String(candidate.id) === tripSelect.value);
     const picked = invoices.filter((invoice) => ticked.has(getInvoiceKey(companyKeyOf(invoice), invoiceIdOf(invoice))));
     if (!trip || !picked.length || !canWrite()) return;
+    const opening = openSequence;
     busy = true; updateSubmit(); message.textContent = `Adding ${picked.length} invoice(s)…`;
     try {
       const { results } = await model.assign({ invoices: picked, trip });
+      if (opening !== openSequence || backdrop.hidden) {
+        // The dialog was closed (and maybe reopened) while saving: refresh the board, leave the current dialog alone.
+        if (results.some((row) => row.ok)) await onAssigned();
+        return;
+      }
       const added = new Set(results.filter((row) => row.ok).map((row) => row.key));
       rowMessages = new Map(results.filter((row) => !row.ok).map((row) => [row.key, row.message]));
       invoices = invoices.filter((invoice) => !added.has(getInvoiceKey(companyKeyOf(invoice), invoiceIdOf(invoice))));
@@ -181,7 +188,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
       renderTrips(); renderList();
     } catch (error) {
       if (error?.code === 'unauthorized') { close(); onSessionLoss(); return; }
-      message.textContent = 'Could not add invoices. Try again.';
+      if (opening === openSequence && !backdrop.hidden) message.textContent = 'Could not add invoices. Try again.';
     } finally { busy = false; updateSubmit(); }
   }
 

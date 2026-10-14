@@ -616,3 +616,29 @@ test('date bar notices Kuala Lumpur midnight while the board stays open', async 
   await expect(page.locator('#boardDate')).toHaveValue('2026-10-15');
   await expect(page.locator('#boardDateBanner')).toBeHidden();
 });
+
+test('older invoice picker keeps a reopened dialog when an earlier Add finishes late', async ({ page }) => {
+  const state = await openBoard(page);
+  const OLD = { ...ENTERPRISE, invoiceId: 'enterprise-old-001', docKey: 'enterprise-old-001', docNo: 'ENT-OLD-001',
+    customer: { code: 'OLD', name: 'Kedai Semalam' } };
+  state.olderInvoicesByDate = new Proxy({}, { get: (_target, date) => (typeof date === 'string' && date < currentKualaLumpurDate() ? [{ ...OLD, docDate: date }] : undefined) });
+  let releaseAdd;
+  const addGate = new Promise((resolve) => { releaseAdd = resolve; });
+  await page.route('**/api/dispatch/assignments', async (route) => {
+    if (route.request().method() === 'POST') await addGate;
+    return route.fallback();
+  });
+  await page.locator('#addOlderInvoiceButton').click();
+  await page.locator('[data-older-invoice-key] input[type="checkbox"]').first().check();
+  await page.locator('#olderInvoiceSubmit').click();
+  await page.locator('#closeOlderInvoice').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeHidden();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
+  await page.locator('#olderInvoiceSearch').fill('semalam');
+  releaseAdd();
+  await expect.poll(() => state.assignmentBodies.length).toBe(1);
+  await expect(page.locator('.invoice-date-tag').first()).toBeVisible();
+  await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
+  await expect(page.locator('#olderInvoiceSearch')).toHaveValue('semalam');
+});

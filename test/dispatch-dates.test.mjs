@@ -123,3 +123,32 @@ test('trip card tags an older invoice against the trip date', () => {
   });
   assert.match(renderTripCard(state, state.trips[0]), /Older · 12 Oct/);
 });
+
+test('a failed invoice re-added to another trip shows only on the new trip, with the new assignment', () => {
+  const header = { customer: { name: 'Kedai Ulang' } };
+  const state = createDispatchState({
+    trips: [
+      { id: 1, tripDate: '2026-10-14', driverId: 1, vehicleId: 2, revision: 3, status: 'completed',
+        assignments: [{ id: 10, tripId: 1, companyKey: 'enterprise', invoiceId: 'E1', docNo: 'IV-E1', docDate: '2026-10-13', status: 'failed', header, items: [] }] },
+      { id: 2, tripDate: '2026-10-14', driverId: 1, vehicleId: 2, revision: 2, status: 'planned',
+        assignments: [{ id: 20, tripId: 2, companyKey: 'enterprise', invoiceId: 'E1', docNo: 'IV-E1', docDate: '2026-10-13', status: 'assigned', header, items: [] }] },
+    ],
+    dateRange: { startDate: '2026-10-14', endDate: '2026-10-14' },
+  });
+  const key = 'enterprise:E1';
+  assert.deepEqual(state.trips.map((trip) => [trip.id, trip.invoiceKeys.includes(key)]), [[1, false], [2, true]]);
+  const invoice = state.invoices.find((row) => row.key === key);
+  assert.equal(invoice.assignmentId, 20);
+  assert.equal(invoice.assignmentStatus, 'assigned');
+  assert.equal(String(invoice.tripId), '2');
+});
+
+test('a failed invoice that was not re-added still shows on its original trip', () => {
+  const state = createDispatchState({
+    trips: [{ id: 1, tripDate: '2026-10-14', driverId: 1, vehicleId: 2, revision: 3, status: 'completed',
+      assignments: [{ id: 10, tripId: 1, companyKey: 'enterprise', invoiceId: 'E1', docNo: 'IV-E1', docDate: '2026-10-13', status: 'failed', header: {}, items: [] }] }],
+    dateRange: { startDate: '2026-10-14', endDate: '2026-10-14' },
+  });
+  assert.ok(state.trips[0].invoiceKeys.includes('enterprise:E1'));
+  assert.equal(state.invoices.find((row) => row.key === 'enterprise:E1').assignmentStatus, 'failed');
+});
