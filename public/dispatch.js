@@ -704,7 +704,7 @@ export function createDispatchApp({
   function setAuthenticated(next, nextSession = null) { authenticated = next; session = next ? nextSession : null; if (loginView) loginView.hidden = next; if (authenticatedView) authenticatedView.hidden = !next; root.dataset.authenticated = String(next); }
   function setLoginMessage(message) { if (loginMessage) loginMessage.textContent = message; }
   function setResourceMessage(message) { if (resourceStatus) resourceStatus.textContent = message; }
-  function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled(), resources }); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
+  function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled(), resources }); renderDateBar(); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
   function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; const older = $(root, '#addOlderInvoiceButton'); if (older) older.disabled = !writesEnabled(); root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
@@ -1171,6 +1171,9 @@ export function createDispatchApp({
   });
   root.addEventListener('keydown', (event) => { const tab = event.target.closest?.('[role="tab"]'); if (tab) { const tabs = [...root.querySelectorAll('[role="tab"]')]; const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length); if (nextIndex !== null) { event.preventDefault(); activateTab(tabs[nextIndex].dataset.tab, { focus: true }); } return; } const assign = event.target.closest?.('[data-assign-selected], [data-assign-invoice]'); if (assign && event.key === 'Enter') { event.preventDefault(); assign.click(); } });
   globalThis.addEventListener?.('online', render); globalThis.addEventListener?.('offline', render);
+  // Keep Today and the not-today banner correct across Kuala Lumpur midnight while the board stays open.
+  documentRef.addEventListener?.('visibilitychange', renderDateBar); globalThis.addEventListener?.('focus', renderDateBar);
+  globalThis.setInterval?.(renderDateBar, 60_000)?.unref?.();
   syncDefaultDateControls(root, initialDateRange); renderDateBar(); activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
   return { getState: () => state, getSession: () => session, loadBoard, setBoardDate, getBoardDate: () => selectedDate, loadResources, loadReports, exportReport, assignInvoice, removeAssignedInvoice, render, activateTab, login, logout };
 }

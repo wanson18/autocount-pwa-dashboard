@@ -98,12 +98,13 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
   const searchInput = $('#olderInvoiceSearch'); const list = $('#olderInvoiceList');
   const tripSelect = $('#olderInvoiceTrip'); const message = $('#olderInvoiceMessage');
   const submit = $('#olderInvoiceSubmit'); const retry = $('#olderInvoiceRetry');
-  let invoices = []; let ticked = new Set(); let rowMessages = new Map(); let loadSequence = 0; let invoker = null; let busy = false;
+  let invoices = []; let ticked = new Set(); let rowMessages = new Map(); let loadSequence = 0; let invoker = null; let busy = false; let loading = false;
 
   function trips() { return (getTrips() || []).filter((trip) => trip.status !== 'cancelled'); }
-  function updateSubmit() { submit.disabled = busy || !canWrite() || !ticked.size || !tripSelect.value; }
+  function updateSubmit() { submit.disabled = busy || loading || !canWrite() || !ticked.size || !tripSelect.value; }
 
   function renderList() {
+    if (loading) { list.innerHTML = '<p class="section-help">Loading invoices…</p>'; updateSubmit(); return; }
     const visible = filterPickerInvoices(invoices, searchInput.value);
     list.innerHTML = visible.length ? visible.map((invoice) => {
       const key = getInvoiceKey(companyKeyOf(invoice), invoiceIdOf(invoice));
@@ -130,18 +131,19 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
 
   async function load() {
     const sequence = ++loadSequence;
-    ticked = new Set(); rowMessages = new Map(); retry.hidden = true;
-    list.innerHTML = '<p class="section-help">Loading invoices…</p>';
-    updateSubmit();
+    invoices = []; ticked = new Set(); rowMessages = new Map(); retry.hidden = true; loading = true;
+    renderList();
     if (trips().length) message.textContent = '';
     try {
       const result = await model.load({ date: dateInput.value, company: companySelect.value });
       if (sequence !== loadSequence) return;
+      loading = false;
       if (result.status === 'error') { invoices = []; list.innerHTML = ''; message.textContent = result.message; retry.hidden = false; updateSubmit(); return; }
       invoices = result.invoices;
       if (result.warning) { message.textContent = result.warning; retry.hidden = false; }
       renderList();
     } catch (error) {
+      if (sequence === loadSequence) { loading = false; list.innerHTML = ''; updateSubmit(); }
       if (error?.code === 'unauthorized') { close(); onSessionLoss(); }
     }
   }
@@ -160,7 +162,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
     await load();
   }
 
-  function close() { loadSequence += 1; backdrop.hidden = true; invoker?.focus?.(); invoker = null; }
+  function close() { loadSequence += 1; loading = false; backdrop.hidden = true; invoker?.focus?.(); invoker = null; }
 
   async function submitPicked() {
     const trip = trips().find((candidate) => String(candidate.id) === tripSelect.value);

@@ -580,3 +580,39 @@ test('older invoice picker tells the clerk to create a trip first when the day h
   await expect(page.locator('#olderInvoiceMessage')).toHaveText('Create a trip for this day first.');
   await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
 });
+
+test('older invoice picker hides the previous rows and blocks adding while a new selection loads', async ({ page }) => {
+  const state = await openBoard(page);
+  const OLD = { ...ENTERPRISE, invoiceId: 'enterprise-old-001', docKey: 'enterprise-old-001', docNo: 'ENT-OLD-001',
+    customer: { code: 'OLD', name: 'Kedai Semalam' } };
+  state.olderInvoicesByDate = new Proxy({}, { get: (_target, date) => (typeof date === 'string' && date < currentKualaLumpurDate() ? [{ ...OLD, docDate: date }] : undefined) });
+  let releaseSdnBhd;
+  const sdnBhdGate = new Promise((resolve) => { releaseSdnBhd = resolve; });
+  await page.route('**/api/dispatch/invoices?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('company') === 'sdn_bhd') await sdnBhdGate;
+    return route.fallback();
+  });
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('[data-older-invoice-key]')).toHaveCount(1);
+  await page.locator('#olderInvoiceCompany').selectOption('sdn_bhd');
+  await page.locator('#olderInvoiceSearch').fill('semalam');
+  await expect(page.locator('[data-older-invoice-key]')).toHaveCount(0);
+  await expect(page.locator('#olderInvoiceList')).toContainText('Loading invoices');
+  await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
+  releaseSdnBhd();
+  await expect(page.locator('#olderInvoiceList')).not.toContainText('Loading invoices');
+});
+
+test('date bar notices Kuala Lumpur midnight while the board stays open', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-14T15:58:00Z') });
+  await openBoard(page);
+  await expect(page.locator('#boardDate')).toHaveValue('2026-10-14');
+  await expect(page.locator('#boardToday')).toBeDisabled();
+  await page.clock.runFor(3 * 60_000);
+  await expect(page.locator('#boardToday')).toBeEnabled();
+  await expect(page.locator('#boardDateBanner')).toBeVisible();
+  await expect(page.locator('#boardDateBanner')).toContainText('not today');
+  await page.locator('#boardToday').click();
+  await expect(page.locator('#boardDate')).toHaveValue('2026-10-15');
+  await expect(page.locator('#boardDateBanner')).toBeHidden();
+});
