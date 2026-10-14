@@ -1517,3 +1517,15 @@ h2 {
   font-weight: 600;
 }
 .board-date-banner[hidden] { display: none; }
+
+.invoice-date-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.invoice-date-tag-older { background: var(--butter); color: var(--butter-ink); border: 1px solid var(--butter-line); }
+.invoice-date-tag-newer { background: var(--blue-soft); color: var(--blue); }

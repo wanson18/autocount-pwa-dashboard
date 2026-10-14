@@ -8,6 +8,7 @@ import {
   getCompanyFilterLabel,
   getDefaultDateRange,
   getDispatchWindow,
+  getInvoiceDateTag,
   getInvoiceKey,
   getSourceMessage,
   isCurrentEligibleUnassignedInvoice,
@@ -146,7 +147,7 @@ function loadingSheetHref(tripId) {
   return `/loading-sheet.html?trip_id=${encodeURIComponent(String(tripId))}`;
 }
 
-export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true, tripOptions = [], assignTripId = null } = {}) {
+export function renderInvoiceCard(invoice, { inTrip = false, selected = false, pending = false, writesEnabled = true, rail = false, tripId = null, assignable = true, tripOptions = [], assignTripId = null, referenceDate = null } = {}) {
   const key = getInvoiceKey(invoice);
   const selectedClass = selected ? ' is-selected' : '';
   const railClass = rail ? ' invoice-card--rail' : '';
@@ -159,10 +160,12 @@ export function renderInvoiceCard(invoice, { inTrip = false, selected = false, p
       <label class="assign-trip-picker"><span class="assign-trip-label">Assign to</span><select class="assign-trip-select" data-assign-trip-select aria-label="Trip for invoice ${escapeHtml(invoice.docNo)}" ${!writesEnabled || pending ? 'disabled' : ''}>${tripOptions.map((option) => `<option value="${escapeHtml(option.id)}"${String(option.id) === String(assignTripId) ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>
       <button class="assign-button" type="button" data-assign-invoice="${escapeHtml(key)}" ${!writesEnabled || pending ? 'disabled' : ''} aria-label="Assign invoice ${escapeHtml(invoice.docNo)} to the chosen trip">Assign to this trip</button>` : '');
   const dragHint = showAssignControls ? '<span class="drag-affordance" aria-label="Drag invoice to a lorry">↔ Drag / select</span>' : '';
+  const dateTag = getInvoiceDateTag(invoice.docDate, referenceDate);
+  const dateTagHtml = dateTag ? `<span class="invoice-date-tag invoice-date-tag-${dateTag.kind}">${escapeHtml(dateTag.label)}</span>` : '';
   if (inTrip) {
     return `
     <article class="invoice-card invoice-card--compact${selectedClass}" data-invoice-key="${escapeHtml(key)}" draggable="${String(draggable)}" title="${escapeHtml(`Invoice ${invoice.docNo}`)}">
-      <span class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</span>${action}
+      <span class="invoice-customer">${escapeHtml(invoice.customer?.name || invoice.customerName || 'Customer review')}</span>${dateTagHtml}${action}
     </article>`;
   }
   if (rail) {
@@ -209,7 +212,7 @@ export function renderTripCard(state, trip, { writesEnabled = true, drivers = nu
       <p class="trip-route">${escapeHtml(trip.routeNotes || 'Route notes not set')}</p>
       <button class="trip-select-button" type="button" data-select-trip="${escapeHtml(trip.id)}" aria-pressed="${String(selected)}" aria-label="Select trip ${escapeHtml(trip.id)} with ${counts.total} invoice${counts.total === 1 ? '' : 's'}">Select trip</button>
       <div class="trip-invoices" data-drop-trip-id="${escapeHtml(trip.id)}" aria-label="Invoices assigned to trip ${escapeHtml(trip.id)}">
-        ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key, pending, writesEnabled, tripId: trip.id })).join('') : '<div class="empty-dropzone">Select an invoice above, then assign it here.</div>'}
+        ${tripInvoices.length ? tripInvoices.map((invoice) => renderInvoiceCard(invoice, { inTrip: true, selected: state.selectedInvoiceKey === invoice.key, pending, writesEnabled, tripId: trip.id, referenceDate: trip.tripDate })).join('') : '<div class="empty-dropzone">Select an invoice above, then assign it here.</div>'}
       </div>
       <div class="trip-actions"><span class="trip-subtotal"><strong>Enterprise ${counts.enterprise}</strong> · <strong>Sdn Bhd ${counts.sdn_bhd}</strong> · Combined ${counts.total}</span>
         <span class="trip-action-buttons">${removableTrip ? `<button class="remove-trip-button" type="button" data-remove-trip="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Remove trip ${escapeHtml(tripNumber || trip.id)} for lorry ${escapeHtml(lorryNumber)}">Remove trip</button>` : ''}<a class="future-print-button" data-print-items-trip="${escapeHtml(trip.id)}" href="${escapeHtml(loadingSheetHref(trip.id))}">Print Items</a><button class="assign-selected-button" type="button" data-assign-selected="${escapeHtml(trip.id)}" ${writesEnabled && !pending ? '' : 'disabled'} aria-label="Assign selected invoice to trip ${escapeHtml(trip.id)}">Assign selected invoice</button></span></div>

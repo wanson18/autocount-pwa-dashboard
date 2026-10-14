@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   clampToDispatchWindow,
+  createDispatchState,
   filterPickerInvoices,
   filterUnassignedForDate,
   getDispatchWindow,
   getInvoiceDateTag,
   shiftDate,
 } from '../public/dispatch-state.mjs';
-import { createFetchTransport } from '../public/dispatch.js';
+import { createFetchTransport, renderInvoiceCard, renderTripCard } from '../public/dispatch.js';
 
 const KL_NOON_14_OCT = new Date('2026-10-14T04:00:00Z');
 const KL_JUST_AFTER_MIDNIGHT_15_OCT = new Date('2026-10-14T16:05:00Z');
@@ -97,4 +98,28 @@ test('picker transport reads one date of invoices and that date’s active assig
     '/api/dispatch/invoices?startDate=2026-10-12&endDate=2026-10-12&company=enterprise',
   ]);
   assert.deepEqual(result, { invoices, assignments, sources: { enterprise: { status: 'ok' } } });
+});
+
+const OLD_INVOICE = {
+  companyKey: 'enterprise', invoiceId: 'OLD-1', docKey: 'OLD-1', docNo: 'IV-OLD-1', docDate: '2026-10-12',
+  customer: { name: 'Kedai Lama' }, deliveryAddress: 'Ipoh', cancelled: false, eligibility: 'eligible',
+  items: [{ itemCode: 'OIL', description: 'Oil', quantity: '1', uom: 'CTN' }],
+};
+
+test('invoice card shows an Older tag when its date is before the reference date', () => {
+  const html = renderInvoiceCard(OLD_INVOICE, { inTrip: true, referenceDate: '2026-10-14' });
+  assert.match(html, /class="invoice-date-tag invoice-date-tag-older">Older · 12 Oct</);
+  assert.doesNotMatch(renderInvoiceCard(OLD_INVOICE, { inTrip: true, referenceDate: '2026-10-12' }), /invoice-date-tag/);
+  assert.doesNotMatch(renderInvoiceCard(OLD_INVOICE, { inTrip: true }), /invoice-date-tag/);
+});
+
+test('trip card tags an older invoice against the trip date', () => {
+  const state = createDispatchState({
+    invoices: [],
+    trips: [{ id: 5, tripDate: '2026-10-14', driverId: 1, vehicleId: 2, revision: 2, status: 'planned',
+      assignments: [{ id: 9, tripId: 5, companyKey: 'enterprise', invoiceId: 'OLD-1', docNo: 'IV-OLD-1', docDate: '2026-10-12', status: 'assigned',
+        header: { customer: { name: 'Kedai Lama' } }, items: OLD_INVOICE.items }] }],
+    dateRange: { startDate: '2026-10-14', endDate: '2026-10-14' },
+  });
+  assert.match(renderTripCard(state, state.trips[0]), /Older · 12 Oct/);
 });
