@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  clampToDispatchWindow,
+  filterPickerInvoices,
+  filterUnassignedForDate,
+  getDispatchWindow,
+  getInvoiceDateTag,
+  shiftDate,
+} from '../public/dispatch-state.mjs';
+
+const KL_NOON_14_OCT = new Date('2026-10-14T04:00:00Z');
+const KL_JUST_AFTER_MIDNIGHT_15_OCT = new Date('2026-10-14T16:05:00Z');
+
+test('shiftDate moves across month and year boundaries', () => {
+  assert.equal(shiftDate('2026-10-14', -1), '2026-10-13');
+  assert.equal(shiftDate('2026-10-01', -1), '2026-09-30');
+  assert.equal(shiftDate('2026-12-31', 1), '2027-01-01');
+  assert.equal(shiftDate('2028-02-28', 1), '2028-02-29');
+});
+
+test('dispatch window is today ± 7 in Kuala Lumpur time', () => {
+  assert.deepEqual(getDispatchWindow(KL_NOON_14_OCT), { today: '2026-10-14', minDate: '2026-10-07', maxDate: '2026-10-21' });
+  assert.deepEqual(getDispatchWindow(KL_JUST_AFTER_MIDNIGHT_15_OCT), { today: '2026-10-15', minDate: '2026-10-08', maxDate: '2026-10-22' });
+});
+
+test('clampToDispatchWindow keeps dates inside the window and repairs bad input', () => {
+  assert.equal(clampToDispatchWindow('2026-10-10', KL_NOON_14_OCT), '2026-10-10');
+  assert.equal(clampToDispatchWindow('2026-10-01', KL_NOON_14_OCT), '2026-10-07');
+  assert.equal(clampToDispatchWindow('2026-11-30', KL_NOON_14_OCT), '2026-10-21');
+  assert.equal(clampToDispatchWindow('not-a-date', KL_NOON_14_OCT), '2026-10-14');
+});
+
+const pickerInvoices = [
+  { companyKey: 'enterprise', invoiceId: 'E1', docNo: 'IV-1001', docDate: '2026-10-13', customer: { name: 'Kedai Ah Seng' }, cancelled: false, eligibility: 'eligible' },
+  { companyKey: 'sdn_bhd', invoiceId: 'S1', docNo: 'IV-2001', docDate: '2026-10-13', customer: { name: 'Mini Market Ipoh' }, cancelled: false, eligibility: 'eligible' },
+  { companyKey: 'enterprise', invoiceId: 'E2', docNo: 'IV-1002', docDate: '2026-10-13', customer: { name: 'Cancelled Co' }, cancelled: true, eligibility: 'eligible' },
+  { companyKey: 'enterprise', invoiceId: 'E3', docNo: 'IV-1003', docDate: '2026-10-13', customer: { name: 'No UOM Sdn' }, cancelled: false, eligibility: 'blocked_missing_uom' },
+];
+
+test('filterUnassignedForDate drops assigned, cancelled, and blocked invoices', () => {
+  const assignments = [{ companyKey: 'enterprise', invoiceId: 'E1', status: 'assigned' }];
+  assert.deepEqual(filterUnassignedForDate(pickerInvoices, assignments).map((row) => row.invoiceId), ['S1']);
+});
+
+test('filterUnassignedForDate keys by company so the same invoice ID in the other book stays available', () => {
+  const assignments = [{ companyKey: 'sdn_bhd', invoiceId: 'E1', status: 'assigned' }];
+  assert.deepEqual(filterUnassignedForDate(pickerInvoices, assignments).map((row) => row.invoiceId), ['E1', 'S1']);
+});
+
+test('filterPickerInvoices matches doc no. or customer name, case-insensitive', () => {
+  assert.deepEqual(filterPickerInvoices(pickerInvoices, 'iv-200').map((row) => row.invoiceId), ['S1']);
+  assert.deepEqual(filterPickerInvoices(pickerInvoices, 'ah seng').map((row) => row.invoiceId), ['E1']);
+  assert.equal(filterPickerInvoices(pickerInvoices, '  ').length, pickerInvoices.length);
+});
+
+test('getInvoiceDateTag labels older and later invoice dates against the trip date', () => {
+  assert.equal(getInvoiceDateTag('2026-10-14', '2026-10-14'), null);
+  assert.equal(getInvoiceDateTag('', '2026-10-14'), null);
+  const older = getInvoiceDateTag('2026-10-12', '2026-10-14');
+  assert.equal(older.kind, 'older');
+  assert.match(older.label, /^Older · 12 Oct$/);
+  const newer = getInvoiceDateTag('2026-10-15', '2026-10-14');
+  assert.equal(newer.kind, 'newer');
+  assert.match(newer.label, /^Dated · 15 Oct$/);
+});

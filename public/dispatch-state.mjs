@@ -24,6 +24,46 @@ export function getDefaultDateRange(now = new Date()) {
   return { startDate: date, endDate: date };
 }
 
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+export const DISPATCH_WINDOW_DAYS = 7;
+const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+
+function parseIsoDate(value) {
+  if (typeof value !== 'string' || !ISO_DATE_PATTERN.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date : null;
+}
+
+export function shiftDate(date, days) {
+  const parsed = parseIsoDate(date);
+  if (!parsed) throw new Error(`invalid date: ${date}`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+export function getDispatchWindow(now = new Date()) {
+  const today = getDefaultDateRange(now).startDate;
+  return { today, minDate: shiftDate(today, -DISPATCH_WINDOW_DAYS), maxDate: shiftDate(today, DISPATCH_WINDOW_DAYS) };
+}
+
+export function clampToDispatchWindow(date, now = new Date()) {
+  const { today, minDate, maxDate } = getDispatchWindow(now);
+  if (!parseIsoDate(date)) return today;
+  if (date < minDate) return minDate;
+  if (date > maxDate) return maxDate;
+  return date;
+}
+
+export function getInvoiceDateTag(docDate, referenceDate) {
+  const doc = parseIsoDate(docDate);
+  if (!doc || !parseIsoDate(referenceDate) || docDate === referenceDate) return null;
+  const shortDate = SHORT_DATE_FORMATTER.format(doc);
+  return docDate < referenceDate
+    ? { kind: 'older', label: `Older · ${shortDate}` }
+    : { kind: 'newer', label: `Dated · ${shortDate}` };
+}
+
 export const DEFAULT_DATE_RANGE = getDefaultDateRange();
 
 export const COMPANY_NAMES = {
@@ -266,6 +306,27 @@ export function invoiceMatchesSearch(invoice, query) {
     haystacks.push(item?.itemCode, item?.item_code, item?.description);
   }
   return haystacks.some((field) => typeof field === 'string' && field.toLowerCase().includes(text));
+}
+
+const HOLDING_ASSIGNMENT_EXCLUDED_STATUSES = new Set(['removed', 'failed', 'returned']);
+
+export function filterUnassignedForDate(invoices = [], assignments = []) {
+  const taken = new Set(assignments
+    .filter((assignment) => !HOLDING_ASSIGNMENT_EXCLUDED_STATUSES.has(assignmentStatusOf(assignment)))
+    .map((assignment) => getInvoiceKey(companyKeyOf(assignment), invoiceIdOf(assignment)))
+    .filter(Boolean));
+  return invoices.filter((invoice) => (
+    invoice.cancelled !== true
+    && invoice.eligibility === 'eligible'
+    && !taken.has(getInvoiceKey(companyKeyOf(invoice), invoiceIdOf(invoice)))
+  ));
+}
+
+export function filterPickerInvoices(invoices = [], search = '') {
+  const text = String(search ?? '').trim().toLowerCase();
+  if (!text) return invoices;
+  return invoices.filter((invoice) => [invoice.docNo, invoice.doc_no, invoice.customer?.name, invoice.customerName]
+    .some((field) => typeof field === 'string' && field.toLowerCase().includes(text)));
 }
 
 export function reloadDispatchState(previousState, board) {
