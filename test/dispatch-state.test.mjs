@@ -1168,3 +1168,28 @@ test('quarantined source rows are counted in state for the board notice', () => 
 
   assert.equal(state.quarantinedCount, 3);
 });
+
+test('board date picker reloads the chosen day and creates trips on that day', async () => {
+  const fake = createFakeDispatchDocument({ protectedShell: true });
+  const boardCalls = [];
+  const tripBodies = [];
+  const app = createDispatchApp({
+    documentRef: fake.documentRef,
+    sessionTransport: { getSession: async () => ({ authenticated: true, session: { clerkId: 'clerk-1', role: 'clerk' } }) },
+    transport: { loadBoard: async (options) => { boardCalls.push(options); return { invoices: [], trips: [], assignments: [], sources: {} }; } },
+    resourcesTransport: { loadResources: async () => ({ drivers: [], lorries: [] }) },
+    tripsTransport: { createTrip: async (body) => { tripBodies.push(body); return { trip: { id: 1 } }; } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const { today, minDate } = dispatchState.getDispatchWindow();
+  assert.equal(app.getBoardDate(), today);
+  assert.equal(boardCalls.at(-1).startDate, today);
+
+  const yesterday = dispatchState.shiftDate(today, -1);
+  await app.setBoardDate(yesterday);
+  assert.equal(app.getBoardDate(), yesterday);
+  assert.deepEqual([boardCalls.at(-1).startDate, boardCalls.at(-1).endDate], [yesterday, yesterday]);
+
+  await app.setBoardDate(dispatchState.shiftDate(today, -30));
+  assert.equal(app.getBoardDate(), minDate, 'dates outside the window clamp to the edge');
+});

@@ -4,8 +4,10 @@ import {
   createDispatchState,
   beginOptimisticMove,
   beginOptimisticRemoval,
+  clampToDispatchWindow,
   getCompanyFilterLabel,
   getDefaultDateRange,
+  getDispatchWindow,
   getInvoiceKey,
   getSourceMessage,
   isCurrentEligibleUnassignedInvoice,
@@ -22,6 +24,7 @@ import {
   setCompanyFilter,
   setSearchQuery,
   settleMoveResponse,
+  shiftDate,
   visibleUnassignedInvoices,
 } from './dispatch-state.mjs';
 
@@ -636,19 +639,23 @@ function renderReportView(root, reportState) {
   if (exportButton) exportButton.disabled = reportState.status === 'loading';
 }
 
-function syncDefaultDateControls(root, dateRange = getDefaultDateRange()) {
-  const formattedDate = formatKualaLumpurDate(dateRange.startDate) || dateRange.startDate;
+function syncBoardDateControls(root, date) {
+  const formattedDate = formatKualaLumpurDate(date) || date;
   const updatedAt = $(root, '#updatedAt');
   if (updatedAt) {
-    updatedAt.setAttribute('datetime', dateRange.startDate);
+    updatedAt.setAttribute('datetime', date);
     updatedAt.textContent = formattedDate;
   }
+  const tripDialogHelp = $(root, '#tripDialogHelp');
+  if (tripDialogHelp) tripDialogHelp.textContent = `Choose an active driver and lorry for ${formattedDate}.`;
+}
+
+function syncDefaultDateControls(root, dateRange = getDefaultDateRange()) {
+  syncBoardDateControls(root, dateRange.startDate);
   const reportStartDate = $(root, '#reportStartDate');
   const reportEndDate = $(root, '#reportEndDate');
   if (reportStartDate) reportStartDate.value = dateRange.startDate;
   if (reportEndDate) reportEndDate.value = dateRange.endDate;
-  const tripDialogHelp = $(root, '#tripDialogHelp');
-  if (tripDialogHelp) tripDialogHelp.textContent = `Choose an active driver and lorry for ${formattedDate}.`;
 }
 
 export function createDispatchApp({
@@ -663,7 +670,8 @@ export function createDispatchApp({
   if (!documentRef) throw new Error('a document is required');
   const root = documentRef.querySelector('#dispatchApp');
   if (!root) throw new Error('dispatch app root is required');
-  const initialDateRange = getDefaultDateRange();
+  let selectedDate = getDefaultDateRange().startDate;
+  const initialDateRange = { startDate: selectedDate, endDate: selectedDate };
   let state = createDispatchState({ dateRange: initialDateRange });
   let resources = { drivers: [], lorries: [] };
   let boardRequestSequence = 0;
@@ -696,7 +704,7 @@ export function createDispatchApp({
   function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
-  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; state = createDispatchState({ boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
+  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; selectedDate = getDefaultDateRange().startDate; state = createDispatchState({ dateRange: { startDate: selectedDate, endDate: selectedDate }, boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); syncBoardDateControls(root, selectedDate); renderDateBar(); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
   function handleSessionLoss() { clearSensitiveState(); setLoginMessage('Your session has expired. Sign in again.'); setResourceMessage('Your session has expired. Sign in again.'); }
 
   async function runMutation(operation, canWrite = writesEnabled) {
@@ -718,28 +726,27 @@ export function createDispatchApp({
     if (!authenticated) return state;
     if (mutationInFlight && !allowDuringMutation) { boardLoadQueued = true; return state; }
     if (allowDuringMutation) boardLoadQueued = false;
-    const requestSequence = ++boardRequestSequence; const requestedCompany = state.companyFilter; const previousMessage = state.statusMessage;
+    const requestSequence = ++boardRequestSequence; const requestedCompany = state.companyFilter; const requestedDate = selectedDate; const previousMessage = state.statusMessage;
     boardAuthoritative = false;
     state = { ...state, boardStatus: 'loading', statusMessage: preserveMessage ? previousMessage : 'Loading the authenticated Board…' }; render();
     try {
-      const dateRange = getDefaultDateRange();
-      const board = await transport.loadBoard({ startDate: dateRange.startDate, endDate: dateRange.endDate, company: requestedCompany });
-      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
+      const board = await transport.loadBoard({ startDate: requestedDate, endDate: requestedDate, company: requestedCompany });
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany || selectedDate !== requestedDate) return state;
       let boardResources = resources;
       if (authenticated && $(root, '#driverList') && boardNeedsResourceCatalog(board)) {
         const loadedResources = await loadResources({ boardSequence: requestSequence });
         boardResources = loadedResources ? normalizeResources(loadedResources) : resources;
       }
-      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
-      state = reloadDispatchState(state, { ...board, resources: boardResources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany || selectedDate !== requestedDate) return state;
+      state = reloadDispatchState(state, { ...board, dateRange: board.dateRange || { startDate: requestedDate, endDate: requestedDate }, resources: boardResources, boardStatus: board.invoices?.length || board.trips?.length ? 'ready' : 'empty' });
       boardAuthoritative = true;
       if (preserveMessage) state.statusMessage = previousMessage;
       render();
       return state;
     } catch (error) {
-      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany) return state;
+      if (requestSequence !== boardRequestSequence || state.companyFilter !== requestedCompany || selectedDate !== requestedDate) return state;
       if (error.code === 'unauthorized') { handleSessionLoss(); $(root, '#statusMessage').textContent = 'Your session has expired. Sign in again.'; }
-      else { boardAuthoritative = false; state = createDispatchState({ companyFilter: requestedCompany, boardStatus: 'error' }); state.statusMessage = 'The Board could not be loaded. Use Retry board to try again.'; render(); }
+      else { boardAuthoritative = false; state = createDispatchState({ companyFilter: requestedCompany, dateRange: { startDate: requestedDate, endDate: requestedDate }, boardStatus: 'error' }); state.statusMessage = 'The Board could not be loaded. Use Retry board to try again.'; render(); }
       throw error;
     }
   }
@@ -874,7 +881,7 @@ export function createDispatchApp({
   async function createTrip() {
     if (!writesEnabled()) return;
     return runMutation(async () => {
-      const body = { trip_date: getDefaultDateRange().startDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
+      const body = { trip_date: selectedDate, driver_id: Number($(root, '#tripDriver')?.value), vehicle_id: Number($(root, '#tripVehicle')?.value), route_notes: $(root, '#tripRouteNotes')?.value?.trim() || '' };
       const submit = $(root, '#createTripSubmit'); if (submit) submit.disabled = true; $(root, '#tripDialogMessage').textContent = 'Creating trip…';
       const stagedKey = stagedInvoiceKey;
       try {
@@ -1047,6 +1054,20 @@ export function createDispatchApp({
     return accepted;
   }
 
+  function renderDateBar() {
+    const { today, minDate, maxDate } = getDispatchWindow();
+    const input = $(root, '#boardDate'); if (input) { input.min = minDate; input.max = maxDate; input.value = selectedDate; }
+    const prev = $(root, '#boardPrevDay'); if (prev) prev.disabled = selectedDate <= minDate;
+    const next = $(root, '#boardNextDay'); if (next) next.disabled = selectedDate >= maxDate;
+    const todayButton = $(root, '#boardToday'); if (todayButton) todayButton.disabled = selectedDate === today;
+    const banner = $(root, '#boardDateBanner'); if (banner) { banner.hidden = selectedDate === today; banner.textContent = selectedDate === today ? '' : `Viewing ${formatKualaLumpurDate(selectedDate) || selectedDate} — not today`; }
+  }
+  async function setBoardDate(date) {
+    selectedDate = clampToDispatchWindow(date);
+    syncBoardDateControls(root, selectedDate); state = { ...state, dateRange: { startDate: selectedDate, endDate: selectedDate } }; renderDateBar();
+    try { return await loadBoard(); } catch { return state; }
+  }
+
   async function login() { if (!clerkIdInput || !clerkPinInput) return; if (loginSubmit) loginSubmit.disabled = true; setLoginMessage('Signing in…'); try { const result = await sessionTransport.login({ clerkId: clerkIdInput.value.trim(), pin: clerkPinInput.value }); if (!result?.authenticated || !result.session) throw new Error('Sign-in could not be completed.'); setAuthenticated(true, result.session); setLoginMessage(''); clerkPinInput.value = ''; await loadBoard(); root.querySelector('[role="tab"]')?.focus?.(); } catch (error) { setAuthenticated(false); setLoginMessage(error.code === 'invalid_credentials' ? 'Invalid clerk ID or PIN.' : 'Sign-in could not be completed. Try again.'); clerkPinInput.value = ''; clerkPinInput.focus?.(); throw error; } finally { if (loginSubmit) loginSubmit.disabled = false; } }
   async function logout() { try { const result = await sessionTransport.logout(); if (!result || result.authenticated !== false || result.success === false) { const error = new Error('sign-out was not confirmed by the server'); error.code = 'logout_not_confirmed'; throw error; } } catch (error) { $(root, '#statusMessage').textContent = 'Sign-out could not be completed. Try again.'; setResourceMessage('Sign-out could not be completed. Try again.'); throw error; } clearSensitiveState(); setLoginMessage('You have been signed out.'); clerkIdInput?.focus?.(); }
   async function initializeSession() { if (!loginView && authenticatedView) { setAuthenticated(true, { clerkId: 'public-dispatch', role: 'admin' }); await loadBoard(); return; } if (!loginView || !authenticatedView || !loginForm) return; setAuthenticated(false); setLoginMessage('Checking sign-in…'); try { const result = await sessionTransport.getSession(); if (result?.authenticated && result.session) { setAuthenticated(true, result.session); setLoginMessage(''); await loadBoard(); } else setLoginMessage('Sign in to continue.'); } catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setLoginMessage('Sign-in is temporarily unavailable. Try again.'); } }
@@ -1056,6 +1077,10 @@ export function createDispatchApp({
   $(root, '#companyFilter')?.addEventListener('change', (event) => { setState(setCompanyFilter(state, event.target.value)); loadBoard().catch(() => {}); });
   $(root, '#invoiceSearch')?.addEventListener('input', (event) => { setState(setSearchQuery(state, event.target.value)); });
   $(root, '#refreshBoard')?.addEventListener('click', () => loadBoard().catch(() => {}));
+  $(root, '#boardDate')?.addEventListener('change', (event) => { if (event.target.value) setBoardDate(event.target.value); });
+  $(root, '#boardPrevDay')?.addEventListener('click', () => setBoardDate(shiftDate(selectedDate, -1)));
+  $(root, '#boardNextDay')?.addEventListener('click', () => setBoardDate(shiftDate(selectedDate, 1)));
+  $(root, '#boardToday')?.addEventListener('click', () => setBoardDate(getDispatchWindow().today));
   $(root, '#refreshTrips')?.addEventListener('click', () => loadBoard().catch(() => {}));
   $(root, '#logoutButton')?.addEventListener('click', () => logout().catch(() => {}));
   $(root, '#newTripButton')?.addEventListener('click', (event) => openTripDialog(event.currentTarget).catch((error) => { if (error.code !== 'unauthorized') $(root, '#statusMessage').textContent = 'Resources could not be loaded. Try again.'; }));
@@ -1125,8 +1150,8 @@ export function createDispatchApp({
   });
   root.addEventListener('keydown', (event) => { const tab = event.target.closest?.('[role="tab"]'); if (tab) { const tabs = [...root.querySelectorAll('[role="tab"]')]; const nextIndex = getTabNavigationIndex(tabs.indexOf(tab), event.key, tabs.length); if (nextIndex !== null) { event.preventDefault(); activateTab(tabs[nextIndex].dataset.tab, { focus: true }); } return; } const assign = event.target.closest?.('[data-assign-selected], [data-assign-invoice]'); if (assign && event.key === 'Enter') { event.preventDefault(); assign.click(); } });
   globalThis.addEventListener?.('online', render); globalThis.addEventListener?.('offline', render);
-  syncDefaultDateControls(root, initialDateRange); activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
-  return { getState: () => state, getSession: () => session, loadBoard, loadResources, loadReports, exportReport, assignInvoice, removeAssignedInvoice, render, activateTab, login, logout };
+  syncDefaultDateControls(root, initialDateRange); renderDateBar(); activateTab('board'); updateResourceTypeFields(); render(); initializeSession().catch(() => {});
+  return { getState: () => state, getSession: () => session, loadBoard, setBoardDate, getBoardDate: () => selectedDate, loadResources, loadReports, exportReport, assignInvoice, removeAssignedInvoice, render, activateTab, login, logout };
 }
 
 if (typeof document !== 'undefined') window.addEventListener('DOMContentLoaded', () => { window.dispatchApp = createDispatchApp(); }, { once: true });

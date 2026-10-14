@@ -1502,3 +1502,18 @@ h2 {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.board-date-block { display: grid; gap: 6px; min-width: 0; }
+.board-date-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.board-date-step { min-width: 44px; }
+.board-date-input { width: auto; min-width: 150px; }
+.board-date-banner {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--butter-line);
+  border-radius: 8px;
+  background: var(--butter);
+  color: var(--butter-ink);
+  font-weight: 600;
+}
+.board-date-banner[hidden] { display: none; }

@@ -70,9 +70,16 @@
         <main>
           <section class="view" id="boardView" role="tabpanel" aria-labelledby="boardTab">
           <div class="toolbar panel">
-            <div>
-              <p class="eyebrow">Invoice date</p>
+            <div class="board-date-block">
+              <p class="eyebrow">Delivery date</p>
               <h2 id="boardDateLabel">Today</h2>
+              <div class="board-date-controls">
+                <button class="secondary-button board-date-step" type="button" id="boardPrevDay" aria-label="Previous day">◀</button>
+                <input class="field-control board-date-input" type="date" id="boardDate" aria-label="Board date" />
+                <button class="secondary-button board-date-step" type="button" id="boardNextDay" aria-label="Next day">▶</button>
+                <button class="secondary-button" type="button" id="boardToday">Today</button>
+              </div>
+              <p class="board-date-banner" id="boardDateBanner" role="status" aria-live="polite" hidden></p>
             </div>
             <div class="toolbar-fields">
               <label class="field-group" for="companyFilter">
@@ -140,7 +147,7 @@
                 </div>
                 <button class="secondary-button" type="button" id="closeTripDialog">Close</button>
               </div>
-              <p class="section-help" id="tripDialogHelp">Choose an active driver and lorry for today’s dispatch.</p>
+              <p class="section-help" id="tripDialogHelp">Choose an active driver and lorry for the selected day.</p>
               <form id="tripForm" class="trip-form" novalidate>
                 <label class="field-group" for="tripDriver"><span>Driver</span><select class="field-control" id="tripDriver" name="driver_id" required></select></label>
                 <label class="field-group" for="tripVehicle"><span>Lorry</span><select class="field-control" id="tripVehicle" name="vehicle_id" required></select></label>

@@ -529,3 +529,21 @@ test('with a trip the loading plan sits beside the invoices on wide screens and 
   expect(list.scrollsInside).toBe(true);
   expect(list.height).toBeLessThanOrEqual(testInfo.project.name === 'desktop' ? 900 : 520);
 });
+
+test('board date picker switches day, shows the not-today banner, and creates trips on the chosen day', async ({ page }) => {
+  const state = await openBoard(page);
+  const banner = page.locator('#boardDateBanner');
+  await expect(banner).toBeHidden();
+  await expect(page.locator('#boardDate')).toHaveValue(currentKualaLumpurDate());
+  await page.locator('#boardPrevDay').click();
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('not today');
+  const chosen = await page.locator('#boardDate').inputValue();
+  expect(chosen).not.toBe(currentKualaLumpurDate());
+  await page.locator('#newTripButton').click();
+  await expect(page.getByRole('dialog', { name: 'Create trip' })).toBeVisible();
+  await page.locator('#createTripSubmit').click();
+  await expect.poll(() => state.tripBodies.at(-1)?.trip_date).toBe(chosen);
+  await page.locator('#boardToday').click();
+  await expect(banner).toBeHidden();
+});
