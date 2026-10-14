@@ -16,6 +16,8 @@ export function formatPickerDate(date) {
 }
 
 const SOURCE_LABELS = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
+// Same rule as the server: invoices can only be added to trips still being planned or loaded.
+const ACCEPTING_TRIP_STATUSES = new Set(['planned', 'loading']);
 
 function companyKeyOf(invoice) { return invoice.companyKey ?? invoice.company_key; }
 
@@ -71,6 +73,7 @@ export function createInvoicePickerModel({ transport, assignmentsTransport, relo
         if (error?.code === 'unauthorized') throw error;
         const message = error?.code === 'invoice_already_assigned' ? 'Already on another trip.'
           : error?.code === 'stale_trip' ? 'Trip changed — reopen and try again.'
+            : error?.code === 'invalid_transition' ? 'This trip is no longer taking invoices.'
             : 'Could not add this invoice. Try again.';
         results.push({ key, ok: false, message });
       }
@@ -100,7 +103,12 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
   const submit = $('#olderInvoiceSubmit'); const retry = $('#olderInvoiceRetry');
   let invoices = []; let ticked = new Set(); let rowMessages = new Map(); let loadSequence = 0; let invoker = null; let busy = false; let loading = false; let openSequence = 0;
 
-  function trips() { return (getTrips() || []).filter((trip) => trip.status !== 'cancelled'); }
+  function trips() { return (getTrips() || []).filter((trip) => ACCEPTING_TRIP_STATUSES.has(trip.status ?? 'planned')); }
+  function noTripsMessage() {
+    return (getTrips() || []).some((trip) => trip.status !== 'cancelled')
+      ? 'No trips can accept invoices. Create a new trip or choose a trip that is still being planned or loaded.'
+      : 'Create a trip for this day first.';
+  }
   function updateSubmit() { submit.disabled = busy || loading || !canWrite() || !ticked.size || !tripSelect.value; }
 
   function renderList() {
@@ -126,7 +134,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
     tripSelect.innerHTML = dayTrips.map((trip) => `<option value="${escapeHtml(trip.id)}">${escapeHtml(tripLabel(trip, numbers))}</option>`).join('');
     if (dayTrips.some((trip) => String(trip.id) === previous)) tripSelect.value = previous;
     tripSelect.disabled = !dayTrips.length;
-    if (!dayTrips.length) message.textContent = 'Create a trip for this day first.';
+    if (!dayTrips.length) message.textContent = noTripsMessage();
   }
 
   async function load() {

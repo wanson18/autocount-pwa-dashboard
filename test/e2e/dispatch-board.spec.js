@@ -642,3 +642,21 @@ test('older invoice picker keeps a reopened dialog when an earlier Add finishes 
   await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
   await expect(page.locator('#olderInvoiceSearch')).toHaveValue('semalam');
 });
+
+test('older invoice picker offers only trips still being planned or loaded', async ({ page }) => {
+  const state = await openBoard(page);
+  state.trips.unshift({ ...state.trips[0], id: 100, status: 'completed', assignments: [] });
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceTrip option')).toHaveCount(1);
+  await expect(page.locator('#olderInvoiceTrip')).toHaveValue('101');
+});
+
+test('older invoice picker explains when every trip for the day is finished', async ({ page }) => {
+  const state = await openBoard(page);
+  state.trips[0].status = 'completed';
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceMessage')).toHaveText('No trips can accept invoices. Create a new trip or choose a trip that is still being planned or loaded.');
+  await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
+});

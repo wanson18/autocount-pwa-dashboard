@@ -111,3 +111,13 @@ test('load warns when a requested company book could not be read', async () => {
   const enterpriseOnly = await model.load({ date: '2026-10-12', company: 'enterprise' });
   assert.equal(enterpriseOnly.warning, '');
 });
+
+test('assign explains when the trip stopped taking invoices', async () => {
+  const model = createInvoicePickerModel({
+    transport: {},
+    assignmentsTransport: { assignInvoice: async () => { throw error('invalid_transition'); } },
+    reloadTrip: async () => null, createRequestId,
+  });
+  const outcome = await model.assign({ invoices: [A], trip: { id: 7, revision: 3 } });
+  assert.deepEqual(outcome.results, [{ key: 'enterprise:A', ok: false, message: 'This trip is no longer taking invoices.' }]);
+});
