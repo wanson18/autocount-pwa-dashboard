@@ -129,7 +129,8 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
 
   function renderTrips() {
     const dayTrips = trips();
-    const numbers = getTripNumbers(dayTrips);
+    // Number trips from the board's full list (as the lanes do), then offer only the ones that accept invoices.
+    const numbers = getTripNumbers((getTrips() || []).filter((trip) => trip.status !== 'cancelled'));
     const previous = tripSelect.value;
     tripSelect.innerHTML = dayTrips.map((trip) => `<option value="${escapeHtml(trip.id)}">${escapeHtml(tripLabel(trip, numbers))}</option>`).join('');
     if (dayTrips.some((trip) => String(trip.id) === previous)) tripSelect.value = previous;

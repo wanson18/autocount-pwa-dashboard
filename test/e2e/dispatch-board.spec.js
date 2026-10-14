@@ -660,3 +660,17 @@ test('older invoice picker explains when every trip for the day is finished', as
   await expect(page.locator('#olderInvoiceMessage')).toHaveText('No trips can accept invoices. Create a new trip or choose a trip that is still being planned or loaded.');
   await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
 });
+
+test('older invoice picker numbers trips the same way as the board', async ({ page }) => {
+  const state = await openBoard(page);
+  const base = state.trips[0];
+  state.trips.splice(0, state.trips.length,
+    { ...base, id: 100, status: 'completed', assignments: [] },
+    { ...base, id: 101, status: 'planned', assignments: [] },
+    { ...base, id: 102, status: 'planned', assignments: [] });
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  const labels = await page.locator('#olderInvoiceTrip option').allTextContents();
+  expect(labels.map((label) => label.split(' · ')[0])).toEqual(['Trip 2', 'Trip 3']);
+  await expect(page.locator('#olderInvoiceTrip')).toHaveValue('101');
+});
