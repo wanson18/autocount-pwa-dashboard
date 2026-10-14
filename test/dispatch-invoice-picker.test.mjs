@@ -99,3 +99,15 @@ test('assign rethrows unauthorized immediately', async () => {
   });
   await assert.rejects(model.assign({ invoices: [A, B], trip: { id: 7, revision: 3 } }), (value) => value.code === 'unauthorized');
 });
+
+test('load warns when a requested company book could not be read', async () => {
+  const model = createInvoicePickerModel({
+    transport: { loadPickerInvoices: async () => ({ invoices: [A], assignments: [], sources: { enterprise: { status: 'ok' }, sdn_bhd: { status: 'unavailable' } } }) },
+    assignmentsTransport: {}, reloadTrip: async () => null, createRequestId,
+  });
+  const all = await model.load({ date: '2026-10-12', company: 'all' });
+  assert.equal(all.status, 'ready');
+  assert.equal(all.warning, "Sdn Bhd invoices couldn't be loaded, so this list may be incomplete.");
+  const enterpriseOnly = await model.load({ date: '2026-10-12', company: 'enterprise' });
+  assert.equal(enterpriseOnly.warning, '');
+});

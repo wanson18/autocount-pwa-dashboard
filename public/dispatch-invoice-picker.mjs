@@ -15,14 +15,22 @@ export function formatPickerDate(date) {
   return Number.isNaN(parsed.getTime()) ? String(date) : PICKER_DATE_FORMATTER.format(parsed);
 }
 
+const SOURCE_LABELS = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
+
 function companyKeyOf(invoice) { return invoice.companyKey ?? invoice.company_key; }
+
+function sourceWarning(sources = {}, company = 'all') {
+  const requested = company === 'all' ? Object.keys(SOURCE_LABELS) : [company];
+  const down = requested.filter((key) => sources?.[key]?.status !== 'ok').map((key) => SOURCE_LABELS[key] || key);
+  return down.length ? `${down.join(' and ')} invoices couldn't be loaded, so this list may be incomplete.` : '';
+}
 function invoiceIdOf(invoice) { return invoice.invoiceId ?? invoice.invoice_id ?? invoice.docKey; }
 
 export function createInvoicePickerModel({ transport, assignmentsTransport, reloadTrip, createRequestId }) {
   async function load({ date, company = 'all' }) {
     try {
       const { invoices, assignments, sources } = await transport.loadPickerInvoices({ date, company });
-      return { status: 'ready', invoices: filterUnassignedForDate(invoices, assignments), sources };
+      return { status: 'ready', invoices: filterUnassignedForDate(invoices, assignments), sources, warning: sourceWarning(sources, company) };
     } catch (error) {
       if (error?.code === 'unauthorized') throw error;
       return { status: 'error', message: `Couldn't load invoices for ${formatPickerDate(date)}. Try again.` };
@@ -75,7 +83,6 @@ export function createInvoicePickerModel({ transport, assignmentsTransport, relo
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ESCAPES[character]);
-const COMPANY_LABELS = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
 
 function tripLabel(trip, numbers) {
   const lorry = trip.lorry?.registrationNo || trip.registrationNo || `Lorry ${trip.vehicleId ?? ''}`;
@@ -103,7 +110,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
       const note = rowMessages.get(key);
       return `<label class="older-invoice-row" data-older-invoice-key="${escapeHtml(key)}">
         <input type="checkbox" value="${escapeHtml(key)}"${ticked.has(key) ? ' checked' : ''} />
-        <span class="older-invoice-main"><strong>${escapeHtml(invoice.docNo)}</strong> · ${escapeHtml(COMPANY_LABELS[companyKeyOf(invoice)] || companyKeyOf(invoice))}<br />${escapeHtml(invoice.customer?.name || invoice.customerName || '')}</span>
+        <span class="older-invoice-main"><strong>${escapeHtml(invoice.docNo)}</strong> · ${escapeHtml(SOURCE_LABELS[companyKeyOf(invoice)] || companyKeyOf(invoice))}<br />${escapeHtml(invoice.customer?.name || invoice.customerName || '')}</span>
         <span class="older-invoice-date">${escapeHtml(invoice.docDate)}</span>
         ${note ? `<span class="older-invoice-error">${escapeHtml(note)}</span>` : ''}
       </label>`;
@@ -132,6 +139,7 @@ export function mountInvoicePicker(root, { model, getBoardDate, getTrips, canWri
       if (sequence !== loadSequence) return;
       if (result.status === 'error') { invoices = []; list.innerHTML = ''; message.textContent = result.message; retry.hidden = false; updateSubmit(); return; }
       invoices = result.invoices;
+      if (result.warning) { message.textContent = result.warning; retry.hidden = false; }
       renderList();
     } catch (error) {
       if (error?.code === 'unauthorized') { close(); onSessionLoss(); }
