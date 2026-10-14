@@ -23,7 +23,8 @@ const sheet = {
     driver: { name: 'Aiman Driver' }, lorry: { registrationNo: 'WXY 1001' },
   },
   counts: { enterprise: 1, sdn_bhd: 1, total: 2 },
-  items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil', uom: 'CTN', enterprise: '0.30', sdn_bhd: '3.000', total: '3.300' }],
+  // A float sum of these parts prints 3.3000000000000003, so the sheet must show the API's exact total.
+  items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil', uom: 'CTN', enterprise: '1.10', sdn_bhd: '2.200', total: '3.300' }],
   invoices: [
     { companyKey: 'enterprise', invoiceId: 'e-1', docNo: 'ENT-001', docDate: '2026-08-28', customer: { code: 'E-1', name: 'Enterprise Customer' }, status: 'assigned' },
     { companyKey: 'sdn_bhd', invoiceId: 's-1', docNo: 'SDN-001', docDate: '2026-08-28', customer: { code: 'S-1', name: 'Sdn Customer' }, status: 'returned' },
@@ -89,7 +90,9 @@ test('Board gives every trip a same-origin Print Items link and the loading page
   await expect(page.getByRole('heading', { name: 'Trip 77 loading sheet' })).toBeVisible();
   await expect(page.locator('#sheetContent')).toContainText('Enterprise');
   await expect(page.locator('#sheetContent')).toContainText('Sdn Bhd');
-  await expect(page.locator('#sheetContent')).toContainText('3.300');
+  // Since 6128b2c the sheet trims trailing zeros (1.10 -> 1.1, 2.200 -> 2.2, 3.300 -> 3.3); the
+  // API's exact decimal strings are unchanged. Check every column of the mixed-company row.
+  await expect(page.locator('.items-table tbody td')).toHaveText(['OIL-5KG', 'Cooking Oil', 'CTN', '1.1', '2.2', '3.3']);
   await expect(page.locator('#printButton')).toBeEnabled();
   expect(state.loadingReads).toBe(1);
 });
