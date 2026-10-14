@@ -191,8 +191,14 @@ async function openBoard(page, options) {
   return state;
 }
 
-function invoiceCard(page, docNo) {
-  return page.locator('.invoice-card').filter({ hasText: docNo });
+// Compact invoice cards (24e6f17) show the customer name, not the doc number; the doc
+// number is the card's title, so find cards by title in the queue and on trips alike.
+function invoiceCard(scope, docNo) {
+  return scope.locator(`.invoice-card[title="Invoice ${docNo}"]`);
+}
+
+function queuedInvoice(page, docNo) {
+  return invoiceCard(page.locator('#unassignedList'), docNo);
 }
 
 function currentKualaLumpurDate() {
@@ -238,8 +244,11 @@ test('Board shows combined company feed and creates a mixed-company trip', async
   await expect(trip).toContainText('Enterprise 1');
   await expect(trip).toContainText('Sdn Bhd 1');
   await expect(trip).toContainText('Combined 2');
-  await expect(trip.locator('.company-badge', { hasText: 'Enterprise' })).toHaveCount(1);
-  await expect(trip.locator('.company-badge', { hasText: 'Sdn Bhd' })).toHaveCount(1);
+  // Compact trip rows (24e6f17) have no company badge; the subtotals above give the split,
+  // so check that the trip holds exactly the Enterprise and the Sdn Bhd invoice.
+  await expect(trip.locator('.invoice-card')).toHaveCount(2);
+  await expect(invoiceCard(trip, 'ENT-E2E-001')).toBeVisible();
+  await expect(invoiceCard(trip, 'SDN-E2E-001')).toBeVisible();
 });
 
 test('authenticated Board joins an IDs-only trip from the protected resources response', async ({ page }) => {
@@ -306,7 +315,7 @@ test('failed assignment rolls back exactly and announces the error', async ({ pa
   await card.getByRole('button', { name: /Select invoice/ }).click();
   await page.locator('[data-trip-id="101"]').getByRole('button', { name: /Assign selected invoice/ }).click();
   await expect(page.locator('#statusMessage')).toContainText('could not be assigned');
-  await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toBeVisible();
   await expect(page.locator('[data-trip-id="101"] .invoice-card')).toHaveCount(0);
   await expect(page.locator('[data-assign-selected="101"]')).toBeEnabled();
   await expect(page.locator('[data-assign-selected="101"]')).toBeFocused();
@@ -320,7 +329,7 @@ test('stale trip conflict stays locked through authoritative refetch and then re
   const tripReadsBefore = state.counts.trips;
   await trip.getByRole('button', { name: /Assign selected invoice/ }).click();
   await expect(page.locator('#statusMessage')).toContainText('changed on the server');
-  await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toBeVisible();
   await expect.poll(() => state.counts.trips).toBeGreaterThan(tripReadsBefore);
   await expect(trip.getByRole('button', { name: /Assign selected invoice/ })).toBeDisabled();
   await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
@@ -341,7 +350,7 @@ test('refresh cannot erase a newer pending assignment or suppress its authoritat
   state.assignmentGate.resolve();
   await expect.poll(() => state.counts.invoiceReads).toBeGreaterThan(1);
   await expect(page.locator('[data-trip-id="101"]')).toContainText('Combined 1');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
 });
 
@@ -358,8 +367,8 @@ test('filter change queues behind a pending assignment and applies the newest co
   await expect.poll(() => state.invoiceCompanies.filter((company) => company === 'sdn_bhd').length).toBeGreaterThan(0);
   await expect(page.locator('#statusMessage')).toContainText('Assignment saved');
   await expect(page.locator('#companyFilter')).toHaveValue('sdn_bhd');
-  await expect(page.locator('#unassignedList')).toContainText('SDN-E2E-001');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'SDN-E2E-001')).toBeVisible();
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toHaveCount(0);
 });
 
 test('one shared lock disables Board and resource writes until resource read-back completes', async ({ page }) => {
@@ -402,7 +411,7 @@ test('a missing required source is reported as partial instead of healthy', asyn
 
 test('HTTP 401 with an arbitrary body clears the Board and hides the authenticated view', async ({ page }) => {
   await openBoard(page, { unauthorizedOnRefresh: true });
-  await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toBeVisible();
 
   await page.locator('#refreshBoard').click();
 
@@ -411,7 +420,7 @@ test('HTTP 401 with an arbitrary body clears the Board and hides the authenticat
   await expect(page.locator('#loginView')).toHaveCount(0);
   await expect(page.locator('#authenticatedView')).toBeHidden();
   await expect(page.locator('#dispatchApp')).toHaveAttribute('data-authenticated', 'false');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toHaveCount(0);
 });
 
 test('changing company during a load applies only the newest filter response and settles loading', async ({ page }) => {
@@ -421,12 +430,12 @@ test('changing company during a load applies only the newest filter response and
   await expect.poll(() => state.invoiceCompanies.filter((company) => company === 'enterprise').length).toBe(1);
   await page.locator('#companyFilter').selectOption('sdn_bhd');
 
-  await expect(page.locator('#unassignedList')).toContainText('SDN-E2E-001');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'SDN-E2E-001')).toBeVisible();
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toHaveCount(0);
   state.enterpriseFilterGate.resolve();
   await expect(page.locator('#boardState')).not.toContainText('Loading');
-  await expect(page.locator('#unassignedList')).toContainText('SDN-E2E-001');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'SDN-E2E-001')).toBeVisible();
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toHaveCount(0);
 });
 
 test('generic Board failure is visible and the retry control restores the authenticated feed', async ({ page }) => {
@@ -434,7 +443,8 @@ test('generic Board failure is visible and the retry control restores the authen
   await page.goto('/dispatch.html');
   await expect(page.locator('#authenticatedView')).toBeVisible();
   await expect(page.locator('#boardState')).toContainText('could not be loaded');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-SI-0001');
+  // No sanitized-fixture fallback anywhere: the fixture parks ENT-SI-0001 on its trip, not in the queue.
+  await expect(invoiceCard(page, 'ENT-SI-0001')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
   await expect(page.locator('#refreshBoard')).toHaveText('Retry board');
   await page.locator('#refreshBoard').click();
@@ -448,11 +458,12 @@ test('loading starts with an empty non-writable Board until the first authoritat
 
   await expect(page.locator('#authenticatedView')).toBeVisible();
   await expect(page.locator('#boardState')).toContainText('Loading the authenticated Board');
-  await expect(page.locator('#unassignedList')).not.toContainText('ENT-SI-0001');
+  // No sanitized-fixture fallback anywhere: the fixture parks ENT-SI-0001 on its trip, not in the queue.
+  await expect(invoiceCard(page, 'ENT-SI-0001')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /New trip/ })).toBeDisabled();
 
   state.initialBoardGate.resolve();
-  await expect(page.locator('#unassignedList')).toContainText('ENT-E2E-001');
+  await expect(queuedInvoice(page, 'ENT-E2E-001')).toBeVisible();
   await expect(page.getByRole('button', { name: /New trip/ })).toBeEnabled();
 });
 
@@ -470,7 +481,7 @@ test('creating the first trip reveals the loading plan and restores assignment c
   await expect(page.locator('#loadingPlan')).toBeHidden();
   await expect(page.locator('#queueHelp')).toContainText('Add a trip');
   await expect(page.locator('#unassignedList [data-assign-invoice]')).toHaveCount(0);
-  await expect(page.locator('#unassignedList .drag-affordance')).toHaveCount(0);
+  await expect(page.locator('#unassignedList [draggable="true"]')).toHaveCount(0);
 
   await page.getByRole('button', { name: /New trip/ }).click();
   await expect(page.getByRole('dialog', { name: 'Create trip' })).toBeVisible();
