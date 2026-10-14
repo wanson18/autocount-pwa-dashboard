@@ -45,6 +45,7 @@ function createServerState() {
     drivers: [{ type: 'driver', id: 1, name: 'Aiman Driver', licenseNo: 'D-1001', active: true }],
     lorries: [{ type: 'lorry', id: 2, registrationNo: 'WXY 1001', description: '10-ton lorry', active: true }],
     assignmentBodies: [], tripBodies: [], counts: { trips: 0, assignments: 0, invoiceReads: 0, resources: 0 },
+    servedOlderInvoices: [], olderInvoicesByDate: null,
   };
 }
 
@@ -128,6 +129,12 @@ async function installFixtureApi(page, {
       state.counts.invoiceReads += 1;
       const requestedCompany = url.searchParams.get('company') || 'all';
       state.invoiceCompanies.push(requestedCompany);
+      const startDate = url.searchParams.get('startDate');
+      const olderRows = state.olderInvoicesByDate ? state.olderInvoicesByDate[startDate] : undefined;
+      if (olderRows) {
+        state.servedOlderInvoices.push(...olderRows);
+        return json(route, { success: true, dateRange: { startDate, endDate: startDate }, company: requestedCompany, invoices: olderRows, sources: { enterprise: { status: 'ok' }, sdn_bhd: { status: 'ok' } } });
+      }
       if (state.initialBoardGate && state.counts.invoiceReads === 1) await state.initialBoardGate.promise;
       if (state.enterpriseFilterGate && requestedCompany === 'enterprise') await state.enterpriseFilterGate.promise;
       if (unauthorizedOnRefresh && state.counts.invoiceReads === 2) {
@@ -170,7 +177,7 @@ async function installFixtureApi(page, {
         state.trips[0].revision += 1;
         return json(route, { success: false, error: { code: 'stale_trip' } }, 409);
       }
-      const invoice = state.invoices.find((row) => row.companyKey === body.company_key && row.invoiceId === body.invoice_id);
+      const invoice = [...state.invoices, ...state.servedOlderInvoices].find((row) => row.companyKey === body.company_key && row.invoiceId === body.invoice_id);
       const target = state.trips.find((row) => String(row.id) === String(body.trip_id));
       const created = makeAssignment(invoice, state.assignmentBodies.length + 40, target.id);
       state.assignments.push(created);
@@ -546,4 +553,30 @@ test('board date picker switches day, shows the not-today banner, and creates tr
   await expect.poll(() => state.tripBodies.at(-1)?.trip_date).toBe(chosen);
   await page.locator('#boardToday').click();
   await expect(banner).toBeHidden();
+});
+
+test('older invoice picker adds a previous-day invoice to the current trip with an Older tag', async ({ page }) => {
+  const state = await openBoard(page);
+  const OLD = { ...ENTERPRISE, invoiceId: 'enterprise-old-001', docKey: 'enterprise-old-001', docNo: 'ENT-OLD-001',
+    customer: { code: 'OLD', name: 'Kedai Semalam' } };
+  state.trips[0].tripDate = currentKualaLumpurDate();
+  state.olderInvoicesByDate = new Proxy({}, { get: (_target, date) => (typeof date === 'string' && date < currentKualaLumpurDate() ? [{ ...OLD, docDate: date }] : undefined) });
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeVisible();
+  await page.locator('#olderInvoiceSearch').fill('semalam');
+  await page.locator('[data-older-invoice-key] input[type="checkbox"]').first().check();
+  await page.locator('#olderInvoiceSubmit').click();
+  await expect(page.locator('#olderInvoiceDialog')).toBeHidden();
+  await expect.poll(() => state.assignmentBodies.at(-1)?.invoice_id).toBe('enterprise-old-001');
+  await expect(page.locator('.invoice-date-tag-older').first()).toBeVisible();
+});
+
+test('older invoice picker tells the clerk to create a trip first when the day has none', async ({ page }) => {
+  const state = await openBoard(page);
+  state.trips.length = 0;
+  await page.locator('#refreshBoard').click();
+  await page.locator('#addOlderInvoiceButton').click();
+  await expect(page.locator('#olderInvoiceMessage')).toHaveText('Create a trip for this day first.');
+  await expect(page.locator('#olderInvoiceSubmit')).toBeDisabled();
 });

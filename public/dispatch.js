@@ -28,6 +28,7 @@ import {
   shiftDate,
   visibleUnassignedInvoices,
 } from './dispatch-state.mjs';
+import { createInvoicePickerModel, mountInvoicePicker } from './dispatch-invoice-picker.mjs';
 
 const COMPANY_BADGES = { enterprise: 'Enterprise', sdn_bhd: 'Sdn Bhd' };
 const REMOVABLE_ASSIGNMENT_STATUSES = new Set(['assigned', 'loaded']);
@@ -704,7 +705,7 @@ export function createDispatchApp({
   function setLoginMessage(message) { if (loginMessage) loginMessage.textContent = message; }
   function setResourceMessage(message) { if (resourceStatus) resourceStatus.textContent = message; }
   function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled(), resources }); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
-  function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
+  function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; const older = $(root, '#addOlderInvoiceButton'); if (older) older.disabled = !writesEnabled(); root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
   function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; selectedDate = getDefaultDateRange().startDate; state = createDispatchState({ dateRange: { startDate: selectedDate, endDate: selectedDate }, boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); syncBoardDateControls(root, selectedDate); renderDateBar(); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
@@ -1076,6 +1077,23 @@ export function createDispatchApp({
   async function initializeSession() { if (!loginView && authenticatedView) { setAuthenticated(true, { clerkId: 'public-dispatch', role: 'admin' }); await loadBoard(); return; } if (!loginView || !authenticatedView || !loginForm) return; setAuthenticated(false); setLoginMessage('Checking sign-in…'); try { const result = await sessionTransport.getSession(); if (result?.authenticated && result.session) { setAuthenticated(true, result.session); setLoginMessage(''); await loadBoard(); } else setLoginMessage('Sign in to continue.'); } catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setLoginMessage('Sign-in is temporarily unavailable. Try again.'); } }
   function activateTab(tabName, { focus = false } = {}) { root.querySelectorAll('[role="tab"]').forEach((tab) => { const active = tab.dataset.tab === tabName; tab.classList.toggle('is-active', active); tab.setAttribute('aria-selected', String(active)); tab.setAttribute('tabindex', active ? '0' : '-1'); if (active && focus) tab.focus(); }); root.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = panel.id !== `${tabName}View`; }); }
 
+  const invoicePicker = mountInvoicePicker(root, {
+    model: createInvoicePickerModel({
+      transport,
+      assignmentsTransport,
+      createRequestId,
+      reloadTrip: async (tripId) => {
+        await loadBoard({ preserveMessage: true });
+        return state.trips.find((trip) => String(trip.id) === String(tripId)) || null;
+      },
+    }),
+    getBoardDate: () => selectedDate,
+    getTrips: () => state.trips,
+    canWrite: writesEnabled,
+    onAssigned: async () => { state.statusMessage = 'Older invoice added to the trip.'; try { await loadBoard({ preserveMessage: true }); } catch { /* loadBoard renders the failure. */ } },
+    onSessionLoss: handleSessionLoss,
+  });
+  $(root, '#addOlderInvoiceButton')?.addEventListener('click', (event) => { invoicePicker.open(event.currentTarget).catch(() => {}); });
   root.querySelectorAll('[role="tab"]').forEach((tab) => tab.addEventListener('click', () => { activateTab(tab.dataset.tab); if (tab.dataset.tab === 'resources' && authenticated) loadResources().catch(() => {}); if (tab.dataset.tab === 'reports' && authenticated) openReports().catch(() => {}); }));
   $(root, '#companyFilter')?.addEventListener('change', (event) => { setState(setCompanyFilter(state, event.target.value)); loadBoard().catch(() => {}); });
   $(root, '#invoiceSearch')?.addEventListener('input', (event) => { setState(setSearchQuery(state, event.target.value)); });

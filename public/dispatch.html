@@ -107,6 +107,7 @@
                 </div>
                 <div class="queue-heading-actions">
                   <span class="queue-key" id="queueKey" aria-label="ALL company queue">ALL</span>
+                  <button class="secondary-button" type="button" id="addOlderInvoiceButton">+ Add older invoice</button>
                   <button class="primary-button" type="button" id="newTripButton">+ New trip</button>
                 </div>
               </div>
@@ -155,6 +156,36 @@
                 <p class="dialog-message" id="tripDialogMessage" role="status" aria-live="polite"></p>
                 <button class="primary-button" type="submit" id="createTripSubmit">Create trip</button>
               </form>
+            </section>
+          </div>
+
+          <div class="dialog-backdrop" id="olderInvoiceBackdrop" hidden>
+            <section class="trip-dialog older-invoice-dialog" id="olderInvoiceDialog" role="dialog" aria-modal="true" aria-labelledby="olderInvoiceTitle">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Previous-dated invoices</p>
+                  <h2 id="olderInvoiceTitle">Add older invoice</h2>
+                </div>
+                <button class="secondary-button" type="button" id="closeOlderInvoice">Close</button>
+              </div>
+              <div class="older-invoice-filters">
+                <label class="field-group" for="olderInvoiceDate"><span>Invoice date</span><input class="field-control" type="date" id="olderInvoiceDate" /></label>
+                <label class="field-group" for="olderInvoiceCompany"><span>Company</span>
+                  <select class="field-control" id="olderInvoiceCompany">
+                    <option value="all">Both companies</option>
+                    <option value="enterprise">Enterprise only</option>
+                    <option value="sdn_bhd">Sdn Bhd only</option>
+                  </select>
+                </label>
+                <label class="field-group" for="olderInvoiceSearch"><span>Search</span><input class="field-control" type="search" id="olderInvoiceSearch" placeholder="Invoice no. or customer…" autocomplete="off" /></label>
+              </div>
+              <div class="older-invoice-list" id="olderInvoiceList" aria-live="polite"></div>
+              <label class="field-group" for="olderInvoiceTrip"><span>Add to trip</span><select class="field-control" id="olderInvoiceTrip"></select></label>
+              <p class="dialog-message" id="olderInvoiceMessage" role="status" aria-live="polite"></p>
+              <div class="older-invoice-actions">
+                <button class="secondary-button" type="button" id="olderInvoiceRetry" hidden>Retry</button>
+                <button class="primary-button" type="button" id="olderInvoiceSubmit" disabled>Add to trip</button>
+              </div>
             </section>
           </div>
 

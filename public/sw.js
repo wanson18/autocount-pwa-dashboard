@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sales-dashboard-v28';
+const CACHE_NAME = 'sales-dashboard-v29';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -9,6 +9,7 @@ const STATIC_ASSETS = [
   '/dispatch.css',
   '/dispatch.js',
   '/dispatch-state.mjs',
+  '/dispatch-invoice-picker.mjs',
   '/price-check.html',
   '/manifest.json',
   '/icons/icon-192.png',
