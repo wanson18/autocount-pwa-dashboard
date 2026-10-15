@@ -1,5 +1,6 @@
 const { AutoCountClient } = require('../lib/autocount/client');
 const { loadCompanyConfigs } = require('../lib/autocount/company-config');
+const { isIsoDate } = require('../lib/dates');
 const { InvoiceAdapter } = require('../lib/dispatch/invoice-adapter');
 const {
   methodNotAllowed,
@@ -9,17 +10,7 @@ const {
   sendJson,
 } = require('../lib/dispatch/http');
 
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COMPANY_KEYS = ['enterprise', 'sdn_bhd'];
-
-function isValidDate(value) {
-  if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime())
-    && date.getUTCFullYear() === Number(value.slice(0, 4))
-    && date.getUTCMonth() + 1 === Number(value.slice(5, 7))
-    && date.getUTCDate() === Number(value.slice(8, 10));
-}
 
 function requestError(res, message) {
   return sendError(res, 400, 'invalid_request', message);
@@ -43,7 +34,7 @@ function createDispatchInvoicesHandler({ adapter, configs, getSession, env = pro
       const startDate = query.startDate;
       const endDate = query.endDate;
       const company = query.company || 'all';
-      if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
+      if (!isIsoDate(startDate) || !isIsoDate(endDate) || startDate > endDate) {
         return requestError(res, 'startDate and endDate must be valid YYYY-MM-DD dates with startDate <= endDate');
       }
       if (company !== 'all' && !COMPANY_KEYS.includes(company)) {
@@ -111,4 +102,3 @@ function createDispatchInvoicesHandler({ adapter, configs, getSession, env = pro
 
 module.exports = createDispatchInvoicesHandler();
 module.exports.createDispatchInvoicesHandler = createDispatchInvoicesHandler;
-module.exports.isValidDate = isValidDate;
