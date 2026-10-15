@@ -1,6 +1,6 @@
 # AutoCount: one shared layer for Sales, Dispatch and Price Check
 
-Date: 2026-10-15 · Base: `origin/main` at `04af0d1` (PR #20)
+Date: 2026-10-15, revised the same day after design review · Base: `origin/main` at `04af0d1` (PR #20)
 Scope: `lib/autocount/`, new `lib/dates.js`, `api/sales.js`, `api/price-check.js`, `lib/price-check/`, the date checks in `lib/dispatch/` and `api/dispatch-invoices.js` / `api/dispatch-assignments.js`, `.env.example`, README, `agents.md`, tests
 
 This is sub-project 1 of the repo refactor. The others (Dispatch API input checks, splitting `lib/dispatch/repository.js`, moving inline page scripts into files, docs tidy-up) get their own specs.
@@ -15,20 +15,23 @@ Sales reads AutoCount with its own copy of everything that Dispatch and Price Ch
   - `api/price-check.js` (`EXPECTED_BOOKS`) and `lib/price-check/source.js` (`COMPANY_REGISTRY`) then type the numbers in again, to check them.
   - Dispatch lets Sdn Bhd fall back to the shared `AUTOCOUNT_API_KEY` pair. Sales refuses that, on purpose (test "getCompanyConfigs never reuses Enterprise credentials for Sdn Bhd").
   - Both accept the `AUTOCOUNT_ENTERPRISE_API_KEY` and `AUTOCOUNT_API_KEY_WANSON_ENTERPRISE` styles, but prefer them in opposite order. Only Sales reads `AUTOCOUNT_ENTERPRISE_API_URL` / `AUTOCOUNT_SDN_BHD_API_URL`. Only Dispatch trims spaces.
-- **AutoCount fetching, twice.** `fetchAllInvoices` in `api/sales.js` calls axios directly, with plain `JSON.parse` numbers, its own headers and its own page loop. It runs its own completeness check (`listingProblem`) before falling back to the shared reader's `windowed` mode. Dispatch and Price Check go through `AutoCountClient` (lossless JSON).
+- **AutoCount fetching, twice.** `fetchAllInvoices` in `api/sales.js` calls axios directly, with plain `JSON.parse` numbers, its own headers and its own page loop. It runs its own count and duplicate check (`listingProblem`) before falling back to the shared reader's `windowed` mode. Dispatch and Price Check go through `AutoCountClient` (lossless JSON).
 - **Date helpers, many times.** The "real calendar date" check is written 7 times on the server: `api/sales.js` (regex only), `api/dispatch-invoices.js`, `api/dispatch-assignments.js`, `lib/dispatch/service.js`, `lib/dispatch/invoice-adapter.js`, `lib/price-check/source.js` and `lib/price-check/compare.js`. "Today in Malaysia" is written twice (`getLocalToday` in Sales, `malaysiaDate` in Price Check).
 
 So any fix to how AutoCount is read, or how its settings are read, has to be made in two places, and the two copies already disagree.
 
 ## Goal
 
-One AutoCount layer: one company list and settings loader, one client, one file for checked invoice reads, and one date module. Sales, Dispatch and Price Check all use it. The pages and the API answers for valid requests stay exactly the same. This is checked against live AutoCount before the PR.
+One AutoCount layer: one company list and settings loader, one client, one file for checked invoice reads, one module for reading AutoCount numbers, and one date module. Sales, Dispatch and Price Check all use it.
 
-## Decisions (agreed while brainstorming)
+For the values AutoCount actually sends, the pages and the API answers for valid requests stay the same. This is checked before the PR by replaying identical recorded AutoCount responses to the old and the new code. Where the new parsing could differ only for values AutoCount does not send, the rule is spelled out below, not claimed identical.
+
+## Decisions (agreed while brainstorming and in design review)
 
 - **One rule set.** Where Sales, Dispatch and Price Check disagree about settings, all three now follow the same rules, and the stricter rule wins. Every key name that works today keeps working.
 - **Approach A: share the AutoCount pieces only.** Sales keeps its sales maths (normalising, MultiPack, totals, payment status) in `api/sales.js`. Dispatch keeps its own paging loop in `lib/dispatch/invoice-adapter.js`.
-- **Live check on this PC** before the PR (see Testing).
+- **Proof on this PC.** A deterministic old-versus-new comparison runs on pinned commits with recorded AutoCount responses, plus a separate live run of the new code (see Testing).
+- **Release gate.** Before merging, the Vercel settings are checked by name, because the precedence and address rules can pick different settings than today (see Shipping).
 
 ## Design
 
@@ -82,45 +85,94 @@ The two display names stay different because the pages show them differently tod
 
 ### 2. AutoCount client (`lib/autocount/client.js`)
 
+**Changes**
+
 - Each request uses `company.apiUrl` when it is a non-empty string, otherwise the client's `baseUrl` (unchanged default: `AUTOCOUNT_API_URL`, then AutoCount's standard address).
 - Trailing slashes are removed with `/\/+$/`. Today the client removes only one.
-- Nothing else changes: the same headers (`API-Key`, `Key-ID`), 15-second timeout, raw text with lossless JSON parsing, and status checks.
+- Nothing else changes: the same headers (`API-Key`, `Key-ID`), 15-second timeout, status checks and parsing.
+
+**Parsing facts this design relies on** (checked on 2026-10-15 over real HTTP with axios 1.19.0 and lossless-json 4.3.1)
+
+- Every client request passes `transformResponse: [(data) => data]`, so axios hands over the raw response text and never runs its own `JSON.parse`. That parse would already lose precision: in the same check, plain axios turned `12345678901234567890` into `12345678901234567000` and `1e400` into `Infinity`.
+- `lossless-json` returns `LosslessNumber` objects, not strings. The client's `materializeResponse` turns each one into its exact source text (for example `"3.000"`, `"-2.50"`, `"1e400"`, `"12345678901234567890"`). The exception is any `totalCount` key, which becomes a JS number. Strings, booleans and `null` pass through unchanged.
+
+An acceptance test pins both facts (see Testing).
 
 ### 3. Checked read for Sales (`lib/autocount/invoice-reader.js`)
 
-New export `readInvoicesChecked({ listPage, accountBookId, startDate, endDate, maxPages = 100 })`. It is Sales' current read, moved here unchanged.
+New export `readInvoicesChecked({ listPage, accountBookId, startDate, endDate, maxPages = 100 })`. It moves Sales' current read here with the same acceptance rules, and reports exactly which check it passed.
 
 1. **Tolerant pass, page by page from page 1.**
    - A page must be an object whose `data` is an array, or the read throws.
-   - Rows are appended. The latest numeric `totalCount` is remembered, so an invoice saved during the read does not break it.
-   - Stop on an empty page. Also stop when rows reach the finite `totalCount`. With no `totalCount`, also stop when a page is shorter than the page size. The page size is the first non-zero of `pageSize` / `page_size` / `limit`, using the helper from section 4.
+   - Rows are appended. A numeric `totalCount` is remembered, and the latest one wins, so an invoice saved during the read does not fail it.
+   - Reading stops on an empty page, or when the rows reach a finite `totalCount`. With no `totalCount`, it also stops on a page shorter than the page size. The page size comes from `firstPositiveInteger(pageSize, page_size, limit)` (section 4).
    - Going past `maxPages` throws.
-2. **Proof.** If a safe-integer `totalCount` was reported, the rows must equal it, and no readable `docKey` may appear twice. Rows without a readable `docKey` are skipped in the duplicate check, as today. If either check fails, the range is re-read with the existing strict `windowed` mode.
-3. **Result.** It returns `{ rows, pageCount, verifiedBy: 'pages' | 'slices', problem }`, where `problem` is `null`, `'row count does not match totalCount'` or `'an invoice is listed twice'`. Any other failure throws.
+2. **Check level.** The result records which check the rows passed:
+   - **`count`:** AutoCount reported a safe-integer total. The rows equal the latest reported total, and no readable `docKey` appears twice. Rows without a readable `docKey` are skipped in the duplicate check, as today.
+   - **`slices`:** AutoCount reported a total, but the rows failed the count check. The range was then re-read with the existing strict `windowed` mode, which passed: every date slice fit on one page, the slice totals add up to the overall total, and no document appears twice.
+   - **`none`:** AutoCount reported no total. Reading stopped at an empty or short page, and nothing was checked. Sales accepts this, as it does today, but now logs it as unchecked. Live AutoCount always sends a total today; Price Check depends on it.
+3. **Result.** It returns `{ rows, pageCount, check: 'count' | 'slices' | 'none', problem }`, where `problem` is `null`, `'row count does not match totalCount'` or `'an invoice is listed twice'`. A failed windowed re-read, a malformed page or the page ceiling throws.
 
-`readInvoiceRange` (`paged` and `windowed`), `readDocKey` and `sourceError` are unchanged. Price Check keeps its own stricter flow (paged, then windowed on a retryable error). `addDays` moves to `lib/dates.js` (section 5). The "never loosen the checks" rule now has one home.
+**What the checks guarantee.** They catch the repeated and missing rows that AutoCount's paging produced on long ranges. They do not prove a consistent snapshot. If invoices are added or deleted while the pages are being read, a list can still pass the count check and miss or repeat a row. For example, one invoice deleted from an early page and another added at the end leaves the total unchanged while shifting the rows across a page boundary. Code comments, logs and docs say "checked", with the condition, and do not claim the list is proven complete.
 
-### 4. Sales (`api/sales.js`)
+`readInvoiceRange` (`paged` and `windowed`), `readDocKey` and `sourceError` are unchanged. Price Check keeps its own stricter flow (paged, then windowed on a retryable error). `addDays` and `diffDays` move to `lib/dates.js` (section 5).
 
-- **Removed:** its `COMPANY_DEFINITIONS`, `DEFAULT_API_URL`, `getHeaders`, `DATE_RE` / `isValidDate`, `listingProblem`, `readInvoicesInDateSlices`, and the direct `axios` import.
+### 4. Sales (`api/sales.js`) and AutoCount values (`lib/autocount/numbers.js`)
+
+**Removed from `api/sales.js`:** its `COMPANY_DEFINITIONS`, `DEFAULT_API_URL`, `getHeaders`, `DATE_RE` / `isValidDate`, `listingProblem`, `readInvoicesInDateSlices`, and the direct `axios` import.
+
+**Kept, with new insides**
+
 - **`getCompanyConfigs(env)`** maps `readCompanySettings` to the existing shape (section 1).
-- **`fetchAllInvoices(startDate, endDate, company, client = new AutoCountClient())`.** The 4th argument is now an AutoCount client, not an axios-like object. It calls `readInvoicesChecked` with `listPage = (params) => client.listInvoicePage(company, params)`. These stay the same:
-  - It returns `null` on any failure.
-  - It keeps the same "Missing AutoCount credentials" guard.
-  - It writes the same log lines, including "cannot be trusted (…); re-reading in date slices" and "Fetched N invoices … (verified in date slices)".
-- **`loadCompanyInvoices(startDate, endDate, company, useMock, { client, getProduct })`.** `client` replaces `httpClient`. The default product lookup is `client.getProduct(company, itemCode)` on the same client. Mock mode is unchanged: credentials are not checked, and `mock-sales.json` is used for Enterprise only.
-- **Numbers.**
-  - **The trap.** The client returns AutoCount numbers as exact text. Today Sales picks values with `a || b || 0` on plain numbers, so a zero falls through to the next field (for example `finalTotal || total || grandTotal`). A text `"0.00"` would not fall through.
-  - **The fix.** A small helper, `firstNonZero(...candidates)` in new `lib/autocount/amounts.js`, keeps today's rule: the first candidate that is present and parses to a non-zero number wins, otherwise 0. Sales uses it for grand total, line quantity, unit price and line total. The checked read uses it for page size.
-  - **Unchanged.** `parseOutstandingAmount` and the cancelled flag already accept text.
+- **`fetchAllInvoices(startDate, endDate, company, client = new AutoCountClient())`.** The 4th argument is now an AutoCount client, not an axios-like object. It calls `readInvoicesChecked` with `listPage = (params) => client.listInvoicePage(company, params)`. It still returns `null` on any failure and keeps the "Missing AutoCount credentials" guard. Log lines by check level:
+  - `count`: "Fetched N invoices for A to B" (today's line).
+  - `slices`: today's two lines ("cannot be trusted (…); re-reading in date slices", then "Fetched N invoices … (verified in date slices)").
+  - `none`: "Fetched N invoices for A to B (no total count from AutoCount, so the list was not checked)".
+- **`loadCompanyInvoices(startDate, endDate, company, useMock, { client, getProduct })`.** `client` replaces `httpClient`. The default product lookup is `client.getProduct(company, itemCode)` on the same client. Mock mode is unchanged: credentials are not checked, and `mock-sales.json` (read with `JSON.parse`) is used for Enterprise only.
 - **Request dates.** The handler checks `startDate` / `endDate` with `isIsoDate`.
 - **`getLocalToday`** keeps its export and behaviour (`REPORT_TIMEZONE`, a warning and the UTC date on a bad zone), built on `todayIn`.
 
+**Field conversions.** These are all the AutoCount fields Sales reads. "Today" means the value after axios `JSON.parse`; "new" means after the client (section 2).
+
+| Field(s) | Today | New input | Rule from now on |
+| --- | --- | --- | --- |
+| `totalCount` | number | number (the client converts it) | Unchanged code. The latest numeric value is remembered; the count check needs a safe integer. |
+| `pageSize`, `page_size`, `limit` | number, via `Number(a \|\| b \|\| c)` | text | `firstPositiveInteger`. If none qualifies, there is no short-page stop. |
+| `docKey` | number or text, then `String()` | exact text | Kept as exact text and compared as text. Never turned into a number. |
+| `docNo`, `docDate`, `debtorName` / `customerName`, `productCode` / `sku`, `description`, `unit` | text (a number only if AutoCount sent one) | text (exact digits if AutoCount sent a number) | Kept as text. Only `unit` is trimmed, as today. The type probe (Testing, step 0) confirms AutoCount sends these as JSON strings; if any arrives as a JSON number, stop and decide before implementing. |
+| `cancelled ?? isCancelled` | cancelled if `true`, `1` or `'1'` | boolean or text | Cancelled if `true`, or if its numeric value is exactly 1 (number `1`, text `"1"` or `"1.0"`). Anything else is not cancelled. |
+| `finalTotal` / `total` / `grandTotal`; `qty` / `quantity`; `unitPrice`; `subTotal` / `total` | `parseFloat(a \|\| b \|\| 0)` | text | `firstNonZero`, in the same candidate order as today. |
+| `outstandingAmount` | `parseFloat`; missing or `null` gives `null` | text or `null` | Unchanged `parseOutstandingAmount`: missing or `null` gives `null`, otherwise `parseFloat`, `NaN` gives `null`, rounded to 2 decimals. |
+| Product lookup: `product.unit`, `productMultiPacks[].multiPack`, `.multiPackRate` | already read through the client | unchanged | Unchanged. |
+
+**`lib/autocount/numbers.js`**
+
+- **`decimalValue(value)`** gives the number for:
+  - a finite JS number
+  - text that matches `^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$`, with no surrounding spaces, and whose `Number()` is finite
+
+  It gives `null` for everything else: `null`, `undefined`, booleans, objects, empty text, other text, `NaN` and ±`Infinity`.
+- **`firstNonZero(...candidates)`** returns the first candidate whose `decimalValue` is a non-zero number. Negative values count, and are returned as they are. Zero (`0`, `-0`, `"0"`, `"0.00"`, `"-0"`) does not count, so it falls through to the next candidate. If no candidate counts, it returns `0`.
+- **`firstPositiveInteger(...candidates)`** returns the first candidate whose `decimalValue` is a safe integer greater than 0 (so `"100"` and `"100.0"` give 100). If none qualifies, it returns `null`.
+
+**How close this is to today.** For finite JSON numbers, missing values and `null`, which is what AutoCount sends for these fields, `firstNonZero` gives exactly today's `parseFloat(a || b || 0)`. The results differ only in these cases:
+
+- A value AutoCount sent as a JSON string: zero text now falls through to the next field, and malformed text is skipped instead of giving `NaN`.
+- A number beyond double range: it is skipped instead of becoming `Infinity`.
+- A `docKey` beyond 2^53: it is now compared exactly. Today plain `JSON.parse` rounds it, so two different keys could look the same and force a needless slice re-read.
+
+The type probe (Testing, step 0) confirms which token types AutoCount sends.
+
 ### 5. Dates (`lib/dates.js`)
 
-- `isIsoDate(value)`: true only for a string in `YYYY-MM-DD` that is a real calendar date.
-- `todayIn(timeZone, now = new Date())`: the `YYYY-MM-DD` date in that time zone. Throws on an invalid zone.
-- `addDays(isoDate, delta)`, `diffDays(fromIso, toIso)`: moved from `invoice-reader.js`.
+No date component goes through a JavaScript `Date` constructor or `Date.UTC`. Those normalise overflowing dates (31 February becomes 3 March) and map years 0–99 to 1900–1999.
+
+- **`isIsoDate(value)`** is true only for a string matching `^\d{4}-\d{2}-\d{2}$` whose month is 1–12 and whose day fits that month. Leap years follow the Gregorian rule: divisible by 4, except centuries not divisible by 400. This is checked with arithmetic, not with `Date`.
+- **`todayIn(timeZone, now = new Date())`** gives the `YYYY-MM-DD` date in that time zone, using `Intl.DateTimeFormat('en-CA', …).formatToParts`. It throws on an invalid zone.
+- **`addDays(isoDate, delta)`** and **`diffDays(fromIso, toIso)`**:
+  - They throw if an input fails `isIsoDate`.
+  - They calculate in UTC milliseconds from a `Date` whose fields are set with `setUTCFullYear(year, month - 1, day)`, which keeps years 0–99 as written.
+  - `addDays` returns a zero-padded `YYYY-MM-DD`.
 
 These callers switch to `isIsoDate`, and their own copies are deleted:
 
@@ -138,7 +190,7 @@ The date-and-time parsing that the adapter and compare do around the check stays
 
 - `api/price-check.js`: `EXPECTED_BOOKS` is built from `COMPANIES`. The fail-closed check on injected configs stays (test "a configuration that crosses the fixed book ids fails closed").
 - `lib/price-check/source.js`: `COMPANY_REGISTRY` is built from `COMPANIES` (same export and shape). `addDays` comes from `lib/dates.js`.
-- Dispatch: only the date checks and the settings rules change. The paging loop, row quarantine, duplicate handling and error codes stay as they are.
+- Dispatch: only the date checks and the settings rules change. The paging loop, row quarantine, duplicate handling, cancelled-flag rule and error codes stay as they are.
 
 ### 7. Docs
 
@@ -146,11 +198,13 @@ The date-and-time parsing that the adapter and compare do around the check stays
   - It describes the one rule set: own names first, aliases next, the shared pair for Enterprise only, and book-number settings optional and double-checked.
   - It adds the per-company `*_API_URL` lines as optional.
   - It drops `AUTOCOUNT_ACCOUNT_BOOK_ID`, which no code reads.
-- **README:** the settings table and a short "Company settings" note give the same rules.
+- **README:**
+  - The settings table and a short "Company settings" note give the same rules.
+  - "Verified invoice reads" states the guarantee from section 3 (checked against the count, or in date slices; not a consistent snapshot) and drops "proven".
 - **`agents.md`:**
   - The AutoCount access line now covers Sales too.
-  - A rule says company books, key names and the address come only from `lib/autocount/company-config.js`.
-  - It notes that `lib/autocount/invoice-reader.js` holds every checked read mode.
+  - A rule says company books, key names and the address come only from `lib/autocount/company-config.js`, and AutoCount numbers are read only through `lib/autocount/numbers.js`.
+  - The invoice-reads rule uses the section 3 wording.
 
 ## Behaviour changes (complete list)
 
@@ -160,13 +214,15 @@ The date-and-time parsing that the adapter and compare do around the check stays
 4. Sales no longer combines a book's own key with the shared ID (or the reverse), now trims spaces, and accepts `AUTOCOUNT_API_KEY_ID` as the Enterprise shared key ID.
 5. Dispatch and Price Check now honour `AUTOCOUNT_ENTERPRISE_API_URL` / `AUTOCOUNT_SDN_BHD_API_URL`. Today only Sales does.
 6. `/api/sales` answers 400 to an impossible date such as `2026-02-31`, as Dispatch already does. Today it passes it on to AutoCount.
-7. Sales' AutoCount requests no longer send `Content-Type: application/json` (a GET has no body; Dispatch and Price Check already omit it). Sales now receives numbers as exact text and converts them with the first-non-zero rule.
+7. Sales' AutoCount requests no longer send `Content-Type: application/json` (a GET has no body; Dispatch and Price Check already omit it).
+8. Sales reads AutoCount values by the section 4 table. The results equal today's for the values AutoCount sends, except for the edge cases listed there (JSON-string values, numbers beyond double range, `docKey` beyond 2^53).
+9. A list without a total count is still accepted by Sales, but is now logged as unchecked.
 
-If the dashboard and Price Check both load both books today, items 1 to 5 change nothing on Vercel. That proves each book's own keys are set, and that any `AUTOCOUNT_ACCOUNT_BOOK_*` value already equals the fixed number. The check after merging (Shipping) confirms it.
+Items 1 to 5 depend on the Vercel settings, which this branch cannot see. Both books loading today does not prove the aliases or addresses agree. The release gate in Shipping checks them by name before merging.
 
 ## Unchanged
 
-- Every API response shape and value for valid requests:
+- Every API response shape and value for valid requests, given the values AutoCount sends:
   - `/api/sales`, including company IDs `enterprise` / `sdnBhd`, names, warnings and `complete`
   - `/api/price-check`
   - `/api/dispatch/*`
@@ -178,9 +234,15 @@ If the dashboard and Price Check both load both books today, items 1 to 5 change
 
 Tests are written before the code, in this worktree. Baseline on `04af0d1`: `npm test` gives 408 tests, 407 pass, 1 skipped (it needs `TEST_DATABASE_URL`). The Playwright baseline is recorded before the first change.
 
+**Step 0: type probe (before writing fixtures)**
+
+- A throwaway script in this session's scratch folder makes read-only calls through the current client: one listing page for today and one product lookup per book.
+- It prints each field's JSON token type (number, string, boolean, null, object or array) and nothing else. No values reach the chat or any file.
+- It confirms the section 4 assumptions and shapes the raw fixtures below.
+
 **New tests**
 
-- Settings, one test per rule in section 1:
+- **Settings**, one test per rule in section 1:
   - order of names
   - mixing the two own-name styles
   - half a pair
@@ -191,16 +253,44 @@ Tests are written before the code, in this worktree. Baseline on `04af0d1`: `npm
   - per-company and default address
   - problem messages never contain a key value
   - `apiKey` / `keyId` are `null` when there is a problem
-- `readInvoicesChecked`. The Sales reader tests move here and drive it through a fake `listPage`:
-  - missing `totalCount`
-  - a growing total
-  - repeated invoices, which are re-read in slices
-  - a list short of its total, which throws
-  - slices that do not add up, which throws
-  - the page ceiling
-- `firstNonZero` (`lib/autocount/amounts.js`): numbers, text, `"0.00"` falling through to the next field, `null` / missing, and all-zero giving 0.
-- `lib/dates.js`: real and impossible dates, non-strings, time zones and rollover, an invalid zone, `addDays` / `diffDays`.
-- The client's per-company address and trailing slashes.
+- **Client parsing acceptance test.** Real axios and the real `AutoCountClient` against a local `node:http` server on `127.0.0.1` that returns raw JSON text. It asserts:
+  - axios hands over the raw text
+  - `12345678901234567890`, `3.000`, `-2.50` and `1e400` arrive as that exact text
+  - `totalCount` arrives as a number
+  - strings, booleans and `null` pass through unchanged
+- **The client's** per-company address and trailing slashes.
+- **`readInvoicesChecked`.** The Sales reader tests move here and drive it through a fake `listPage`. Each case asserts the `check` level:
+  - missing `totalCount` gives `none`
+  - a growing total gives `count`
+  - repeated invoices give `slices`
+  - a list short of its total throws
+  - slices that do not add up throw
+  - the page ceiling throws
+  - a page size given as text
+- **`numbers.js`:**
+  - numbers, numeric text and negative amounts
+  - numeric and text zero falling through (`0`, `-0`, `"0"`, `"0.00"`, `"-0"`)
+  - empty text and malformed text (`"12abc"`, `" 12"`, `"1,000.00"`)
+  - non-finite values (`"1e400"`, `Infinity`, `NaN`)
+  - `null`, `undefined` and booleans, and all candidates zero
+  - `firstPositiveInteger` with `"100"`, `"100.0"`, `0`, `-5`, `"12.5"` and missing values
+- **Raw-JSON fixtures** (new, invented data, read as text and shaped by the step 0 probe): `test/fixtures/autocount-sales-raw-listing.json` and `test/fixtures/autocount-sales-raw-product.json`. They run through the real client parser into `fetchAllInvoices`, `loadCompanyInvoices` and `combineCompanyResults`, against hand-computed totals. They cover:
+  - a zero `finalTotal` with a non-zero `total`
+  - a negative line
+  - numeric and boolean cancelled flags
+  - `qty` such as `3.000`
+  - `outstandingAmount` both `null` and set
+  - a `docKey` beyond 2^53
+  - a mixed-unit SKU resolved through the product fixture
+- **`lib/dates.js`:**
+  - leap days: `2024-02-29` and `2000-02-29` are valid; `2026-02-29` and `2100-02-29` are not
+  - impossible days and months: `2026-04-31`, `2026-13-01`, `2026-00-10`, `2026-1-01`, a space before the date, non-strings
+  - month and year rollover in `addDays`: `2026-12-31` +1 and `2028-03-01` −1
+  - a 90-day step back across a year end
+  - `diffDays` across a leap day
+  - years 0–99 (`0050-01-01` +1 gives `0050-01-02`)
+  - `todayIn('Asia/Kuala_Lumpur')` at `15:59:59.999Z` and `16:00:00.000Z`, including the 31 December and 28 February boundaries
+  - an invalid zone throws
 
 **Existing tests that change**
 
@@ -219,24 +309,40 @@ Tests are written before the code, in this worktree. Baseline on `04af0d1`: `npm
 
 `npm test` and the Playwright specs must stay green. The specs run one at a time, because they share port 4173.
 
-**Live check (before the PR, nothing committed)**
+**Old-versus-new replay check (before the PR, nothing committed)**
 
-- A throwaway script in this session's scratch folder, outside the repo, compares an untouched `git archive` copy of `origin/main` (old) with this branch (new).
-- Each side runs in its own Node process against live AutoCount, read-only.
-- Both load the keys from `.env.local`. Their values are never printed. The old side is also given `AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE=63750` and `AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD=63688`, which it needs and `.env.local` does not set. The new side runs without them.
-- Same requests and the same clock for both:
-  - The Sales handler for today, the last 30 days and the last 91 days, ignoring `timestamp`.
-  - The Price Check handler for `today` and `seven_days`, with `auth` stubbed and `now` fixed.
-  - The Dispatch invoices handler for today, with `getSession` stubbed.
-- Results are compared in memory. The script prints only "identical", or the JSON paths that differ, never their values. Nothing is written to files. A case that differs is re-run once, to rule out an invoice saved in between. A difference that remains blocks the PR until it is explained.
-- The summary goes into the PR description.
+- **Pinned commits.**
+  - Old is the branch's base commit (`git merge-base HEAD origin/main`; today `04af0d1`).
+  - New is the branch's HEAD commit, with a clean working tree.
+  - Both are exported with `git archive <sha>` into this session's scratch folder, each with a `node_modules` junction to the main checkout, so no uncommitted edit can leak in.
+  - Both SHAs go into the PR description. If `main` moves first, rebase and pin the new base.
+- **Identical inputs.**
+  - One Node process loads both copies. A recording adapter is installed as `defaults.adapter` on every axios module the copies load (with both junctions pointing at one `node_modules`, that is a single module), so it sees every AutoCount request from both.
+  - Keys come from `.env.local` and are never printed. `USE_MOCK_DATA` is forced to `false`.
+  - The old side runs first, against live AutoCount, and its raw responses are recorded in memory, keyed by URL and query.
+  - The new side then runs only from that recording. Any request the new side makes that is not recorded counts as a difference (reported by count and request kind, never by value). There is no live fallback.
+  - Each version parses the same bytes its own way: the old Sales through axios `JSON.parse`, the client through lossless JSON.
+- **Environment per side.** The cases run one after another:
+  - Before each old case, `AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE=63750` and `AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD=63688` are set, because the old side needs them and `.env.local` does not set them.
+  - Before each new case they are removed, which proves they are now optional.
+- **Cases:**
+  - the Sales handler for today, the last 30 days and the last 91 days, ignoring `timestamp`
+  - the Price Check handler for `today` and `seven_days`, with `auth` stubbed and `now` fixed
+  - the Dispatch invoices handler for today, with `getSession` stubbed
+- **Output.** "Identical", or the JSON paths that differ, never their values. Nothing is written to files. Any difference blocks the PR until it is explained.
+- **Live integration run.** Separately, the new side runs the same cases against live AutoCount with no recording. This checks that real requests work without `Content-Type` and with the new address rules. It reports only that each case succeeded and which `check` level each Sales book got. Its output is not compared, because live data can change between runs.
+- **PR description.** The summary goes into the PR description.
 
 ## Shipping
 
-- Small commits in plan order: dates, settings, client, reader, Sales, Price Check and Dispatch, docs.
+- Small commits in plan order: dates, numbers, settings, client, reader, Sales, Price Check and Dispatch, docs.
+- **Release gate, before merging.** List the AutoCount setting names set in Vercel Production and Preview: names only, never values. The owner can do this in the Vercel dashboard or with `npx vercel env ls`. Claude can do it once the Vercel connector is signed in to the wanson team. Stop and resolve before merging if any of these is true:
+  - Both own-name styles are set for the same field of a book, for example `AUTOCOUNT_ENTERPRISE_API_KEY` and `AUTOCOUNT_API_KEY_WANSON_ENTERPRISE`. Dispatch and Price Check would switch to the first style. The owner compares the two values in the Vercel dashboard, or removes one.
+  - `AUTOCOUNT_ENTERPRISE_API_URL` or `AUTOCOUNT_SDN_BHD_API_URL` is set. Dispatch and Price Check would start using it.
+  - A book's own key or ID is missing while the shared `AUTOCOUNT_API_KEY` pair is set.
+  - `AUTOCOUNT_ACCOUNT_BOOK_WANSON_*` is set to anything other than 63750 / 63688. The owner checks the value; book numbers are not secret.
 - Push this branch with an explicit refspec and open a draft PR into `main`. The owner merges.
-- After the merge, check that `/version.json` shows the merge commit with `"target":"production"`.
-- Then the owner opens the dashboard, Price Check and Dispatch once, to confirm both books still load with the Vercel settings, which the live check cannot see.
+- After the merge, check that `/version.json` shows the merge commit with `"target":"production"`. Then the owner opens the dashboard, Price Check and Dispatch once, to confirm both books still load.
 
 ## Out of scope (possible follow-ups)
 
