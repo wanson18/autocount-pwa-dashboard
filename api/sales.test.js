@@ -1058,3 +1058,28 @@ test('fetchAllInvoices accepts a list when an invoice is saved while the pages a
   assert.equal(result.length, invoices.length);
   assert.deepEqual(httpClient.calls.map((call) => call.page), httpClient.calls.map((_, index) => index + 1), 'no slice re-read was needed');
 });
+
+function responseRecorder() {
+  return {
+    statusCode: null,
+    headers: {},
+    body: null,
+    setHeader(name, value) { this.headers[name] = value; },
+    status(code) { this.statusCode = code; return this; },
+    json(value) { this.body = value; return this; },
+    end() { return this; },
+  };
+}
+
+test('the sales API refuses an impossible calendar date before calling AutoCount', async () => {
+  const handler = require('./sales.js');
+  for (const query of [
+    { startDate: '2026-02-31', endDate: '2026-03-01' },
+    { startDate: '2026-02-01', endDate: '2026-02-30' },
+  ]) {
+    const res = responseRecorder();
+    await handler({ method: 'GET', query }, res);
+    assert.equal(res.statusCode, 400, JSON.stringify(query));
+    assert.deepEqual(res.body, { success: false, error: 'startDate and endDate must be in YYYY-MM-DD format' });
+  }
+});

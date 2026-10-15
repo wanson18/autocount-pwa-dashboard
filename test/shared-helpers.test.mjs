@@ -6,6 +6,7 @@ const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf
 
 // Files that check calendar dates or do day arithmetic. Each must use lib/dates.js.
 const DATE_CHECK_FILES = [
+  'api/sales.js',
   'api/dispatch-invoices.js',
   'api/dispatch-assignments.js',
   'lib/dispatch/service.js',

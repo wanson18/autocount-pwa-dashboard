@@ -3,13 +3,13 @@ const path = require('path');
 const axios = require('axios');
 const { AutoCountClient } = require('../lib/autocount/client');
 const { readCompanySettings } = require('../lib/autocount/company-config');
+const { isIsoDate, todayIn } = require('../lib/dates');
 const { readDocKey, readInvoiceRange } = require('../lib/autocount/invoice-reader');
 // Vercel dev does not consistently inject `.env.local` into plain Node
 // serverless functions, so load the local override explicitly before `.env`.
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_API_URL = 'https://accounting-api.autocountcloud.com';
 
 // Serverless runtimes (Vercel) run with TZ=UTC, so `new Date()` local time is
@@ -27,27 +27,11 @@ function getReportingTimeZone() {
  */
 function getLocalToday(timeZone = getReportingTimeZone(), now = new Date()) {
   try {
-    // en-CA formats as YYYY-MM-DD, and formatToParts avoids locale surprises.
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(now);
-
-    const get = (type) => parts.find((p) => p.type === type)?.value;
-    const [year, month, day] = [get('year'), get('month'), get('day')];
-
-    if (year && month && day) return `${year}-${month}-${day}`;
+    return todayIn(timeZone, now);
   } catch (error) {
     console.warn(`Invalid REPORT_TIMEZONE "${timeZone}", falling back to UTC:`, error.message);
   }
-
   return now.toISOString().slice(0, 10);
-}
-
-function isValidDate(value) {
-  return typeof value === 'string' && DATE_RE.test(value);
 }
 
 function getHeaders(company) {
@@ -623,7 +607,7 @@ module.exports = async (req, res) => {
     const startDate = req.query.startDate || today;
     const endDate = req.query.endDate || today;
 
-    if (!isValidDate(startDate) || !isValidDate(endDate)) {
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
       return res.status(400).json({
         success: false,
         error: 'startDate and endDate must be in YYYY-MM-DD format',
