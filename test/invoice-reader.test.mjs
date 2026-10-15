@@ -194,11 +194,15 @@ test('slices that do not add up to the overall total throw', async () => {
 test('a present totalCount that is not a non-negative safe integer makes the page malformed', async () => {
   // Infinity is what the client makes of a 1e400 token.
   for (const totalCount of [-1, 2.5, Infinity, 2 ** 53, '100', true]) {
+    const listPage = pagesOf([{ data: [row('A')], totalCount }]);
     await assert.rejects(
-      () => readInvoicesChecked({ listPage: pagesOf([{ data: [row('A')], totalCount }]), ...sameDay }),
+      () => readInvoicesChecked({ listPage, ...sameDay }),
       { code: 'PRICE_SOURCE_INVALID' },
       String(totalCount),
     );
+    // A slice re-read would also reject pagesOf's default page with this code, so
+    // only the request count shows that the first page itself was refused.
+    assert.equal(listPage.calls.length, 1, String(totalCount));
   }
 });
 
