@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const { AutoCountClient } = require('../lib/autocount/client');
+const { readCompanySettings } = require('../lib/autocount/company-config');
 const { readDocKey, readInvoiceRange } = require('../lib/autocount/invoice-reader');
 // Vercel dev does not consistently inject `.env.local` into plain Node
 // serverless functions, so load the local override explicitly before `.env`.
@@ -10,30 +11,6 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_API_URL = 'https://accounting-api.autocountcloud.com';
-const COMPANY_DEFINITIONS = Object.freeze([
-  {
-    id: 'enterprise',
-    name: 'Wanson Enterprise',
-    accountBookId: '63750',
-    apiKeyEnv: 'AUTOCOUNT_ENTERPRISE_API_KEY',
-    keyIdEnv: 'AUTOCOUNT_ENTERPRISE_KEY_ID',
-    apiUrlEnv: 'AUTOCOUNT_ENTERPRISE_API_URL',
-    apiKeyAliases: ['AUTOCOUNT_API_KEY_WANSON_ENTERPRISE'],
-    keyIdAliases: ['AUTOCOUNT_KEY_ID_WANSON_ENTERPRISE'],
-    legacyApiKeyEnv: 'AUTOCOUNT_API_KEY',
-    legacyKeyIdEnv: 'AUTOCOUNT_KEY_ID',
-  },
-  {
-    id: 'sdnBhd',
-    name: 'Wanson Sdn Bhd',
-    accountBookId: '63688',
-    apiKeyEnv: 'AUTOCOUNT_SDN_BHD_API_KEY',
-    keyIdEnv: 'AUTOCOUNT_SDN_BHD_KEY_ID',
-    apiUrlEnv: 'AUTOCOUNT_SDN_BHD_API_URL',
-    apiKeyAliases: ['AUTOCOUNT_API_KEY_WANSON_SDN_BHD'],
-    keyIdAliases: ['AUTOCOUNT_KEY_ID_WANSON_SDN_BHD'],
-  },
-]);
 
 // Serverless runtimes (Vercel) run with TZ=UTC, so `new Date()` local time is
 // NOT the business's local time. The reporting timezone must be explicit,
@@ -81,30 +58,23 @@ function getHeaders(company) {
   };
 }
 
-function getCompanyConfigs(env = process.env) {
-  return COMPANY_DEFINITIONS.map((definition) => {
-    const firstConfigured = (names) => names.map((name) => env[name]).find(Boolean) || null;
-    const apiKey = firstConfigured([
-      definition.apiKeyEnv,
-      ...(definition.apiKeyAliases || []),
-      ...(definition.legacyApiKeyEnv ? [definition.legacyApiKeyEnv] : []),
-    ]);
-    const keyId = firstConfigured([
-      definition.keyIdEnv,
-      ...(definition.keyIdAliases || []),
-      ...(definition.legacyKeyIdEnv ? [definition.legacyKeyIdEnv] : []),
-    ]);
+// What the dashboard shows for a book whose settings are refused.
+function settingsErrorText(problem) {
+  if (!problem) return null;
+  return problem.code === 'account_book_mismatch' ? 'Account book setting does not match' : 'Credentials not configured';
+}
 
-    return {
-      id: definition.id,
-      name: definition.name,
-      accountBookId: definition.accountBookId,
-      apiUrl: env[definition.apiUrlEnv] || env.AUTOCOUNT_API_URL || DEFAULT_API_URL,
-      apiKey,
-      keyId,
-      credentialsConfigured: Boolean(apiKey && keyId),
-    };
-  });
+function getCompanyConfigs(env = process.env) {
+  return readCompanySettings(env).map((settings) => ({
+    id: settings.salesId,
+    name: settings.dashboardName,
+    accountBookId: settings.accountBookId,
+    apiUrl: settings.apiUrl,
+    apiKey: settings.apiKey,
+    keyId: settings.keyId,
+    credentialsConfigured: settings.problem === null,
+    settingsError: settingsErrorText(settings.problem),
+  }));
 }
 
 // AutoCount's invoice listing pages can repeat invoices on large date ranges,
@@ -507,7 +477,7 @@ async function loadCompanyInvoices(startDate, endDate, company, useMock, depende
     return {
       company,
       status: 'error',
-      error: 'Credentials not configured',
+      error: company.settingsError || 'Credentials not configured',
       invoices: [],
     };
   }

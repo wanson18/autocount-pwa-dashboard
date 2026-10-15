@@ -88,6 +88,38 @@ test('getCompanyConfigs accepts the existing Vercel company-scoped variable name
   );
 });
 
+test('getCompanyConfigs marks a book whose account book setting differs as unavailable', () => {
+  const [enterprise, sdnBhd] = getCompanyConfigs({
+    AUTOCOUNT_ENTERPRISE_API_KEY: 'enterprise-key',
+    AUTOCOUNT_ENTERPRISE_KEY_ID: 'enterprise-id',
+    AUTOCOUNT_SDN_BHD_API_KEY: 'sdn-key',
+    AUTOCOUNT_SDN_BHD_KEY_ID: 'sdn-id',
+    AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: '63750',
+  });
+
+  assert.equal(enterprise.credentialsConfigured, true);
+  assert.equal(enterprise.settingsError, null);
+  assert.equal(sdnBhd.accountBookId, '63688');
+  assert.equal(sdnBhd.credentialsConfigured, false);
+  assert.equal(sdnBhd.settingsError, 'Account book setting does not match');
+  assert.equal(sdnBhd.apiKey, null);
+});
+
+test('loadCompanyInvoices shows the settings error for that book without calling AutoCount', async () => {
+  const [, sdnBhd] = getCompanyConfigs({
+    AUTOCOUNT_SDN_BHD_API_KEY: 'sdn-key',
+    AUTOCOUNT_SDN_BHD_KEY_ID: 'sdn-id',
+    AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: '63750',
+  });
+
+  const result = await loadCompanyInvoices('2026-09-01', '2026-09-01', sdnBhd, false);
+
+  assert.deepEqual(
+    { status: result.status, error: result.error, invoices: result.invoices },
+    { status: 'error', error: 'Account book setting does not match', invoices: [] },
+  );
+});
+
 test('fetchAllInvoices continues pagination when AutoCount omits totalCount', async () => {
   const pages = [
     { status: 200, data: { data: [{ id: 1 }, { id: 2 }] } },

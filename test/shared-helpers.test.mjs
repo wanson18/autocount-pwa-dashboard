@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 
@@ -22,4 +22,16 @@ test('calendar date checks and day arithmetic live only in lib/dates.js', () => 
     assert.doesNotMatch(source, /getUTCDate\(\) [!=]== Number\(/, file);
     assert.match(source, /require\('(\.\.\/)+(lib\/)?dates'\)/, `${file} uses lib/dates.js`);
   }
+});
+
+function sourceFiles(dir) {
+  return readdirSync(new URL(`../${dir}/`, import.meta.url), { recursive: true })
+    .map((name) => `${dir}/${String(name).replaceAll('\\', '/')}`)
+    .filter((file) => file.endsWith('.js') && !file.endsWith('.test.js'));
+}
+
+test('the two book numbers are typed in one file only', () => {
+  const typed = [...sourceFiles('api'), ...sourceFiles('lib')]
+    .filter((file) => /\b(63750|63688)\b/.test(read(file)));
+  assert.deepEqual(typed, ['lib/autocount/company-config.js']);
 });

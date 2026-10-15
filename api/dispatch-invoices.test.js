@@ -23,8 +23,8 @@ function withAuthenticatedSession(options) {
 
 const ENV = {
   AUTOCOUNT_API_URL: 'https://example.invalid',
-  AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: 'enterprise-book-fixture',
-  AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: 'sdn-bhd-book-fixture',
+  AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: '63750',
+  AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: '63688',
   AUTOCOUNT_KEY_ID_WANSON_ENTERPRISE: 'enterprise-key-fixture',
   AUTOCOUNT_API_KEY_WANSON_ENTERPRISE: 'enterprise-api-fixture',
   AUTOCOUNT_KEY_ID_WANSON_SDN_BHD: 'sdn-bhd-key-fixture',
@@ -68,8 +68,8 @@ test('company config isolates both books and exposes only public company identit
   const configs = loadCompanyConfigs(ENV);
 
   assert.deepEqual(Object.keys(configs), ['enterprise', 'sdn_bhd']);
-  assert.equal(configs.enterprise.accountBookId, 'enterprise-book-fixture');
-  assert.equal(configs.sdn_bhd.accountBookId, 'sdn-bhd-book-fixture');
+  assert.equal(configs.enterprise.accountBookId, '63750');
+  assert.equal(configs.sdn_bhd.accountBookId, '63688');
   assert.equal(configs.enterprise.apiKey, 'enterprise-api-fixture');
   assert.equal(configs.sdn_bhd.apiKey, 'sdn-bhd-api-fixture');
   assert.deepEqual(publicCompany(configs.enterprise), {
@@ -83,30 +83,28 @@ test('company config isolates both books and exposes only public company identit
   assert.equal(JSON.stringify(publicCompany(configs.enterprise)).includes('book'), false);
 });
 
-test('company config uses shared credentials only when both shared values exist', () => {
+test('company config lets only Enterprise use the shared credentials, and only as a complete pair', () => {
+  assert.throws(
+    () => loadCompanyConfigs({ AUTOCOUNT_API_KEY_ID: 'shared-key-fixture', AUTOCOUNT_API_KEY: 'shared-api-fixture' }),
+    /missing credentials for sdn_bhd/,
+  );
   const configs = loadCompanyConfigs({
-    AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: 'enterprise-book-fixture',
-    AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: 'sdn-bhd-book-fixture',
     AUTOCOUNT_API_KEY_ID: 'shared-key-fixture',
     AUTOCOUNT_API_KEY: 'shared-api-fixture',
+    AUTOCOUNT_SDN_BHD_KEY_ID: 'sdn-bhd-key-fixture',
+    AUTOCOUNT_SDN_BHD_API_KEY: 'sdn-bhd-api-fixture',
   });
-
   assert.equal(configs.enterprise.keyId, 'shared-key-fixture');
-  assert.equal(configs.sdn_bhd.apiKey, 'shared-api-fixture');
+  assert.equal(configs.enterprise.apiKey, 'shared-api-fixture');
+  assert.equal(configs.sdn_bhd.apiKey, 'sdn-bhd-api-fixture');
   assert.throws(
-    () => loadCompanyConfigs({
-      AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: 'enterprise-book-fixture',
-      AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: 'sdn-bhd-book-fixture',
-      AUTOCOUNT_API_KEY_ID: 'shared-key-fixture',
-    }),
+    () => loadCompanyConfigs({ AUTOCOUNT_API_KEY_ID: 'shared-key-fixture' }),
     /shared AutoCount credentials/,
   );
 });
 
 test('company config accepts the existing Sdn Bhd credential variable names', () => {
   const configs = loadCompanyConfigs({
-    AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE: 'enterprise-book-fixture',
-    AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD: 'sdn-bhd-book-fixture',
     AUTOCOUNT_KEY_ID: 'shared-enterprise-key-fixture',
     AUTOCOUNT_API_KEY: 'shared-enterprise-api-fixture',
     AUTOCOUNT_SDN_BHD_KEY_ID: 'sdn-bhd-key-fixture',
@@ -411,7 +409,7 @@ test('all endpoint returns mixed company invoices and source health', async () =
   assert.deepEqual(res.body.sources.enterprise, { status: 'ok', invoiceCount: 1, quarantinedCount: 0 });
   assert.deepEqual(res.body.sources.sdn_bhd, { status: 'unavailable', errorCode: 'source_unavailable' });
   assert.equal(JSON.stringify(res.body).includes('source unavailable'), false);
-  assert.equal(JSON.stringify(res.body).includes('enterprise-book-fixture'), false);
+  assert.equal(JSON.stringify(res.body).includes('63750'), false);
 });
 
 test('endpoint preserves integrity error health separately from source outage health', async () => {
