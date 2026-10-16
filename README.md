@@ -74,22 +74,33 @@ Copy `.env.example` to `.env.local` and fill in your AutoCount credentials:
 cp .env.example .env.local
 ```
 
-Required variables:
+Variables:
 
 | Variable                    | Description                                 |
 | --------------------------- | ------------------------------------------- |
-| `AUTOCOUNT_API_URL`         | `https://accounting-api.autocountcloud.com` |
-| `AUTOCOUNT_ENTERPRISE_API_KEY` | Credential for Enterprise book `63750`   |
-| `AUTOCOUNT_ENTERPRISE_KEY_ID`  | Key ID for Enterprise book `63750`       |
-| `AUTOCOUNT_SDN_BHD_API_KEY`    | Credential for Sdn Bhd book `63688`      |
-| `AUTOCOUNT_SDN_BHD_KEY_ID`     | Key ID for Sdn Bhd book `63688`          |
+| `AUTOCOUNT_API_URL`         | Optional; when it is unset, AutoCount's standard address `https://accounting-api.autocountcloud.com` is used. A book's own `AUTOCOUNT_ENTERPRISE_API_URL` / `AUTOCOUNT_SDN_BHD_API_URL` comes first (see Company settings) |
+| `AUTOCOUNT_ENTERPRISE_API_KEY` | Credential for Enterprise book `63750`, or its alias (see Company settings) |
+| `AUTOCOUNT_ENTERPRISE_KEY_ID`  | Key ID for Enterprise book `63750`, or its alias (see Company settings) |
+| `AUTOCOUNT_SDN_BHD_API_KEY`    | Credential for Sdn Bhd book `63688`, or its alias (see Company settings) |
+| `AUTOCOUNT_SDN_BHD_KEY_ID`     | Key ID for Sdn Bhd book `63688`, or its alias (see Company settings) |
 | `USE_MOCK_DATA`             | `false` for live data, `true` for mock      |
 | `DATABASE_URL`              | Pooled PostgreSQL URL for dispatch state    |
 | `DISPATCH_USERS_JSON`       | Server-side clerk identities and scrypt hashes |
 | `DISPATCH_SESSION_SECRET`   | Base64url for exactly 32 random secret bytes |
 | `DISPATCH_PUBLIC_ACCESS`     | `true` deliberately disables dispatch credential checks |
 
-The old single-book `AUTOCOUNT_COMPANY_ID` setting does not select a book in this integration. Both book-scoped credential pairs must be present for a complete live result; otherwise the dashboard reports which book is unavailable.
+The old single-book `AUTOCOUNT_COMPANY_ID` setting does not select a book in this integration. Enterprise may use the old shared pair (`AUTOCOUNT_API_KEY` with `AUTOCOUNT_KEY_ID` or `AUTOCOUNT_API_KEY_ID`) instead of its own credentials; Sdn Bhd never does (see Company settings). A complete live result needs both books' credentials: if either book's are missing or refused by the settings rules (see Company settings), the dashboard reports which book is unavailable, and Dispatch and Price Check stop reading AutoCount for both books.
+
+#### Company settings
+
+Sales, Dispatch and Price Check read the AutoCount settings with one rule set (`lib/autocount/company-config.js`):
+
+- The two books are fixed in code (Enterprise `63750`, Sdn Bhd `63688`). `AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE` / `AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD` are optional; if set, they must equal those numbers or that book is refused.
+- Each book's API key and key ID come from its own names first (`AUTOCOUNT_ENTERPRISE_API_KEY` and `AUTOCOUNT_ENTERPRISE_KEY_ID`; `AUTOCOUNT_SDN_BHD_API_KEY` and `AUTOCOUNT_SDN_BHD_KEY_ID`), then the aliases (`AUTOCOUNT_API_KEY_WANSON_*`, `AUTOCOUNT_KEY_ID_WANSON_*`). A book with only half a pair is refused.
+- Only Enterprise may fall back to the old shared pair (`AUTOCOUNT_API_KEY` with `AUTOCOUNT_KEY_ID` or `AUTOCOUNT_API_KEY_ID`), and only when none of its four key and key ID names (own names or aliases) is set; its address and book-number settings do not count. Sdn Bhd never does.
+- The address is `AUTOCOUNT_ENTERPRISE_API_URL` / `AUTOCOUNT_SDN_BHD_API_URL`, then `AUTOCOUNT_API_URL`, then AutoCount's standard address.
+- Values are trimmed; a blank value counts as unset. Error messages name settings, never their values.
+- When a book is refused, Sales shows only that book as unavailable. Dispatch and Price Check need both books, so a problem with either book stops their AutoCount reads for both.
 
 ### 3. Run Locally
 
@@ -273,8 +284,8 @@ real-Postgres run.
 - **Windows** — fixed server-side only, in `Asia/Kuala_Lumpur`: `today` scans 90 prior days plus today (91 days), and `seven_days` monitors the last 7 calendar days plus 90 prior days (97 days). Arbitrary or unknown ranges return `400`.
 - **Read-only** — `Cache-Control: no-store`, no CORS, GET-only, and no service-worker cache or offline fallback for price data. No invoice is created, approved, amended, voided, or submitted, and Jev/TypeSafe is not involved.
 - **No persistent audit** — version 1 recomputes from fresh Cloud data on every check, so a corrected difference disappears on the next scan. A durable first-seen alert ledger is deliberately out of scope.
-- **Unstable Cloud lists** — each book is first read page by page. If AutoCount repeats a row, changes its total, or returns a short or long list, the book is read once more in date slices that each fit on one page (up to 3 requests at a time, 250 requests at most), so the Cloud never has to order rows across pages. Both reads must prove completeness: every slice complete, slice totals equal to the overall total, and no invoice twice. A book that still fails is reported as failed with page, row, and total numbers (no invoice data) and an entry in the Vercel function log.
-- **Status** — `PASS` (both books verified and scanned completely, even with no alerts), `PARTIAL` (one book failed; only the successful book's alerts are shown), `FAIL` (neither book scanned, returned with HTTP `502`, never an empty-success state).
+- **Unstable Cloud lists** — each book is first read page by page. If AutoCount repeats a row, changes its total, or returns a short or long list, the book is read once more in date slices that each fit on one page (up to 3 requests at a time, 250 requests at most), so the Cloud never has to order rows across pages. Both reads must pass the same checks: every slice complete, slice totals equal to the overall total, and no invoice twice. A book that still fails is reported as failed with page, row, and total numbers (no invoice data) and an entry in the Vercel function log.
+- **Status** — `PASS` (both books were read and passed the company-profile and completeness checks, even with no alerts), `PARTIAL` (one book failed; only the successful book's alerts are shown), `FAIL` (neither book scanned, returned with HTTP `502`, never an empty-success state).
 
 The dashboard home page starts with the **Price Check access** panel. After signing in, use the **Check Price Differences** button. The mobile page `public/price-check.html` defaults to Today and offers a Last 7 days selector. It clears customer rows on failed or unauthenticated refreshes instead of showing stale prices, and distinguishes complete-zero, partial, failed, offline, and unauthenticated states by text, colour, and icon. Findings are listed newest invoice first and each card shows the price movement (for example `RM 95.00 → RM 98.50 · ▲ +3.50 (+3.68%)`) without opening it. The `skipped*` counts in the API response cover the monitored window only, not the 90-day history baseline.
 
@@ -305,9 +316,9 @@ npx vercel env add USE_MOCK_DATA production,preview --value "false"
 
 Every deployment writes `public/version.json` at build time (`scripts/write-version.js`), so you can see which commit is running: `curl https://autocount-pwa-dashboard.vercel.app/version.json` returns the commit, branch, environment (`production` or `preview`) and build time. After a merge to `main` it shows `"target":"production"` and the merge commit. A deployment uploaded from a computer (`npx vercel --prod`) can have `null` for the Git fields. The file is generated, so it is git-ignored, and it is never cached.
 
-### Verified invoice reads
+### Checked invoice reads
 
-AutoCount's invoice listing pages can repeat invoices on large date ranges, which also pushes other invoices out of the list. On a live 91-day range the Sales dashboard once received 9 invoices twice and missed 9 others, so revenue was about 1.3% off with no error. `lib/autocount/invoice-reader.js` (used by Price Check and Sales) checks every read: when AutoCount reports a `totalCount` the rows must add up to it with no invoice repeated. If they do not, the range is re-read in date slices that each fit on one page (at most 3 requests at once, 250 in total), and if completeness still cannot be proven, Sales shows that company as unavailable and Price Check fails that book, instead of showing wrong numbers. Ranges up to 30 days were consistent when checked, so normal use reads page by page exactly as before.
+AutoCount's invoice listing pages can repeat invoices on large date ranges, which also pushes other invoices out of the list. On a live 91-day range the Sales dashboard once received 9 invoices twice and missed 9 others, so revenue was about 1.3% off with no error. `lib/autocount/invoice-reader.js` holds the checked reads for Sales and Price Check: Sales uses `readInvoicesChecked`, Price Check its stricter paged-then-sliced flow. When AutoCount reports a `totalCount`, the rows must equal it with no invoice repeated. A count mismatch or a repeated invoice triggers a re-read in date slices that each fit on one page (at most 3 requests at once, 250 in total). If that re-read fails too, Sales shows that company as unavailable and Price Check fails that book, instead of showing wrong numbers. These checks catch repeated and missing rows; they cannot prove a consistent snapshot while invoices are being added or deleted during the read. A listing without any `totalCount` cannot be checked: Sales still shows it and logs it as unchecked. Ranges up to 30 days were consistent when checked, so normal use reads page by page exactly as before.
 
 ### Function regions
 

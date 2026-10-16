@@ -1,39 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 const { AutoCountClient } = require('../lib/autocount/client');
-const { readDocKey, readInvoiceRange } = require('../lib/autocount/invoice-reader');
+const { readCompanySettings } = require('../lib/autocount/company-config');
+const { readInvoicesChecked } = require('../lib/autocount/invoice-reader');
+const { decimalValue, firstNonZero } = require('../lib/autocount/numbers');
+const { isIsoDate, todayIn } = require('../lib/dates');
 // Vercel dev does not consistently inject `.env.local` into plain Node
 // serverless functions, so load the local override explicitly before `.env`.
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DEFAULT_API_URL = 'https://accounting-api.autocountcloud.com';
-const COMPANY_DEFINITIONS = Object.freeze([
-  {
-    id: 'enterprise',
-    name: 'Wanson Enterprise',
-    accountBookId: '63750',
-    apiKeyEnv: 'AUTOCOUNT_ENTERPRISE_API_KEY',
-    keyIdEnv: 'AUTOCOUNT_ENTERPRISE_KEY_ID',
-    apiUrlEnv: 'AUTOCOUNT_ENTERPRISE_API_URL',
-    apiKeyAliases: ['AUTOCOUNT_API_KEY_WANSON_ENTERPRISE'],
-    keyIdAliases: ['AUTOCOUNT_KEY_ID_WANSON_ENTERPRISE'],
-    legacyApiKeyEnv: 'AUTOCOUNT_API_KEY',
-    legacyKeyIdEnv: 'AUTOCOUNT_KEY_ID',
-  },
-  {
-    id: 'sdnBhd',
-    name: 'Wanson Sdn Bhd',
-    accountBookId: '63688',
-    apiKeyEnv: 'AUTOCOUNT_SDN_BHD_API_KEY',
-    keyIdEnv: 'AUTOCOUNT_SDN_BHD_KEY_ID',
-    apiUrlEnv: 'AUTOCOUNT_SDN_BHD_API_URL',
-    apiKeyAliases: ['AUTOCOUNT_API_KEY_WANSON_SDN_BHD'],
-    keyIdAliases: ['AUTOCOUNT_KEY_ID_WANSON_SDN_BHD'],
-  },
-]);
 
 // Serverless runtimes (Vercel) run with TZ=UTC, so `new Date()` local time is
 // NOT the business's local time. The reporting timezone must be explicit,
@@ -50,157 +25,56 @@ function getReportingTimeZone() {
  */
 function getLocalToday(timeZone = getReportingTimeZone(), now = new Date()) {
   try {
-    // en-CA formats as YYYY-MM-DD, and formatToParts avoids locale surprises.
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(now);
-
-    const get = (type) => parts.find((p) => p.type === type)?.value;
-    const [year, month, day] = [get('year'), get('month'), get('day')];
-
-    if (year && month && day) return `${year}-${month}-${day}`;
+    return todayIn(timeZone, now);
   } catch (error) {
     console.warn(`Invalid REPORT_TIMEZONE "${timeZone}", falling back to UTC:`, error.message);
   }
-
   return now.toISOString().slice(0, 10);
 }
 
-function isValidDate(value) {
-  return typeof value === 'string' && DATE_RE.test(value);
-}
-
-function getHeaders(company) {
-  return {
-    'API-Key': company.apiKey,
-    'Key-ID': company.keyId,
-    'Content-Type': 'application/json',
-  };
+// What the dashboard shows for a book whose settings are refused.
+function settingsErrorText(problem) {
+  if (!problem) return null;
+  return problem.code === 'account_book_mismatch' ? 'Account book setting does not match' : 'Credentials not configured';
 }
 
 function getCompanyConfigs(env = process.env) {
-  return COMPANY_DEFINITIONS.map((definition) => {
-    const firstConfigured = (names) => names.map((name) => env[name]).find(Boolean) || null;
-    const apiKey = firstConfigured([
-      definition.apiKeyEnv,
-      ...(definition.apiKeyAliases || []),
-      ...(definition.legacyApiKeyEnv ? [definition.legacyApiKeyEnv] : []),
-    ]);
-    const keyId = firstConfigured([
-      definition.keyIdEnv,
-      ...(definition.keyIdAliases || []),
-      ...(definition.legacyKeyIdEnv ? [definition.legacyKeyIdEnv] : []),
-    ]);
-
-    return {
-      id: definition.id,
-      name: definition.name,
-      accountBookId: definition.accountBookId,
-      apiUrl: env[definition.apiUrlEnv] || env.AUTOCOUNT_API_URL || DEFAULT_API_URL,
-      apiKey,
-      keyId,
-      credentialsConfigured: Boolean(apiKey && keyId),
-    };
-  });
+  return readCompanySettings(env).map((settings) => ({
+    id: settings.salesId,
+    name: settings.dashboardName,
+    accountBookId: settings.accountBookId,
+    apiUrl: settings.apiUrl,
+    apiKey: settings.apiKey,
+    keyId: settings.keyId,
+    credentialsConfigured: settings.problem === null,
+    settingsError: settingsErrorText(settings.problem),
+  }));
 }
 
-// AutoCount's invoice listing pages can repeat invoices on large date ranges,
-// which also pushes other invoices out of the list: on a live 91-day range, 9
-// invoices came back twice and 9 were missing, silently skewing every total. When
-// AutoCount reports a totalCount, the rows must add up to it with no invoice
-// repeated. Returns why the rows cannot be trusted, or null when they add up or
-// cannot be checked (AutoCount reported no totalCount).
-function listingProblem(rows, reportedTotal) {
-  if (!Number.isSafeInteger(reportedTotal)) return null;
-  if (rows.length !== reportedTotal) return 'row count does not match totalCount';
-  const seen = new Set();
-  for (const row of rows) {
-    const docKey = readDocKey(row);
-    if (docKey === null) continue;
-    if (seen.has(docKey)) return 'an invoice is listed twice';
-    seen.add(docKey);
-  }
-  return null;
-}
-
-// Re-reads the range in date slices that each fit on one page, so AutoCount
-// never has to order rows across pages. Throws unless completeness is proven.
-async function readInvoicesInDateSlices(url, company, startDate, endDate, httpClient) {
-  const listPage = async ({ page, startDate: from, endDate: to }) => {
-    const response = await httpClient.get(url, {
-      headers: getHeaders(company),
-      timeout: 15000,
-      params: { page, startDate: from, endDate: to },
-    });
-    if (response.status !== 200) throw new Error(`AutoCount listing returned HTTP ${response.status}`);
-    return response.data;
-  };
-  const { rows } = await readInvoiceRange({
-    listPage,
-    accountBookId: company.accountBookId,
-    startDate,
-    endDate,
-    strategy: 'windowed',
-  });
-  return rows;
-}
-
-async function fetchAllInvoices(startDate, endDate, company, httpClient = axios) {
-  const baseUrl = (company?.apiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
-  const accountBookId = company?.accountBookId;
-
-  if (!accountBookId || !company?.apiKey || !company?.keyId) {
+async function fetchAllInvoices(startDate, endDate, company, client = new AutoCountClient()) {
+  if (!company?.accountBookId || !company?.apiKey || !company?.keyId) {
     console.error(`Missing AutoCount credentials for ${company?.name || 'unknown company'}`);
     return null;
   }
 
-  const allInvoices = [];
-  const url = `${baseUrl}/${accountBookId}/invoice/listing`;
-  let page = 1;
-  let reportedTotal = null;
-
   try {
-    while (true) {
-      const response = await httpClient.get(url, {
-        headers: getHeaders(company),
-        timeout: 15000,
-        params: { page, startDate, endDate },
-      });
-      const pageData = Array.isArray(response.data?.data) ? response.data.data : null;
-
-      if (response.status !== 200 || !pageData) return null;
-
-      allInvoices.push(...pageData);
-      // The latest total, so an invoice saved while pages are being read does
-      // not make a consistent list look broken.
-      if (typeof response.data.totalCount === 'number') reportedTotal = response.data.totalCount;
-      if (pageData.length === 0) break;
-
-      const totalCount = Number(response.data.totalCount);
-      if (Number.isFinite(totalCount) && allInvoices.length >= totalCount) break;
-
-      const pageSize = Number(response.data.pageSize || response.data.page_size || response.data.limit);
-      if (!Number.isFinite(totalCount) && Number.isFinite(pageSize) && pageData.length < pageSize) break;
-
-      page += 1;
-      if (page > 100) throw new Error(`AutoCount pagination exceeded 100 pages for ${company.name}`);
-    }
-
-    const problem = listingProblem(allInvoices, reportedTotal);
-    if (problem) {
-      console.error(
+    const { rows, check } = await readInvoicesChecked({
+      listPage: (params) => client.listInvoicePage(company, params),
+      accountBookId: company.accountBookId,
+      startDate,
+      endDate,
+      onRecheck: (problem) => console.error(
         `AutoCount ${company.name} listing for ${startDate} to ${endDate} cannot be trusted (${problem}); re-reading in date slices`,
-      );
-      const verified = await readInvoicesInDateSlices(url, company, startDate, endDate, httpClient);
-      console.log(`Fetched ${verified.length} invoices for ${startDate} to ${endDate} (verified in date slices)`);
-      return verified;
+      ),
+    });
+    if (check === 'slices') {
+      console.log(`Fetched ${rows.length} invoices for ${startDate} to ${endDate} (checked in date slices)`);
+    } else if (check === 'none') {
+      console.log(`Fetched ${rows.length} invoices for ${startDate} to ${endDate} (no total count from AutoCount, so the list was not checked)`);
+    } else {
+      console.log(`Fetched ${rows.length} invoices for ${startDate} to ${endDate}`);
     }
-
-    console.log(`Fetched ${allInvoices.length} invoices for ${startDate} to ${endDate}`);
-    return allInvoices;
+    return rows;
   } catch (error) {
     console.error('AutoCount API error:', error.message);
     return null;
@@ -214,9 +88,11 @@ function parseOutstandingAmount(rawValue) {
   return Math.round(parsed * 100) / 100;
 }
 
+// Cancelled when AutoCount says true, or a flag whose value is exactly 1 (the
+// client hands a numeric 1 over as text such as "1" or "1.0").
 function isCancelledInvoice(master) {
   const cancellationState = master.cancelled ?? master.isCancelled;
-  return cancellationState === true || cancellationState === 1 || cancellationState === '1';
+  return cancellationState === true || decimalValue(cancellationState) === 1;
 }
 
 function normalizeInvoices(rawInvoices, company = null) {
@@ -228,7 +104,7 @@ function normalizeInvoices(rawInvoices, company = null) {
       docNo: master.docNo || '',
       docDate: master.docDate || '',
       customerName: master.debtorName || master.customerName || '',
-      grandTotal: Math.round(parseFloat(master.finalTotal || master.total || master.grandTotal || 0) * 100) / 100,
+      grandTotal: Math.round(firstNonZero(master.finalTotal, master.total, master.grandTotal) * 100) / 100,
       outstandingAmount: parseOutstandingAmount(master.outstandingAmount),
       lineItems: details.map((d) => {
         // The line unit is the only UOM evidence AutoCount returns per line.
@@ -237,10 +113,10 @@ function normalizeInvoices(rawInvoices, company = null) {
         return {
           sku: d.productCode || d.sku || '',
           description: d.description || '',
-          quantity: parseFloat(d.qty || d.quantity || 0),
+          quantity: firstNonZero(d.qty, d.quantity),
           ...(unit ? { unit } : {}),
-          unitPrice: parseFloat(d.unitPrice || 0),
-          total: parseFloat(d.subTotal || d.total || 0),
+          unitPrice: firstNonZero(d.unitPrice),
+          total: firstNonZero(d.subTotal, d.total),
         };
       }),
     };
@@ -507,15 +383,16 @@ async function loadCompanyInvoices(startDate, endDate, company, useMock, depende
     return {
       company,
       status: 'error',
-      error: 'Credentials not configured',
+      error: company.settingsError || 'Credentials not configured',
       invoices: [],
     };
   }
 
   try {
+    const client = dependencies.client || new AutoCountClient();
     const rawInvoices = useMock
       ? loadMockData(company)
-      : await fetchAllInvoices(startDate, endDate, company, dependencies.httpClient);
+      : await fetchAllInvoices(startDate, endDate, company, client);
     if (!rawInvoices) {
       return {
         company,
@@ -528,8 +405,7 @@ async function loadCompanyInvoices(startDate, endDate, company, useMock, depende
     let invoices = normalizeInvoices(rawInvoices, company);
     if (!useMock) {
       try {
-        const getProduct = dependencies.getProduct
-          || ((itemCode) => new AutoCountClient({ baseUrl: company.apiUrl }).getProduct(company, itemCode));
+        const getProduct = dependencies.getProduct || ((itemCode) => client.getProduct(company, itemCode));
         invoices = await resolveMultiPackRates(invoices, getProduct);
       } catch (error) {
         // The dashboard still shows every invoice; only the mixed-UOM SKUs
@@ -653,7 +529,7 @@ module.exports = async (req, res) => {
     const startDate = req.query.startDate || today;
     const endDate = req.query.endDate || today;
 
-    if (!isValidDate(startDate) || !isValidDate(endDate)) {
+    if (!isIsoDate(startDate) || !isIsoDate(endDate)) {
       return res.status(400).json({
         success: false,
         error: 'startDate and endDate must be in YYYY-MM-DD format',

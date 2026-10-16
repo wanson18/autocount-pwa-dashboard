@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import reader from '../lib/autocount/invoice-reader.js';
 
-const { readInvoiceRange } = reader;
+const { readInvoiceRange, readInvoicesChecked } = reader;
 
 const day = (offset) => new Date(Date.UTC(2026, 6, 8 + offset)).toISOString().slice(0, 10);
 
@@ -77,4 +77,180 @@ test('bad input is rejected before any request is made', async () => {
     { code: 'PRICE_SOURCE_INVALID' },
   );
   assert.equal(listPage.calls.length, 0);
+});
+
+// --- readInvoicesChecked (Sales) -------------------------------------------
+
+// A listPage that serves prepared pages in order and records each request.
+function pagesOf(pages) {
+  const calls = [];
+  const listPage = async (params) => {
+    calls.push(params);
+    return pages[calls.length - 1] ?? { data: [] };
+  };
+  listPage.calls = calls;
+  return listPage;
+}
+
+const row = (docKey) => ({ master: { docKey }, details: [] });
+const sameDay = { accountBookId: '63750', startDate: day(0), endDate: day(0) };
+const fullRange = { accountBookId: '63750', startDate: day(0), endDate: day(90) };
+const isFullRange = (params) => params.startDate === day(0) && params.endDate === day(90);
+
+test('checked read without any total stops at an empty page and reports check none', async () => {
+  const listPage = pagesOf([{ data: [row('A'), row('B')] }, { data: [row('C')], totalCount: null }, { data: [] }]);
+  const result = await readInvoicesChecked({ listPage, ...sameDay });
+  assert.deepEqual(result.rows.map((r) => r.master.docKey), ['A', 'B', 'C']);
+  assert.equal(result.check, 'none');
+  assert.equal(result.problem, null);
+  assert.equal(listPage.calls.length, 3);
+});
+
+test('checked read without a total also stops at a page shorter than a page size given as text', async () => {
+  const listPage = pagesOf([{ data: [row('A'), row('B')], pageSize: '2' }, { data: [row('C')], pageSize: '2' }, { data: [row('never')] }]);
+  const result = await readInvoicesChecked({ listPage, ...sameDay });
+  assert.deepEqual(result.rows.map((r) => r.master.docKey), ['A', 'B', 'C']);
+  assert.equal(result.check, 'none');
+  assert.equal(listPage.calls.length, 2);
+});
+
+test('checked read accepts a total that grows while the pages are read', async () => {
+  const first = Array.from({ length: 100 }, (_, i) => row(`K${i}`));
+  const second = Array.from({ length: 51 }, (_, i) => row(`K${100 + i}`));
+  const listPage = pagesOf([{ data: first, totalCount: 150 }, { data: second, totalCount: 151 }]);
+  const result = await readInvoicesChecked({ listPage, ...sameDay });
+  assert.equal(result.rows.length, 151);
+  assert.equal(result.check, 'count');
+  assert.equal(listPage.calls.length, 2);
+});
+
+test('rows without a readable document key are not counted as repeats', async () => {
+  const listPage = pagesOf([{ data: [{ id: 1 }, { id: 1 }], totalCount: 2 }]);
+  const result = await readInvoicesChecked({ listPage, ...sameDay });
+  assert.equal(result.check, 'count');
+});
+
+test('a count mismatch alone triggers the slice re-read', async () => {
+  const rows = rowsOverDays(DAYS);
+  const honest = listPageOver(rows);
+  const listPage = async (params) => {
+    const payload = await honest(params);
+    return isFullRange(params) && params.page === 2 ? { ...payload, data: payload.data.slice(0, -3) } : payload;
+  };
+  const rechecks = [];
+  const result = await readInvoicesChecked({ listPage, ...fullRange, onRecheck: (problem) => rechecks.push(problem) });
+  assert.deepEqual(keys(result.rows), keys(rows));
+  assert.equal(result.check, 'slices');
+  assert.equal(result.problem, 'row count does not match totalCount');
+  assert.deepEqual(rechecks, ['row count does not match totalCount']);
+});
+
+test('a repeated document alone triggers the slice re-read', async () => {
+  const rows = rowsOverDays(DAYS);
+  const result = await readInvoicesChecked({ listPage: listPageOver(rows, { unstable: true }), ...fullRange });
+  assert.deepEqual(keys(result.rows), keys(rows));
+  assert.equal(result.check, 'slices');
+  assert.equal(result.problem, 'an invoice is listed twice');
+});
+
+test('when both checks fail, the re-read happens once and the count mismatch is named', async () => {
+  const unstable = listPageOver(rowsOverDays(DAYS), { unstable: true });
+  const listPage = async (params) => {
+    const payload = await unstable(params);
+    return isFullRange(params) && params.page === 2 ? { ...payload, data: payload.data.slice(0, -3) } : payload;
+  };
+  const rechecks = [];
+  const result = await readInvoicesChecked({ listPage, ...fullRange, onRecheck: (problem) => rechecks.push(problem) });
+  assert.equal(result.check, 'slices');
+  assert.equal(result.problem, 'row count does not match totalCount');
+  assert.equal(rechecks.length, 1);
+});
+
+test('a list that stays short of its total, even in slices, throws', async () => {
+  const honest = listPageOver(rowsOverDays(DAYS));
+  const listPage = async (params) => {
+    const payload = await honest(params);
+    return { ...payload, data: payload.data.slice(0, Math.max(0, payload.data.length - 1)) };
+  };
+  await assert.rejects(() => readInvoicesChecked({ listPage, ...fullRange }), { code: 'PRICE_PAGE_INCOMPLETE' });
+});
+
+test('slices that do not add up to the overall total throw', async () => {
+  // Every request silently drops its end date, so the slices cannot add up.
+  const rows = rowsOverDays(DAYS);
+  const listPage = async ({ page, startDate, endDate }) => {
+    const matching = rows
+      .filter((r) => r.master.docDate >= startDate && r.master.docDate < endDate)
+      .sort((a, b) => `${a.master.docDate}${a.master.docKey}`.localeCompare(`${b.master.docDate}${b.master.docKey}`));
+    const total = matching.length;
+    const ordered = page > 1 && total > 0
+      ? matching.map((_, i) => matching[(i - 13 * (page - 1) + total * 100) % total])
+      : matching;
+    return { totalCount: total, data: ordered.slice((page - 1) * 100, page * 100) };
+  };
+  await assert.rejects(() => readInvoicesChecked({ listPage, ...fullRange }), { code: 'PRICE_PAGE_INCOMPLETE' });
+});
+
+test('a present totalCount that is not a non-negative safe integer makes the page malformed', async () => {
+  // Infinity is what the client makes of a 1e400 token.
+  for (const totalCount of [-1, 2.5, Infinity, 2 ** 53, '100', true]) {
+    const listPage = pagesOf([{ data: [row('A')], totalCount }]);
+    await assert.rejects(
+      () => readInvoicesChecked({ listPage, ...sameDay }),
+      { code: 'PRICE_SOURCE_INVALID' },
+      String(totalCount),
+    );
+    // A slice re-read would also reject pagesOf's default page with this code, so
+    // only the request count shows that the first page itself was refused.
+    assert.equal(listPage.calls.length, 1, String(totalCount));
+  }
+});
+
+test('a page without a total keeps the total of an earlier page', async () => {
+  const listPage = pagesOf([{ data: [row('A'), row('B')], totalCount: 3 }, { data: [row('C')] }, { data: [] }]);
+  const result = await readInvoicesChecked({ listPage, ...sameDay });
+  assert.equal(result.check, 'count');
+  assert.equal(result.rows.length, 3);
+  assert.equal(listPage.calls.length, 3);
+});
+
+test('a page without a data array is malformed', async () => {
+  for (const payload of [null, [], { data: null }, { rows: [] }]) {
+    await assert.rejects(
+      () => readInvoicesChecked({ listPage: async () => payload, ...sameDay }),
+      { code: 'PRICE_SOURCE_INVALID' },
+      JSON.stringify(payload),
+    );
+  }
+});
+
+test('the checked read stops at the page ceiling', async () => {
+  const listPage = async ({ page }) => ({ data: [row(`K${page}`)] });
+  await assert.rejects(
+    () => readInvoicesChecked({ listPage, ...sameDay, maxPages: 5 }),
+    { code: 'PRICE_PAGE_INCOMPLETE' },
+  );
+});
+
+test('the checked read stops after 100 page requests by default, not 1000', async () => {
+  // A listing that never ends: one new row per page and a total far out of reach.
+  let requests = 0;
+  const listPage = async ({ page }) => {
+    requests += 1;
+    if (requests > 1000) throw new Error('runaway read: no page ceiling stopped it');
+    return { data: [row(`K${page}`)], totalCount: 1000000 };
+  };
+  await assert.rejects(
+    () => readInvoicesChecked({ listPage, ...sameDay }),
+    (error) => {
+      assert.equal(error.code, 'PRICE_PAGE_INCOMPLETE');
+      assert.equal(requests, 100, 'MAX_PAGES (1000) belongs to the paged read, not to this one');
+      assert.deepEqual(error.detail, { page: 101, rowsRead: 100 });
+      return true;
+    },
+  );
+});
+
+test('the checked read needs a listPage function', async () => {
+  await assert.rejects(() => readInvoicesChecked({ ...sameDay }), { code: 'PRICE_SOURCE_INVALID' });
 });

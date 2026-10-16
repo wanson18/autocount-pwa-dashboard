@@ -1,0 +1,6 @@
+{
+  "product": { "productCode": "ITEM-A", "description": "Sample cooking oil 5KG", "unit": "BTL" },
+  "productMultiPacks": [
+    { "multiPack": "BOX", "multiPackRate": 4.00000000 }
+  ]
+}

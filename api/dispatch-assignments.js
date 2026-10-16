@@ -1,4 +1,5 @@
 const { AutoCountClient } = require('../lib/autocount/client');
+const { isIsoDate } = require('../lib/dates');
 const { pool } = require('../lib/db/pool');
 const { createRepository } = require('../lib/dispatch/repository');
 const { createDispatchService } = require('../lib/dispatch/service');
@@ -28,7 +29,6 @@ const ASSIGNMENT_QUERY_KEYS = ['assignment_id', 'trip_id', 'doc_date', 'limit'];
 const OPERATIONS = new Set(['move', 'remove', 'status']);
 const MAX_LIMIT = 100;
 const DOC_DATE_MAX_LIMIT = 1000;
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function idField(value) {
   if (Number.isSafeInteger(value) && value > 0) return value;
@@ -47,16 +47,7 @@ function requiredText(value, max = 256) {
 }
 
 function dateField(value) {
-  if (typeof value !== 'string' || !ISO_DATE_RE.test(value)) {
-    throw new DispatchHttpError(400, 'invalid_request');
-  }
-  const date = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())
-    || date.getUTCFullYear() !== Number(value.slice(0, 4))
-    || date.getUTCMonth() + 1 !== Number(value.slice(5, 7))
-    || date.getUTCDate() !== Number(value.slice(8, 10))) {
-    throw new DispatchHttpError(400, 'invalid_request');
-  }
+  if (!isIsoDate(value)) throw new DispatchHttpError(400, 'invalid_request');
   return value;
 }
 

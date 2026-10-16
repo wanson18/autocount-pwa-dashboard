@@ -1,7 +1,7 @@
 'use strict';
 
 const { AutoCountClient } = require('../lib/autocount/client');
-const { loadCompanyConfigs } = require('../lib/autocount/company-config');
+const { COMPANIES, loadCompanyConfigs } = require('../lib/autocount/company-config');
 const { loadPriceSource, priceCheckWindow } = require('../lib/price-check/source');
 const { compareApprovedInvoices } = require('../lib/price-check/compare');
 const defaultAuth = require('../lib/dispatch/auth');
@@ -11,7 +11,9 @@ const STORE_HEADERS = Object.freeze({
 });
 const ALLOWED_QUERY_KEYS = new Set(['range']);
 const ALLOWED_RANGES = new Set(['today', 'seven_days']);
-const EXPECTED_BOOKS = Object.freeze({ enterprise: '63750', sdn_bhd: '63688' });
+const EXPECTED_BOOKS = Object.freeze(Object.fromEntries(
+  COMPANIES.map((company) => [company.companyKey, company.accountBookId]),
+));
 const SAFE_SOURCE_CODES = new Set([
   'PRICE_SOURCE_INVALID',
   'PRICE_PROFILE_MISMATCH',
