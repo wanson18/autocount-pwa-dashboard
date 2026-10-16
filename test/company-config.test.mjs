@@ -124,6 +124,24 @@ test('the address comes from the per-company setting, then AUTOCOUNT_API_URL, th
   assert.equal(perCompany.sdn_bhd.apiUrl, 'https://sdn.example');
 });
 
+test('AUTOCOUNT_ENTERPRISE_API_URL is for Enterprise only, and a blank per-book address falls through', () => {
+  const enterpriseOnly = byKey(readCompanySettings({ ...OWN, AUTOCOUNT_API_URL: 'https://cloud.example', AUTOCOUNT_ENTERPRISE_API_URL: ' https://enterprise.example/ ' }));
+  assert.equal(enterpriseOnly.enterprise.apiUrl, 'https://enterprise.example');
+  assert.equal(enterpriseOnly.sdn_bhd.apiUrl, 'https://cloud.example');
+
+  const both = byKey(readCompanySettings({ ...OWN, AUTOCOUNT_ENTERPRISE_API_URL: 'https://enterprise.example', AUTOCOUNT_SDN_BHD_API_URL: 'https://sdn.example' }));
+  assert.deepEqual([both.enterprise.apiUrl, both.sdn_bhd.apiUrl], ['https://enterprise.example', 'https://sdn.example']);
+
+  const blankToShared = byKey(readCompanySettings({ ...OWN, AUTOCOUNT_API_URL: 'https://cloud.example', AUTOCOUNT_ENTERPRISE_API_URL: '  ', AUTOCOUNT_SDN_BHD_API_URL: '' }));
+  assert.deepEqual([blankToShared.enterprise.apiUrl, blankToShared.sdn_bhd.apiUrl], ['https://cloud.example', 'https://cloud.example']);
+
+  const blankToDefault = byKey(readCompanySettings({ ...OWN, AUTOCOUNT_API_URL: ' ', AUTOCOUNT_ENTERPRISE_API_URL: '', AUTOCOUNT_SDN_BHD_API_URL: '\t' }));
+  assert.deepEqual(
+    [blankToDefault.enterprise.apiUrl, blankToDefault.sdn_bhd.apiUrl],
+    ['https://accounting-api.autocountcloud.com', 'https://accounting-api.autocountcloud.com'],
+  );
+});
+
 test('problem messages name settings but never contain a value', () => {
   const secrets = {
     AUTOCOUNT_ENTERPRISE_API_KEY: 'secret-ent-key',

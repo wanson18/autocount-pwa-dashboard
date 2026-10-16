@@ -1076,6 +1076,44 @@ test('fetchAllInvoices accepts a list when an invoice is saved while the pages a
   assert.deepEqual(fake.calls.map((call) => call.page), fake.calls.map((_, index) => index + 1), 'no slice re-read was needed');
 });
 
+test('fetchAllInvoices logs one line per check level: count, date slices, or not checked', async (t) => {
+  const log = t.mock.method(console, 'log', () => {});
+  const error = t.mock.method(console, 'error', () => {});
+  const company = { name: 'Sample Book', accountBookId: '63750', apiUrl: 'https://autocount.invalid', apiKey: 'test-key', keyId: 'test-id' };
+  const row = (docKey) => ({ master: { docKey }, details: [] });
+  const linesOf = (mock) => mock.mock.calls.map((call) => call.arguments.join(' '));
+  const read = async (answers) => {
+    log.mock.resetCalls();
+    error.mock.resetCalls();
+    const client = clientOver({ get: async () => ({ status: 200, data: answers.shift() ?? { data: [] } }) });
+    const rows = await fetchAllInvoices('2026-09-01', '2026-09-01', company, client);
+    return { rows: rows && rows.length, logs: linesOf(log), errors: linesOf(error) };
+  };
+
+  assert.deepEqual(await read([{ data: [row('A'), row('B')], totalCount: 2 }]), {
+    rows: 2,
+    logs: ['Fetched 2 invoices for 2026-09-01 to 2026-09-01'],
+    errors: [],
+  });
+
+  // AutoCount lists A twice; the date-slice re-read then gets a clean answer.
+  assert.deepEqual(await read([
+    { data: [row('A'), row('A')], totalCount: 2 },
+    { data: [row('A'), row('B')], totalCount: 2 },
+  ]), {
+    rows: 2,
+    logs: ['Fetched 2 invoices for 2026-09-01 to 2026-09-01 (checked in date slices)'],
+    errors: ['AutoCount Sample Book listing for 2026-09-01 to 2026-09-01 cannot be trusted (an invoice is listed twice); re-reading in date slices'],
+  });
+
+  // Behaviour change 9: a listing without any total is accepted, and logged as unchecked.
+  assert.deepEqual(await read([{ data: [row('A'), row('B')] }, { data: [] }]), {
+    rows: 2,
+    logs: ['Fetched 2 invoices for 2026-09-01 to 2026-09-01 (no total count from AutoCount, so the list was not checked)'],
+    errors: [],
+  });
+});
+
 function responseRecorder() {
   return {
     statusCode: null,
@@ -1121,6 +1159,19 @@ test('normalizeInvoices lets a zero amount given as text fall through to the nex
 
   assert.equal(invoice.grandTotal, 25.5);
   assert.deepEqual(invoice.lineItems[0], { sku: 'A', description: '', quantity: 2, unitPrice: 0, total: 9.5 });
+});
+
+test('normalizeInvoices keeps the amount candidate order when both candidates are non-zero', () => {
+  const [invoice] = normalizeInvoices([{
+    master: { docNo: 'INV-T-2', finalTotal: '100', total: '90', grandTotal: '80' },
+    details: [{ productCode: 'A', qty: '3', quantity: '5', unitPrice: '2.50', subTotal: '30', total: '20' }],
+  }]);
+  const [withoutFinalTotal] = normalizeInvoices([{ master: { docNo: 'INV-T-3', total: '90', grandTotal: '80' }, details: [] }]);
+
+  assert.equal(invoice.grandTotal, 100, 'finalTotal comes before total');
+  assert.equal(withoutFinalTotal.grandTotal, 90, 'total comes before grandTotal');
+  assert.equal(invoice.lineItems[0].quantity, 3, 'qty comes before quantity');
+  assert.equal(invoice.lineItems[0].total, 30, 'subTotal comes before total');
 });
 
 test('normalizeInvoices treats a cancelled flag whose value is 1 as cancelled, in any spelling', () => {

@@ -232,6 +232,25 @@ test('the checked read stops at the page ceiling', async () => {
   );
 });
 
+test('the checked read stops after 100 page requests by default, not 1000', async () => {
+  // A listing that never ends: one new row per page and a total far out of reach.
+  let requests = 0;
+  const listPage = async ({ page }) => {
+    requests += 1;
+    if (requests > 1000) throw new Error('runaway read: no page ceiling stopped it');
+    return { data: [row(`K${page}`)], totalCount: 1000000 };
+  };
+  await assert.rejects(
+    () => readInvoicesChecked({ listPage, ...sameDay }),
+    (error) => {
+      assert.equal(error.code, 'PRICE_PAGE_INCOMPLETE');
+      assert.equal(requests, 100, 'MAX_PAGES (1000) belongs to the paged read, not to this one');
+      assert.deepEqual(error.detail, { page: 101, rowsRead: 100 });
+      return true;
+    },
+  );
+});
+
 test('the checked read needs a listPage function', async () => {
   await assert.rejects(() => readInvoicesChecked({ ...sameDay }), { code: 'PRICE_SOURCE_INVALID' });
 });
