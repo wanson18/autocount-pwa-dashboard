@@ -1,0 +1,55 @@
+{
+  "data": [
+    {
+      "master": {
+        "docKey": 9007199254740993,
+        "docNo": "INV-TEST-0001",
+        "docDate": "2026-09-24",
+        "debtorCode": "C-TEST-001",
+        "debtorName": "Sample Trading One",
+        "finalTotal": 0,
+        "total": 25.50,
+        "outstandingAmount": null,
+        "cancelled": false
+      },
+      "details": [
+        { "productCode": "ITEM-A", "description": "Sample cooking oil 5KG", "qty": 3.000, "unit": "BOX", "unitPrice": 10.50, "subTotal": 31.50 },
+        { "productCode": "ITEM-B", "description": "Sample discount", "qty": 1, "unit": "UNIT", "unitPrice": -6.00, "subTotal": -6.00 }
+      ]
+    },
+    {
+      "master": {
+        "docKey": 1001,
+        "docNo": "INV-TEST-0002",
+        "docDate": "2026-09-24",
+        "debtorCode": "C-TEST-002",
+        "debtorName": "Sample Trading Two",
+        "finalTotal": 999.99,
+        "outstandingAmount": 999.99,
+        "cancelled": true
+      },
+      "details": [
+        { "productCode": "ITEM-C", "description": "Sample flour 1KG", "qty": 9, "unit": "KG", "unitPrice": 111.11, "subTotal": 999.99 }
+      ]
+    },
+    {
+      "master": {
+        "docKey": 9007199254740992,
+        "docNo": "INV-TEST-0003",
+        "docDate": "2026-09-24",
+        "debtorCode": "C-TEST-002",
+        "debtorName": "Sample Trading Two",
+        "finalTotal": 110.00,
+        "total": 110.00,
+        "outstandingAmount": 40.00,
+        "isCancelled": false
+      },
+      "details": [
+        { "productCode": "ITEM-A", "description": "Sample cooking oil 5KG", "qty": 4, "unit": "BTL", "unitPrice": 2.50, "subTotal": 10.00 },
+        { "productCode": "ITEM-C", "description": "Sample flour 1KG", "qty": 2.5, "unit": "KG", "unitPrice": 40, "subTotal": 100.00 }
+      ]
+    }
+  ],
+  "totalCount": 3,
+  "pageSize": 100
+}

@@ -13,6 +13,23 @@ const {
   classifyPaymentStatus,
   computePaymentSummary,
 } = require('./sales.js');
+const fs = require('node:fs');
+const path = require('node:path');
+const { AutoCountClient } = require('../lib/autocount/client');
+
+// Serves a fake's answers as JSON text through the real AutoCountClient, so the
+// lossless parser and the shared reader run exactly as in production.
+function clientOver(fake) {
+  return new AutoCountClient({
+    baseUrl: 'https://accounting-api.autocountcloud.com',
+    http: {
+      async get(url, options) {
+        const response = await fake.get(url, options);
+        return { status: response.status, data: JSON.stringify(response.data) };
+      },
+    },
+  });
+}
 
 test('getCompanyConfigs maps both books to their matching credentials', () => {
   const configs = getCompanyConfigs({
@@ -134,22 +151,22 @@ test('fetchAllInvoices continues pagination when AutoCount omits totalCount', as
     apiKey: 'sdn-key',
     keyId: 'sdn-id',
   };
-  const httpClient = {
+  const client = clientOver({
     get: async (url, options) => {
       calls.push({ url, options });
       return pages.shift();
     },
-  };
+  });
 
-  const result = await fetchAllInvoices('2026-09-01', '2026-09-01', company, httpClient);
+  const result = await fetchAllInvoices('2026-09-01', '2026-09-01', company, client);
 
-  assert.deepEqual(result, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+  // The lossless parser hands numbers over as their exact text.
+  assert.deepEqual(result, [{ id: '1' }, { id: '2' }, { id: '3' }]);
   assert.equal(calls.length, 3);
   assert.equal(calls[0].url, 'https://accounting-api.autocountcloud.com/63688/invoice/listing');
   assert.deepEqual(calls[0].options.headers, {
     'API-Key': 'sdn-key',
     'Key-ID': 'sdn-id',
-    'Content-Type': 'application/json',
   });
   assert.deepEqual(calls.map(({ options }) => options.params.page), [1, 2, 3]);
 });
@@ -234,7 +251,7 @@ test('loadCompanyInvoices converts multipack quantities using the AutoCount prod
     },
     { status: 200, data: { data: [] } },
   ];
-  const httpClient = { get: async () => rawPages.shift() || { status: 200, data: { data: [] } } };
+  const client = clientOver({ get: async () => rawPages.shift() || { status: 200, data: { data: [] } } });
   const requested = [];
   const getProduct = async (sku) => {
     requested.push(sku);
@@ -254,7 +271,7 @@ test('loadCompanyInvoices converts multipack quantities using the AutoCount prod
       credentialsConfigured: true,
     },
     false,
-    { httpClient, getProduct },
+    { client, getProduct },
   );
 
   assert.equal(result.status, 'ok');
@@ -282,7 +299,7 @@ test('loadCompanyInvoices still returns invoices when the product master is unav
     },
     { status: 200, data: { data: [] } },
   ];
-  const httpClient = { get: async () => rawPages.shift() || { status: 200, data: { data: [] } } };
+  const client = clientOver({ get: async () => rawPages.shift() || { status: 200, data: { data: [] } } });
   const requested = [];
   const getProduct = async (sku) => {
     requested.push(sku);
@@ -302,7 +319,7 @@ test('loadCompanyInvoices still returns invoices when the product master is unav
       credentialsConfigured: true,
     },
     false,
-    { httpClient, getProduct },
+    { client, getProduct },
   );
 
   assert.equal(result.status, 'ok');
@@ -965,55 +982,55 @@ const keysOf = (rows) => rows.map((row) => row.master.docKey).sort();
 test('fetchAllInvoices returns every invoice exactly once when AutoCount pages repeat invoices', async () => {
   const invoices = invoicesOverDays(MIXED_DAYS);
   assert.ok(invoices.length > 1000, 'fixture must span many pages');
-  const httpClient = fakeAutoCount(invoices, { unstablePaging: true });
+  const fake = fakeAutoCount(invoices, { unstablePaging: true });
 
-  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, clientOver(fake));
 
-  assert.ok(Array.isArray(result), 'a verified result, not null');
+  assert.ok(Array.isArray(result), 'a checked result, not null');
   assert.equal(result.length, invoices.length);
   assert.deepEqual(keysOf(result), keysOf(invoices));
   assert.ok(
-    httpClient.calls.some((call) => call.startDate !== sliceDay(0) || call.endDate !== sliceDay(90)),
+    fake.calls.some((call) => call.startDate !== sliceDay(0) || call.endDate !== sliceDay(90)),
     'the range was re-read in narrower date slices',
   );
-  assert.ok(httpClient.maxActive <= 3, `at most 3 requests at once, saw ${httpClient.maxActive}`);
+  assert.ok(fake.maxActive <= 3, `at most 3 requests at once, saw ${fake.maxActive}`);
 });
 
 test('fetchAllInvoices reads a stable AutoCount page by page and makes no extra requests', async () => {
   const invoices = invoicesOverDays(MIXED_DAYS);
-  const httpClient = fakeAutoCount(invoices);
+  const fake = fakeAutoCount(invoices);
 
-  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, clientOver(fake));
 
   assert.deepEqual(keysOf(result), keysOf(invoices));
   const pages = Math.ceil(invoices.length / 100);
-  assert.deepEqual(httpClient.calls.map((call) => call.page), Array.from({ length: pages }, (_, index) => index + 1));
-  assert.ok(httpClient.calls.every((call) => call.startDate === sliceDay(0) && call.endDate === sliceDay(90)));
+  assert.deepEqual(fake.calls.map((call) => call.page), Array.from({ length: pages }, (_, index) => index + 1));
+  assert.ok(fake.calls.every((call) => call.startDate === sliceDay(0) && call.endDate === sliceDay(90)));
 });
 
 test('fetchAllInvoices does not accept a list whose rows do not add up to the reported total', async () => {
   const invoices = invoicesOverDays(MIXED_DAYS);
   // AutoCount reports N invoices but silently stops short of the last 5, on every kind of read.
-  const httpClient = fakeAutoCount(invoices, { dropTrailingRows: 5 });
+  const fake = fakeAutoCount(invoices, { dropTrailingRows: 5 });
 
-  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, clientOver(fake));
 
-  assert.equal(result, null, 'an unprovable result becomes "unavailable", never a wrong total');
+  assert.equal(result, null, 'an unchecked result becomes "unavailable", never a wrong total');
 });
 
 test('fetchAllInvoices refuses date slices that do not add up to the overall total', async () => {
   const invoices = invoicesOverDays(MIXED_DAYS);
-  const httpClient = fakeAutoCount(invoices, { unstablePaging: true, endExclusive: true });
+  const fake = fakeAutoCount(invoices, { unstablePaging: true, endExclusive: true });
 
-  assert.equal(await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient), null);
+  assert.equal(await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, clientOver(fake)), null);
 });
 
-test('loadCompanyInvoices still reports the book unavailable when no proven list can be read', async () => {
+test('loadCompanyInvoices still reports the book unavailable when no checked list can be read', async () => {
   const invoices = invoicesOverDays(MIXED_DAYS);
-  const httpClient = fakeAutoCount(invoices, { dropTrailingRows: 5 });
+  const fake = fakeAutoCount(invoices, { dropTrailingRows: 5 });
 
   const result = await loadCompanyInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, false, {
-    httpClient,
+    client: clientOver(fake),
     getProduct: async () => ({}),
   });
 
@@ -1022,12 +1039,12 @@ test('loadCompanyInvoices still reports the book unavailable when no proven list
   assert.deepEqual(result.invoices, []);
 });
 
-test('loadCompanyInvoices returns the full, verified list for a long range with unstable pages', async () => {
+test('loadCompanyInvoices returns the full, checked list for a long range with unstable pages', async () => {
   const invoices = invoicesOverDays(MIXED_DAYS);
-  const httpClient = fakeAutoCount(invoices, { unstablePaging: true });
+  const fake = fakeAutoCount(invoices, { unstablePaging: true });
 
   const result = await loadCompanyInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, false, {
-    httpClient,
+    client: clientOver(fake),
     getProduct: async () => ({}),
   });
 
@@ -1042,7 +1059,7 @@ test('fetchAllInvoices accepts a list when an invoice is saved while the pages a
   const extra = { ...newest, master: { ...newest.master, docKey: 'KEY-late', docNo: 'INV-late', docDate: sliceDay(90) } };
   const base = fakeAutoCount(invoices);
   let requests = 0;
-  const httpClient = {
+  const fake = {
     calls: base.calls,
     async get(url, options) {
       requests += 1;
@@ -1052,11 +1069,11 @@ test('fetchAllInvoices accepts a list when an invoice is saved while the pages a
     },
   };
 
-  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, httpClient);
+  const result = await fetchAllInvoices(sliceDay(0), sliceDay(90), SLICE_COMPANY, clientOver(fake));
 
   assert.ok(Array.isArray(result));
   assert.equal(result.length, invoices.length);
-  assert.deepEqual(httpClient.calls.map((call) => call.page), httpClient.calls.map((_, index) => index + 1), 'no slice re-read was needed');
+  assert.deepEqual(fake.calls.map((call) => call.page), fake.calls.map((_, index) => index + 1), 'no slice re-read was needed');
 });
 
 function responseRecorder() {
@@ -1094,4 +1111,116 @@ test('the sales API refuses an impossible calendar date before calling AutoCount
     assert.deepEqual(res.body, { success: false, error: 'startDate and endDate must be in YYYY-MM-DD format' });
   }
   assert.equal(attempts, 0, 'the handler must not try to reach AutoCount');
+});
+
+test('normalizeInvoices lets a zero amount given as text fall through to the next field, as a zero number did', () => {
+  const [invoice] = normalizeInvoices([{
+    master: { docNo: 'INV-T-1', finalTotal: '0', total: '25.50' },
+    details: [{ productCode: 'A', qty: '0', quantity: '2', unitPrice: '0.00', subTotal: '0', total: '9.5' }],
+  }]);
+
+  assert.equal(invoice.grandTotal, 25.5);
+  assert.deepEqual(invoice.lineItems[0], { sku: 'A', description: '', quantity: 2, unitPrice: 0, total: 9.5 });
+});
+
+test('normalizeInvoices treats a cancelled flag whose value is 1 as cancelled, in any spelling', () => {
+  const kept = normalizeInvoices([
+    { master: { docNo: 'A', cancelled: '1.0' }, details: [] },
+    { master: { docNo: 'B', isCancelled: 1 }, details: [] },
+    { master: { docNo: 'C', cancelled: true }, details: [] },
+    { master: { docNo: 'D', cancelled: '0' }, details: [] },
+    { master: { docNo: 'E', cancelled: false }, details: [] },
+    { master: { docNo: 'F' }, details: [] },
+  ]);
+
+  assert.deepEqual(kept.map((invoice) => invoice.docNo), ['D', 'E', 'F']);
+});
+
+const RAW_LISTING = fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'autocount-sales-raw-listing.json'), 'utf8');
+const RAW_PRODUCT = fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'autocount-sales-raw-product.json'), 'utf8');
+
+// A client over raw AutoCount JSON text, so the real lossless parser runs.
+function rawClient() {
+  const calls = [];
+  const client = new AutoCountClient({
+    baseUrl: 'https://accounting-api.autocountcloud.com',
+    http: {
+      async get(url, options) {
+        calls.push({ url, params: options.params });
+        if (url.endsWith('/invoice/listing')) {
+          return { status: 200, data: options.params.page === 1 ? RAW_LISTING : '{"data":[],"totalCount":3}' };
+        }
+        if (url.endsWith('/product')) return { status: 200, data: RAW_PRODUCT };
+        return { status: 404, data: '{}' };
+      },
+    },
+  });
+  client.calls = calls;
+  return client;
+}
+
+test('raw AutoCount JSON goes through the real client parser into the expected dashboard totals', async () => {
+  const client = rawClient();
+  const [enterprise] = getCompanyConfigs({ AUTOCOUNT_ENTERPRISE_API_KEY: 'k', AUTOCOUNT_ENTERPRISE_KEY_ID: 'i' });
+
+  const loaded = await loadCompanyInvoices('2026-09-24', '2026-09-24', enterprise, false, { client });
+  const result = combineCompanyResults([loaded], '2026-09-24', '2026-09-24', '2026-09-24T00:00:00.000Z');
+
+  // One listing page: document keys beyond 2^53 stay distinct as exact text, so
+  // they are not mistaken for repeats and no slice re-read happens.
+  assert.deepEqual(client.calls.map((call) => call.url.split('/').pop()), ['listing', 'product']);
+  assert.deepEqual(client.calls[1].params, { code: 'ITEM-A' });
+
+  const company = { companyId: 'enterprise', companyName: 'Wanson Enterprise' };
+  assert.equal(result.complete, true);
+  assert.equal(result.dataSource, 'live');
+  assert.deepEqual(result.kpis, {
+    totalRevenue: 135.5,
+    totalInvoices: 2,
+    totalItemsSold: 19.5,
+    avgOrderValue: 67.75,
+    topCustomer: { name: 'Sample Trading Two', revenue: 110, ...company },
+  });
+  assert.deepEqual(result.skuBreakdown, [
+    {
+      sku: 'ITEM-C', description: 'Sample flour 1KG', totalRevenue: 100, totalUnits: 2.5, orderCount: 1, totalCost: 100,
+      ...company, unit: 'KG', avgPricePerUnit: 40,
+      customers: [{ name: 'Sample Trading Two', quantity: 2.5, ...company }],
+    },
+    {
+      sku: 'ITEM-A', description: 'Sample cooking oil 5KG', totalRevenue: 41.5, totalUnits: 16, orderCount: 2, totalCost: 41.5,
+      ...company, unit: 'BTL', avgPricePerUnit: 2.59,
+      customers: [{ name: 'Sample Trading One', quantity: 12, ...company }, { name: 'Sample Trading Two', quantity: 4, ...company }],
+    },
+    {
+      sku: 'ITEM-B', description: 'Sample discount', totalRevenue: -6, totalUnits: 1, orderCount: 1, totalCost: -6,
+      ...company, unit: 'UNIT', avgPricePerUnit: -6,
+      customers: [{ name: 'Sample Trading One', quantity: 1, ...company }],
+    },
+  ]);
+  assert.deepEqual(result.invoices, [
+    {
+      docNo: 'INV-TEST-0001', docDate: '2026-09-24', customerName: 'Sample Trading One', grandTotal: 25.5,
+      outstandingAmount: null, paymentStatus: 'unknown', ...company, accountBookId: '63750',
+      lineItems: [
+        { sku: 'ITEM-A', description: 'Sample cooking oil 5KG', quantity: 3, unit: 'BOX', unitPrice: 10.5, total: 31.5 },
+        { sku: 'ITEM-B', description: 'Sample discount', quantity: 1, unit: 'UNIT', unitPrice: -6, total: -6 },
+      ],
+    },
+    {
+      docNo: 'INV-TEST-0003', docDate: '2026-09-24', customerName: 'Sample Trading Two', grandTotal: 110,
+      outstandingAmount: 40, paymentStatus: 'partial', ...company, accountBookId: '63750',
+      lineItems: [
+        { sku: 'ITEM-A', description: 'Sample cooking oil 5KG', quantity: 4, unit: 'BTL', unitPrice: 2.5, total: 10 },
+        { sku: 'ITEM-C', description: 'Sample flour 1KG', quantity: 2.5, unit: 'KG', unitPrice: 40, total: 100 },
+      ],
+    },
+  ]);
+  assert.deepEqual(result.paymentSummary, {
+    paid: { count: 0, total: 0 },
+    partial: { count: 1, outstanding: 40 },
+    unpaid: { count: 0, total: 0 },
+    unknown: { count: 1, total: 25.5 },
+    stillUnpaidTotal: 40,
+  });
 });
