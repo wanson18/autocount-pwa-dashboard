@@ -100,7 +100,7 @@ An acceptance test pins both facts (see Testing).
 
 ### 3. Checked read for Sales (`lib/autocount/invoice-reader.js`)
 
-New export `readInvoicesChecked({ listPage, accountBookId, startDate, endDate, maxPages = 100 })`. It moves Sales' current read here and reports exactly which check it passed. It keeps today's acceptance rules, with one exception: the stricter `totalCount` check below (behaviour change 10).
+New export `readInvoicesChecked({ listPage, accountBookId, startDate, endDate, maxPages = 100, onRecheck })`. It moves Sales' current read here and reports exactly which check it passed. `onRecheck(problem)`, when given, is called once just before the slice re-read in step 2; Sales logs its "cannot be trusted" line there. It keeps today's acceptance rules, with two exceptions: the stricter `totalCount` check below (behaviour change 10), and a `null` `totalCount`, which no longer ends the read (behaviour change 11).
 
 1. **Tolerant pass, page by page from page 1.** Each page goes through these steps in order:
    - **Shape.** The page must be an object whose `data` is an array. Otherwise the page is malformed and the read throws.
@@ -214,7 +214,7 @@ The date-and-time parsing that the adapter and compare do around the check stays
   - The "Verified invoice reads" section becomes "Checked invoice reads". It states the guarantee from section 3 (checked against the count, or in date slices; not a consistent snapshot) and drops "proven".
 - **`agents.md`:**
   - The AutoCount access line now covers Sales too.
-  - A rule says company books, key names and the address come only from `lib/autocount/company-config.js`, and AutoCount numbers are read only through `lib/autocount/numbers.js`.
+  - A rule says company books, key names and the address come only from `lib/autocount/company-config.js`. For AutoCount numbers it follows section 4: Sales reads amounts, quantities, page sizes and cancelled flags through `lib/autocount/numbers.js`; `outstandingAmount` and the product `multiPackRate` keep today's parsing; Dispatch and Price Check keep decimal text exact in their own adapters; `totalCount` is the one field the client makes a Number.
   - The invoice-reads rule uses the section 3 wording.
 
 ## Behaviour changes (complete list)
@@ -229,12 +229,18 @@ The date-and-time parsing that the adapter and compare do around the check stays
 8. Sales reads AutoCount values by the section 4 table. For number tokens, missing values and `null`, the results equal today's. The edge cases listed there can differ: string tokens in number fields, numbers beyond double range, and a `docKey` beyond 2^53.
 9. A list without a total count is still accepted by Sales, but is now logged as unchecked.
 10. A page whose `totalCount` is present but not a non-negative safe integer now makes that book unavailable. Today Sales accepted such a list unchecked when the value was fractional, non-finite, beyond the safe range or text, and failed it only during the slice re-read when the value was negative. The step 0 probe checks the total AutoCount sent in the probed range.
+11. A listing page whose `totalCount` is `null` used to end Sales' read after that page (`Number(null)` is 0, so the rows read so far already met it). Now `null` means "no total" for that page, as a missing `totalCount` already did, and reading goes on under the section 3 stop rules: an empty page, a page with a total that the rows read so far reach, or a page without a total that is shorter than a page size AutoCount gives. With no total on any page, the list is accepted and logged as unchecked (item 9). Pinned by `test/invoice-reader.test.mjs` (about line 100, "checked read without any total stops at an empty page and reports check none").
+12. (log only) In Sales' page-by-page pass, a page whose `data` is not an array, or a body that is not valid JSON, still makes the book unavailable, as before, but no longer silently: it now logs "AutoCount API error: Cloud invoice page is malformed" or "AutoCount API error: AutoCount returned invalid JSON" (`lib/autocount/invoice-reader.js` about lines 357-359, `lib/autocount/client.js` about lines 5-13, `api/sales.js` about lines 78-80).
+13. (log only) The Sales page-ceiling message changed from `AutoCount pagination exceeded 100 pages for <name>` to `Cloud invoice listing exceeded the page ceiling` (`invoice-reader.js` about line 351). It is still 100 requests.
+14. A Sales listing answered with a 2xx status other than 200 (for example 203 or 206) used to make the book unavailable. The shared client accepts any 2xx (`client.js` about line 62), so such a page is now read.
+15. For Dispatch and Price Check, the company's own address (trimmed, every trailing slash removed) now always wins over the client's base address. The old client used `AUTOCOUNT_API_URL` untrimmed, so a space at its end went into every request address (after the host, a space makes the address invalid); it is now trimmed. The constructor's `baseUrl` no longer overrides a company's address (no production caller passes one) (`client.js` `urlFor`, about lines 43-47).
+16. The text "Account book setting does not match" now reaches `/api/sales` in `warnings` and `companies[].error` when a book-number setting differs from the fixed number, which is how item 1 shows on the dashboard (`api/sales.js` about line 38; section 1 already calls the text new).
 
 Items 1 to 5 depend on the Vercel settings, which this branch cannot see. Both books loading today does not show that the aliases or addresses agree. Before merging, the release gate in Shipping finds possible conflicts by setting name, and the owner settles each one by comparing values.
 
 ## Unchanged
 
-- Every API response shape and value for valid requests, apart from the section 4 edge cases and behaviour changes 6 and 10:
+- Every API response shape and value for valid requests, apart from the section 4 edge cases, behaviour changes 6, 10, 11 and 14, and, where the settings make them apply, behaviour changes 1 to 5, 15 and 16:
   - `/api/sales`, including company IDs `enterprise` / `sdnBhd`, names, warnings and `complete`
   - `/api/price-check`
   - `/api/dispatch/*`
@@ -298,7 +304,7 @@ Tests are written before the code, in this worktree. Baseline on `04af0d1`: `npm
 - **Raw-JSON fixtures** (new, invented data, read as text and shaped by the step 0 probe): `test/fixtures/autocount-sales-raw-listing.json` and `test/fixtures/autocount-sales-raw-product.json`. They run through the real client parser into `fetchAllInvoices`, `loadCompanyInvoices` and `combineCompanyResults`, against hand-computed totals. They cover:
   - a zero `finalTotal` with a non-zero `total`
   - a negative line
-  - numeric and boolean cancelled flags
+  - numeric and boolean cancelled flags (deviation: the step 0 probe saw only boolean `cancelled` flags and no `isCancelled`, so the fixture holds booleans, and the numeric spellings are unit-tested in `api/sales.test.js`, in "normalizeInvoices treats a cancelled flag whose value is 1 as cancelled, in any spelling")
   - `qty` such as `3.000`
   - `outstandingAmount` both `null` and set
   - a `docKey` beyond 2^53
