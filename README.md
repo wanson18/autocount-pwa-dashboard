@@ -89,7 +89,7 @@ Variables:
 | `DISPATCH_SESSION_SECRET`   | Base64url for exactly 32 random secret bytes |
 | `DISPATCH_PUBLIC_ACCESS`     | `true` deliberately disables dispatch credential checks |
 
-The old single-book `AUTOCOUNT_COMPANY_ID` setting does not select a book in this integration. Enterprise may use the old shared pair (`AUTOCOUNT_API_KEY` with `AUTOCOUNT_KEY_ID` or `AUTOCOUNT_API_KEY_ID`) instead of its own credentials; Sdn Bhd never does (see Company settings). A complete live result needs both books' credentials: if either book's are missing or refused, the dashboard reports which book is unavailable, and Dispatch and Price Check stop reading AutoCount for both books.
+The old single-book `AUTOCOUNT_COMPANY_ID` setting does not select a book in this integration. Enterprise may use the old shared pair (`AUTOCOUNT_API_KEY` with `AUTOCOUNT_KEY_ID` or `AUTOCOUNT_API_KEY_ID`) instead of its own credentials; Sdn Bhd never does (see Company settings). A complete live result needs both books' credentials: if either book's are missing or refused by the settings rules (see Company settings), the dashboard reports which book is unavailable, and Dispatch and Price Check stop reading AutoCount for both books.
 
 #### Company settings
 
