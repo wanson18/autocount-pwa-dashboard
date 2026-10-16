@@ -1071,7 +1071,18 @@ function responseRecorder() {
   };
 }
 
-test('the sales API refuses an impossible calendar date before calling AutoCount', async () => {
+test('the sales API refuses an impossible calendar date before calling AutoCount', async (t) => {
+  // The handler reads the real environment, which can hold live AutoCount keys.
+  // Refuse every outbound request (axios's Node adapter goes through these two),
+  // so a broken date check fails here instead of calling AutoCount.
+  let attempts = 0;
+  const refuse = () => {
+    attempts += 1;
+    throw new Error('network access is not allowed in this test');
+  };
+  t.mock.method(require('node:https'), 'request', refuse);
+  t.mock.method(require('node:http'), 'request', refuse);
+
   const handler = require('./sales.js');
   for (const query of [
     { startDate: '2026-02-31', endDate: '2026-03-01' },
@@ -1082,4 +1093,5 @@ test('the sales API refuses an impossible calendar date before calling AutoCount
     assert.equal(res.statusCode, 400, JSON.stringify(query));
     assert.deepEqual(res.body, { success: false, error: 'startDate and endDate must be in YYYY-MM-DD format' });
   }
+  assert.equal(attempts, 0, 'the handler must not try to reach AutoCount');
 });
