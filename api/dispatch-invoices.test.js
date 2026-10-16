@@ -514,13 +514,19 @@ test('AutoCount client preserves a decimal quantity lexeme at the HTTP boundary'
   assert.equal(payload.data[0].details[0].qty, '0.100000000000000005');
 });
 
-test('env example keeps legacy Sales variables alongside dispatch variables', () => {
+test('env example documents the one rule set for both books', () => {
   const envExample = fs.readFileSync(path.join(__dirname, '..', '.env.example'), 'utf8');
 
-  assert.match(envExample, /^AUTOCOUNT_API_URL=/m);
-  assert.match(envExample, /^AUTOCOUNT_API_KEY=/m);
-  assert.match(envExample, /^AUTOCOUNT_KEY_ID=/m);
-  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_ID=/m);
-  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE=/m);
-  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD=/m);
+  for (const name of [
+    'AUTOCOUNT_API_URL', 'AUTOCOUNT_ENTERPRISE_API_URL', 'AUTOCOUNT_SDN_BHD_API_URL',
+    'AUTOCOUNT_ENTERPRISE_API_KEY', 'AUTOCOUNT_ENTERPRISE_KEY_ID', 'AUTOCOUNT_SDN_BHD_API_KEY', 'AUTOCOUNT_SDN_BHD_KEY_ID',
+    'AUTOCOUNT_API_KEY_WANSON_ENTERPRISE', 'AUTOCOUNT_KEY_ID_WANSON_ENTERPRISE',
+    'AUTOCOUNT_API_KEY_WANSON_SDN_BHD', 'AUTOCOUNT_KEY_ID_WANSON_SDN_BHD',
+    'AUTOCOUNT_API_KEY', 'AUTOCOUNT_KEY_ID', 'AUTOCOUNT_API_KEY_ID',
+  ]) {
+    assert.match(envExample, new RegExp(`^${name}=`, 'm'), name);
+  }
+  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_WANSON_ENTERPRISE=63750$/m);
+  assert.match(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_WANSON_SDN_BHD=63688$/m);
+  assert.doesNotMatch(envExample, /^AUTOCOUNT_ACCOUNT_BOOK_ID=/m);
 });

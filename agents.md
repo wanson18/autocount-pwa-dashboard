@@ -15,7 +15,7 @@ Beyond the dashboard home page the app ships Delivery Dispatch, Price Check, Tod
 ## Tech Stack
 
 - **Middleware:** Node.js serverless functions in `api/` (Vercel, no Express).
-- **AutoCount access:** `axios` + `lossless-json` through `lib/autocount/client.js`.
+- **AutoCount access:** `axios` + `lossless-json` through `lib/autocount/client.js`, for Sales, Dispatch and Price Check alike. Company books, key names and addresses come only from `lib/autocount/company-config.js`. The client hands numeric tokens over as exact text, so read AutoCount numbers only through `lib/autocount/numbers.js` (never rely on truthiness: `"0"` is truthy).
 - **Dispatch persistence:** PostgreSQL via `pg`; schema in `db/migrations/`.
 - **Frontend:** static HTML5 + Tailwind CSS (CDN, spacing and layout helpers) + `public/theme.css` (all colours and components); no build step. Charts are plain HTML/CSS (no Chart.js).
 - **PWA:** `public/manifest.json` plus a versioned service worker cache.
@@ -50,7 +50,7 @@ autocount-pwa-dashboard/
   - If the product lookup fails, or a unit has no MultiPack that explains it, leave that SKU's quantities raw rather than guessing.
   - `totalCost` stays priced per raw invoice unit.
 - Cancelled invoices are excluded. `USE_MOCK_DATA=true` serves `api/mock-sales.json` for Enterprise only.
-- Invoice reads are verified (`lib/autocount/invoice-reader.js`, shared with Price Check). AutoCount's page-by-page listing can repeat invoices on large ranges (live, 91 days: 9 invoices twice, 9 missing, revenue about 1.3% off, no error). After the normal read, `fetchAllInvoices` checks that the rows equal `totalCount` with no repeated `docKey`; if not, it re-reads in date slices, and if completeness still cannot be proven it returns `null` (the book shows as unavailable) rather than wrong totals. Never loosen this check to make a range load.
+- Invoice reads are checked (`readInvoicesChecked` in `lib/autocount/invoice-reader.js`, next to Price Check's flow). AutoCount's page-by-page listing can repeat invoices on large ranges (live, 91 days: 9 invoices twice, 9 missing, revenue about 1.3% off, no error). After the normal read, the rows must equal AutoCount's latest `totalCount` with no repeated `docKey`; a count mismatch or a repeated document triggers a re-read in date slices, and if that re-read fails too, `fetchAllInvoices` returns `null` (the book shows as unavailable) rather than wrong totals. A `totalCount` that is present but not a non-negative safe integer fails the book. These checks catch repeated and missing rows; they cannot prove a consistent snapshot while invoices change during the read. Never loosen this check to make a range load.
 
 ## Delivery Dispatch UOM Rule (contrast)
 
@@ -59,7 +59,7 @@ autocount-pwa-dashboard/
 ## Price Check Rules (`api/price-check.js`, `lib/price-check/`)
 
 - Read-only and protected: it needs a real signed clerk session (`verifySessionCookie`), never the synthetic public-dispatch session, and every response is `no-store`.
-- Each book is read page by page first (shared reader: `lib/autocount/invoice-reader.js`). AutoCount's paging returned repeated invoices on large date ranges, so a duplicate document, a changing total, or a short or long list triggers one re-read in date slices that each fit on one page. Both reads must prove completeness (no document twice, slice totals equal to the overall total). Never relax these checks to make a failing book pass; fail the book instead.
+- Each book is read page by page first (shared reader: `lib/autocount/invoice-reader.js`). AutoCount's paging returned repeated invoices on large date ranges, so a duplicate document, a changing total, or a short or long list triggers one re-read in date slices that each fit on one page. Both reads must pass the completeness checks (no document twice, slice totals equal to the overall total). Never relax these checks to make a failing book pass; fail the book instead.
 - `counts.skipped*` describe the monitored window only, not the 90-day history baseline.
 - A failed book is `PARTIAL`, never an empty success. Failure details are integers and booleans only (no invoice or customer data).
 
