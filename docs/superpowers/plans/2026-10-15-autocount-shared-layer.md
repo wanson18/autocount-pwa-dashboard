@@ -24,7 +24,7 @@
 - **Public repo.** New fixtures use invented data only.
 - **Dependencies.** No new ones, and no `npm install`. `node_modules` resolves from `D:\autocount-pwa-dashboard` because the worktree is nested inside it.
 - **Where to run.** Run every command in Git Bash from the worktree root: `D:/autocount-pwa-dashboard/.claude/worktrees/autocount-shared-layer`.
-- **Scratch folder.** `SCRATCH=C:/Users/wanso/AppData/Local/Temp/claude/D--autocount-pwa-dashboard/93d7b131-4d1e-411c-9bc7-afc94adb37fa/scratchpad`. Scripts here are never committed.
+- **Scratch folder.** `$SCRATCH` is the session's scratch folder. Scripts here are never committed.
 - **Playwright.**
   - Run it as `node D:/autocount-pwa-dashboard/node_modules/@playwright/test/cli.js test <spec> --output "$SCRATCH/pw-out"`.
   - Run one spec at a time, because every spec binds port 4173.
@@ -92,7 +92,7 @@ Expected: `ℹ tests 408`, `ℹ pass 407`, `ℹ fail 0`, `ℹ skipped 1`. The sk
 - [ ] **Step 3: Record the Playwright baseline, one spec at a time**
 
 ```bash
-SCRATCH=C:/Users/wanso/AppData/Local/Temp/claude/D--autocount-pwa-dashboard/93d7b131-4d1e-411c-9bc7-afc94adb37fa/scratchpad
+SCRATCH="<the session's scratch folder>"
 PW=D:/autocount-pwa-dashboard/node_modules/@playwright/test/cli.js
 node "$PW" test test/e2e/dispatch-board.spec.js --output "$SCRATCH/pw-out" 2>&1 | tail -4
 node "$PW" test test/e2e/dispatch-print-report.spec.js --output "$SCRATCH/pw-out" 2>&1 | tail -4

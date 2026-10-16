@@ -15,7 +15,7 @@ Beyond the dashboard home page the app ships Delivery Dispatch, Price Check, Tod
 ## Tech Stack
 
 - **Middleware:** Node.js serverless functions in `api/` (Vercel, no Express).
-- **AutoCount access:** `axios` + `lossless-json` through `lib/autocount/client.js`, for Sales, Dispatch and Price Check alike. Company books, key names and addresses come only from `lib/autocount/company-config.js`. The client hands numeric tokens over as exact text, so read AutoCount numbers only through `lib/autocount/numbers.js` (never rely on truthiness: `"0"` is truthy).
+- **AutoCount access:** `axios` + `lossless-json` through `lib/autocount/client.js`, for Sales, Dispatch and Price Check alike. Company books, key names and addresses come only from `lib/autocount/company-config.js`. The client hands numeric tokens over as exact text; `totalCount` is the one field it makes a Number. In Sales, amounts, quantities, page sizes and cancelled flags are read through `lib/autocount/numbers.js` (never rely on truthiness: `"0"` is truthy), while `outstandingAmount` and the product `multiPackRate` keep their own parsing. Dispatch and Price Check keep AutoCount decimal text exact in their own adapters.
 - **Dispatch persistence:** PostgreSQL via `pg`; schema in `db/migrations/`.
 - **Frontend:** static HTML5 + Tailwind CSS (CDN, spacing and layout helpers) + `public/theme.css` (all colours and components); no build step. Charts are plain HTML/CSS (no Chart.js).
 - **PWA:** `public/manifest.json` plus a versioned service worker cache.
@@ -27,7 +27,8 @@ Beyond the dashboard home page the app ships Delivery Dispatch, Price Check, Tod
 autocount-pwa-dashboard/
 ├── api/                 # sales.js, price-check.js, dispatch-*.js, mock-sales.json
 ├── lib/
-│   ├── autocount/       # AutoCount API client and company config
+│   ├── autocount/       # AutoCount client, company config, checked invoice reader, number reader
+│   ├── dates.js         # calendar dates as YYYY-MM-DD: isIsoDate, todayIn, addDays, diffDays
 │   ├── db/              # Postgres pool
 │   ├── dispatch/        # auth, invoice adapter, loading sheet, repository, service
 │   └── price-check/     # invoice source and price comparison
