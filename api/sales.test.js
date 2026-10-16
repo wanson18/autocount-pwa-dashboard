@@ -186,9 +186,9 @@ test('loadCompanyInvoices converts multipack quantities using the AutoCount prod
         data: [
           {
             master: {
-              docNo: 'CS-035525',
+              docNo: 'INV-TEST-0001',
               docDate: '2026-09-24',
-              debtorName: 'INFLOW GLOBALL MARKETING SDN BHD',
+              debtorName: 'Sample Trading One',
               finalTotal: '13144.00',
               outstandingAmount: '13144.00',
             },
@@ -239,7 +239,7 @@ test('loadCompanyInvoices still returns invoices when the product master is unav
       data: {
         data: [
           {
-            master: { docNo: 'CS-035525', docDate: '2026-09-24', debtorName: 'INFLOW GLOBALL MARKETING SDN BHD', finalTotal: '11800.00' },
+            master: { docNo: 'INV-TEST-0001', docDate: '2026-09-24', debtorName: 'Sample Trading One', finalTotal: '11800.00' },
             details: [
               { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '100', unit: 'BOX', unitPrice: '118', subTotal: '11800' },
               { productCode: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', qty: '30', unit: 'BTL', unitPrice: '28', subTotal: '840' },
@@ -465,21 +465,21 @@ test('resolveMultiPackRates converts multipack lines to the item base unit for m
   const invoices = [
     {
       companyId: 'sdnBhd',
-      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      customerName: 'Sample Trading One',
       lineItems: [
         { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitPrice: 118, total: 11800 },
       ],
     },
     {
       companyId: 'sdnBhd',
-      customerName: 'ONG ST ENTERPRISE',
+      customerName: 'Sample Trading Two',
       lineItems: [
         { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitPrice: 28, total: 840 },
       ],
     },
     {
       companyId: 'sdnBhd',
-      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      customerName: 'Sample Trading One',
       lineItems: [
         { sku: '1110100005', description: 'MINYAK MASAK 1KG 食油', quantity: 200, unit: 'BTL', unitPrice: 6, total: 1200 },
       ],
@@ -506,7 +506,7 @@ test('resolveMultiPackRates leaves mixed-unit quantities untouched when the prod
   const invoices = [
     {
       companyId: 'sdnBhd',
-      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      customerName: 'Sample Trading One',
       lineItems: [
         { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitPrice: 118, total: 11800 },
         { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitPrice: 28, total: 840 },
@@ -550,7 +550,7 @@ test('aggregateBySKU counts multipack lines in the item base unit', () => {
     {
       companyId: 'sdnBhd',
       companyName: 'Wanson Sdn Bhd',
-      customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+      customerName: 'Sample Trading One',
       lineItems: [
         { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 100, unit: 'BOX', unitRate: 4, baseUnit: 'BTL', unitPrice: 118, total: 11800 },
       ],
@@ -558,7 +558,7 @@ test('aggregateBySKU counts multipack lines in the item base unit', () => {
     {
       companyId: 'sdnBhd',
       companyName: 'Wanson Sdn Bhd',
-      customerName: 'ONG ST ENTERPRISE',
+      customerName: 'Sample Trading Two',
       lineItems: [
         { sku: '1110100002', description: 'MINYAK MASAK TOMATO MERAH 5KG 食油', quantity: 30, unit: 'BTL', unitRate: 1, baseUnit: 'BTL', unitPrice: 28, total: 840 },
       ],
@@ -572,8 +572,8 @@ test('aggregateBySKU counts multipack lines in the item base unit', () => {
   assert.equal(sku.totalCost, 12640);
   assert.equal(sku.avgPricePerUnit, 29.4);
   assert.deepEqual(sku.customers, [
-    { name: 'INFLOW GLOBALL MARKETING SDN BHD', quantity: 400, companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd' },
-    { name: 'ONG ST ENTERPRISE', quantity: 30, companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd' },
+    { name: 'Sample Trading One', quantity: 400, companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd' },
+    { name: 'Sample Trading Two', quantity: 30, companyId: 'sdnBhd', companyName: 'Wanson Sdn Bhd' },
   ]);
 });
 
@@ -608,9 +608,9 @@ test('combineCompanyResults converts multipack lines before computing units sold
         dataSource: 'live',
         invoices: [
           {
-            docNo: 'CS-035525',
+            docNo: 'INV-TEST-0001',
             docDate: '2026-09-24',
-            customerName: 'INFLOW GLOBALL MARKETING SDN BHD',
+            customerName: 'Sample Trading One',
             grandTotal: 13144,
             outstandingAmount: 13144,
             lineItems: [
@@ -775,9 +775,9 @@ test('normalizeInvoices keeps the AutoCount line unit so multipack quantities ca
   const [invoice] = normalizeInvoices([
     {
       master: {
-        docNo: 'CS-035525',
+        docNo: 'INV-TEST-0001',
         docDate: '2026-09-24',
-        debtorName: 'INFLOW GLOBALL MARKETING SDN BHD',
+        debtorName: 'Sample Trading One',
         finalTotal: '13144.00',
       },
       details: [
