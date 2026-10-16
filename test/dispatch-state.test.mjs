@@ -1119,19 +1119,19 @@ test('snake-case trips join the protected driver and lorry catalog', () => {
 test('invoice search matches customer, document, and item text case-insensitively', () => {
   const state = createDispatchState({
     invoices: [
-      { companyKey: 'enterprise', invoiceId: 'naina-001', docKey: 'naina-001', docNo: 'ENT-101', customer: { name: 'Naina Trading' }, items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '2', uom: 'CTN' }] },
+      { companyKey: 'enterprise', invoiceId: 'sample-001', docKey: 'sample-001', docNo: 'ENT-101', customer: { name: 'Sample Trading Three' }, items: [{ itemCode: 'OIL-5KG', description: 'Cooking Oil 5KG', quantity: '2', uom: 'CTN' }] },
       { companyKey: 'sdn_bhd', invoiceId: 'other-001', docKey: 'other-001', docNo: 'SDN-202', customer: { name: 'Other Mart' }, items: [{ itemCode: 'SUGAR-1KG', description: 'Sugar', quantity: '1', uom: 'PKT' }] },
     ],
     trips,
   });
 
   assert.deepEqual(
-    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'naina')).map(getInvoiceKey),
-    ['enterprise:naina-001'],
+    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'sample')).map(getInvoiceKey),
+    ['enterprise:sample-001'],
   );
   assert.deepEqual(
-    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'NAINA')).map(getInvoiceKey),
-    ['enterprise:naina-001'],
+    visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'SAMPLE')).map(getInvoiceKey),
+    ['enterprise:sample-001'],
   );
   assert.deepEqual(
     visibleUnassignedInvoices(dispatchState.setSearchQuery(state, 'sdn-202')).map(getInvoiceKey),
@@ -1148,18 +1148,18 @@ test('invoice search matches customer, document, and item text case-insensitivel
 test('invoice search narrows trip lanes and survives board reload', () => {
   const state = createDispatchState({
     invoices: [
-      { companyKey: 'enterprise', invoiceId: 'naina-001', docKey: 'naina-001', docNo: 'ENT-101', customer: { name: 'Naina Trading' }, items: [] },
+      { companyKey: 'enterprise', invoiceId: 'sample-001', docKey: 'sample-001', docNo: 'ENT-101', customer: { name: 'Sample Trading Three' }, items: [] },
       { companyKey: 'enterprise', invoiceId: 'other-001', docKey: 'other-001', docNo: 'ENT-102', customer: { name: 'Other Mart' }, items: [] },
     ],
-    trips: [{ ...trips[0], invoiceKeys: ['enterprise:naina-001', 'enterprise:other-001'] }],
+    trips: [{ ...trips[0], invoiceKeys: ['enterprise:sample-001', 'enterprise:other-001'] }],
   });
-  const searched = dispatchState.setSearchQuery(state, 'naina');
+  const searched = dispatchState.setSearchQuery(state, 'sample');
 
-  assert.deepEqual(getTripInvoices(searched, 'trip-001').map(getInvoiceKey), ['enterprise:naina-001']);
+  assert.deepEqual(getTripInvoices(searched, 'trip-001').map(getInvoiceKey), ['enterprise:sample-001']);
 
   const reloaded = reloadDispatchState(searched, { invoices: state.invoices, trips: state.trips, assignments: [] });
-  assert.equal(reloaded.searchQuery, 'naina');
-  assert.deepEqual(getTripInvoices(reloaded, 'trip-001').map(getInvoiceKey), ['enterprise:naina-001']);
+  assert.equal(reloaded.searchQuery, 'sample');
+  assert.deepEqual(getTripInvoices(reloaded, 'trip-001').map(getInvoiceKey), ['enterprise:sample-001']);
 });
 
 test('quarantined source rows are counted in state for the board notice', () => {
