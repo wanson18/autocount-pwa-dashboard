@@ -159,7 +159,11 @@ test('compact A4 loading sheet fits ordinary loads and paginates long physical l
     return (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) || []).length;
   };
   expect(await pages()).toBe(1);
-  expect(await page.locator('[aria-labelledby="checklistTitle"]').evaluate((el) => el.getBoundingClientRect().top)).toBeLessThan(await page.locator('[aria-labelledby="itemsTitle"]').evaluate((el) => el.getBoundingClientRect().top));
+  await expect(page.locator('.summary-grid')).toHaveCSS('border-top-style', 'solid');
+  await expect(page.locator('.summary-cell')).toHaveCount(4);
+  await expect(page.locator('.summary-cell').first()).toHaveCSS('border-top-width', '0px');
+  await expect(page.locator('.items-table')).toHaveCSS('font-size', '11px');
+  expect(await page.locator('[aria-labelledby="checklistTitle"]').evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThan(await page.locator('[aria-labelledby="itemsTitle"]').evaluate((el) => el.getBoundingClientRect().top));
   printSheet.items = Array.from({ length: 80 }, (_, i) => ({ ...sheet.items[0], itemCode: `ITEM-${i}` }));
   await page.reload();
   await expect(page.locator('.items-table tbody tr')).toHaveCount(80);

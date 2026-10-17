@@ -207,15 +207,15 @@ h3 {
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--ground);
 }
 
 .summary-cell {
   min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--ground);
+  padding: 8px 10px;
 }
 
 .summary-cell dt {
@@ -544,30 +544,30 @@ td {
   }
 }
 
-/* Keep the invoice checklist ahead of physical-load overflow on paper. */
+/* Compact paper layout preserves physical load before the invoice checklist. */
 @media print {
   @page { size: A4; margin: 10mm; }
-  body { font-size: 12px; line-height: 1.2; }
+  body { font-size: 11px; line-height: 1.15; }
   .loading-header { padding-bottom: 2mm; }
-  h1 { font-size: 18px; }
-  h2 { font-size: 14px; }
+  h1 { font-size: 16px; }
+  h2 { font-size: 13px; }
   .sheet-content { display: flex; flex-direction: column; gap: 3mm; }
   .trip-panel { order: 0; }
-  .sheet-panel[aria-labelledby="checklistTitle"] { order: 1; }
-  .sheet-panel[aria-labelledby="itemsTitle"] { order: 2; }
+  .sheet-panel[aria-labelledby="checklistTitle"] { order: 2; }
+  .sheet-panel[aria-labelledby="itemsTitle"] { order: 1; }
   .sheet-panel-heading { margin-bottom: 1.5mm; break-after: avoid; }
-  .summary-grid { gap: 2mm; margin: 2mm 0; }
-  .summary-cell { padding: 1.5mm; }
-  .summary-cell dd { font-size: 12px; white-space: normal; overflow: visible; }
-  .route-notes { margin-top: 2mm; font-size: 12px; }
-  table { font-size: 12px; }
-  th, td { padding: 1mm 1.5mm; }
+  .summary-grid { gap: 0; margin: 1.5mm 0; border-color: #d1d5db; border-radius: 0; }
+  .summary-cell { padding: 1mm 1.5mm; border: 0; background: transparent; }
+  .summary-cell dd { font-size: 11px; white-space: normal; overflow: visible; }
+  .route-notes { margin-top: 2mm; font-size: 11px; }
+  table, th, .company-badge, .customer-code, .audit-time, .summary-cell dt, .eyebrow { font-size: 11px; }
+  th, td { padding: 0.8mm 1.5mm; }
   .company-badge { min-height: 0; padding: 0.5mm 1mm; }
   .checklist-table td:first-child { width: auto; }
   .checklist-table .customer-cell, .items-table td:nth-child(2) { min-width: 0; }
-  .check-field { min-width: 0; gap: 1mm; font-size: 12px; }
+  .check-field { min-width: 0; gap: 1mm; font-size: 11px; }
   .blank-line { min-width: 12mm; }
   .signoff-grid { margin-top: 3mm; padding-top: 2mm; gap: 4mm; break-inside: avoid; }
-  .signoff-cell { font-size: 12px; }
+  .signoff-cell { font-size: 11px; }
   .trip-panel { break-inside: avoid; }
 }
