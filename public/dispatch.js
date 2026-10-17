@@ -784,7 +784,7 @@ export function createDispatchApp({
   function editResource(type, id) {
     if (!resourceWritesEnabled()) return;
     const resource = resources[type === 'driver' ? 'drivers' : 'lorries'].find((row) => String(row.id) === String(id));
-    if (!resource) return;
+    if (!resource) { setResourceMessage('This resource is no longer in the current list. Reopen Resources to refresh it, then try again.'); return; }
     editingResource = { type, id: resource.id };
     resourceType.value = type;
     for (const [field, key] of [['resourceName', 'name'], ['resourceLicenseNo', 'licenseNo'], ['resourcePhone', 'phone'], ['resourceRegistrationNo', 'registrationNo'], ['resourceDescription', 'description']]) {
