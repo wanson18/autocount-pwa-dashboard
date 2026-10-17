@@ -257,7 +257,8 @@ export function createDispatchState({
     if (key) assignedByKey.set(key, assignment);
   });
   const normalizedTrips = trips.filter((trip) => trip.status !== 'cancelled').map((trip) => normalizeTrip(trip, activeAssignments, resources, isShown))
-    .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }));
+    .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }))
+    .sort((left, right) => Number(right.id) - Number(left.id));
   const normalizedInvoices = invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips, assignedByKey));
   const invoiceKeys = new Set(normalizedInvoices.map((invoice) => invoice.key));
   for (const assignment of assignedByKey.values()) {
@@ -422,18 +423,20 @@ export function getLorryLanes(state, resources = {}) {
     if (lane) lane.trips.push(trip);
   }
   return [...lanes.values()].sort((left, right) => {
+    const newest = Number(right.trips[0]?.id || 0) - Number(left.trips[0]?.id || 0);
+    if (newest) return newest;
     const leftReg = left.lorry?.registrationNo || '';
     const rightReg = right.lorry?.registrationNo || '';
     return leftReg.localeCompare(rightReg);
   });
 }
 
-// Trip 1, Trip 2… counted per lorry per day, oldest trip ID first. The number is
+// Trip 1, Trip 2… counted across all lorries per day, oldest trip ID first. The number is
 // display-only; every action and the loading sheet address the trip by its ID.
 export function getTripNumbers(trips = []) {
   const groups = new Map();
   for (const trip of trips) {
-    const key = `${lorryIdOf(trip) ?? trip.registrationNo ?? `trip:${trip.id}`}|${trip.tripDate ?? ''}`;
+    const key = trip.tripDate ?? trip.trip_date ?? '';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(trip);
   }

@@ -207,15 +207,15 @@ h3 {
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--ground);
 }
 
 .summary-cell {
   min-width: 0;
-  padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--ground);
+  padding: 8px 10px;
 }
 
 .summary-cell dt {
@@ -394,152 +394,44 @@ td {
   }
 }
 
-@media print {
-  .eyebrow,
-  .trip-status,
-  .customer-code,
-  .audit-time {
-    font-size: 0.68rem;
-  }
-  .summary-cell dt {
-    font-size: 0.64rem;
-  }
-  .summary-cell dd {
-    font-size: 0.8rem;
-  }
-  .route-notes {
-    font-size: 0.78rem;
-  }
-  table {
-    font-size: 0.76rem;
-  }
-  th {
-    font-size: 0.65rem;
-  }
-  .check-field {
-    font-size: 0.72rem;
-  }
-  .signoff-cell {
-    font-size: 0.74rem;
-  }
-  .company-badge {
-    font-size: 0.63rem;
-  }
-  h1 {
-    font-size: clamp(1.2rem, 3vw, 1.7rem);
-  }
-  h2 {
-    font-size: 1.05rem;
-  }
-}
-
+/* Compact paper layout preserves physical load before the invoice checklist. */
 @media print {
   @page {
     size: A4 portrait;
-    margin: 12mm;
+    margin: 10mm;
   }
 
-  :root {
-    color-scheme: light;
-  }
-
-  html,
-  body {
-    background: white;
-    color: #111827;
-  }
-
-  body {
-    padding: 0;
-  }
-
-  .loading-app {
-    width: auto;
-    padding: 0;
-  }
-
-  .no-print,
-  .loading-state,
-  .sheet-controls,
-  .loading-back {
-    display: none !important;
-  }
-
-  .loading-header {
-    display: block;
-    padding-bottom: 7mm;
-    border-bottom: 1px solid #9ca3af;
-  }
-
-  .eyebrow,
-  .route-notes,
-  .summary-cell dt,
-  .customer-code,
-  .audit-time,
-  .check-field,
-  .signoff-cell {
-    color: #4b5563;
-  }
-
-  h1,
-  h2,
-  h3,
-  .summary-cell dd,
-  .customer-name,
-  td {
-    color: #111827;
-  }
-
-  .sheet-content {
-    gap: 6mm;
-  }
-
-  .sheet-panel {
-    padding: 0;
-    border: 0;
-    box-shadow: none;
-    background: white;
-  }
-
-  .trip-status,
-  .company-badge {
-    border: 1px solid #6b7280;
-    background: white;
-    color: #111827;
-  }
-
-  .summary-grid {
-    gap: 3mm;
-  }
-
-  .summary-cell {
-    padding: 3mm;
-    border: 1px solid #d1d5db;
-    background: white;
-  }
-
-  .items-table-wrap,
-  .checklist-table-wrap {
-    overflow: visible;
-  }
-
-  thead {
-    display: table-header-group;
-  }
-
-  tr {
-    break-inside: avoid;
-  }
-
-  th,
-  td {
-    padding: 2.5mm 2mm;
-    border-color: #d1d5db;
-  }
-
-  .signoff-grid {
-    gap: 8mm;
-    padding-top: 5mm;
-    border-color: #9ca3af;
-  }
+  :root { color-scheme: light; }
+  html, body { background: white; color: #111827; }
+  body { padding: 0; font-size: 11px; line-height: 1.15; }
+  .loading-app { width: auto; padding: 0; }
+  .no-print, .loading-state, .sheet-controls, .loading-back { display: none !important; }
+  .loading-header { display: block; padding-bottom: 2mm; border-bottom: 1px solid #9ca3af; }
+  .eyebrow, .route-notes, .summary-cell dt, .customer-code, .audit-time, .check-field, .signoff-cell { color: #4b5563; }
+  h1, h2, h3, .summary-cell dd, .customer-name, td { color: #111827; }
+  h1 { font-size: 16px; }
+  h2 { font-size: 13px; }
+  .sheet-content { display: flex; flex-direction: column; gap: 3mm; }
+  .sheet-panel { padding: 0; border: 0; box-shadow: none; background: white; }
+  .trip-panel { order: 0; break-inside: avoid; }
+  .sheet-panel[aria-labelledby="itemsTitle"] { order: 1; }
+  .sheet-panel[aria-labelledby="checklistTitle"] { order: 2; }
+  .sheet-panel-heading { margin-bottom: 1.5mm; break-after: avoid; }
+  .trip-status, .company-badge { border: 1px solid #6b7280; background: white; color: #111827; }
+  .summary-grid { gap: 0; margin: 1.5mm 0; border-color: #d1d5db; border-radius: 0; }
+  .summary-cell { padding: 1mm 1.5mm; border: 0; background: transparent; }
+  .summary-cell dd { font-size: 11px; white-space: normal; overflow: visible; }
+  .route-notes { margin-top: 2mm; font-size: 11px; }
+  .items-table-wrap, .checklist-table-wrap { overflow: visible; }
+  table, th, .company-badge, .customer-code, .audit-time, .summary-cell dt, .eyebrow { font-size: 11px; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th, td { padding: 0.8mm 1.5mm; border-color: #d1d5db; }
+  .company-badge { min-height: 0; padding: 0.5mm 1mm; }
+  .checklist-table td:first-child { width: auto; }
+  .checklist-table .customer-cell, .items-table td:nth-child(2) { min-width: 0; }
+  .check-field { min-width: 0; gap: 1mm; font-size: 11px; }
+  .blank-line { min-width: 12mm; }
+  .signoff-grid { margin-top: 3mm; padding-top: 2mm; gap: 4mm; border-color: #9ca3af; break-inside: avoid; }
+  .signoff-cell { font-size: 11px; }
 }

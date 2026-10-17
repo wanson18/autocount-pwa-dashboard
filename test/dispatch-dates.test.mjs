@@ -136,7 +136,7 @@ test('a failed invoice re-added to another trip shows only on the new trip, with
     dateRange: { startDate: '2026-10-14', endDate: '2026-10-14' },
   });
   const key = 'enterprise:E1';
-  assert.deepEqual(state.trips.map((trip) => [trip.id, trip.invoiceKeys.includes(key)]), [[1, false], [2, true]]);
+  assert.deepEqual(state.trips.map((trip) => [trip.id, trip.invoiceKeys.includes(key)]), [[2, true], [1, false]]);
   const invoice = state.invoices.find((row) => row.key === key);
   assert.equal(invoice.assignmentId, 20);
   assert.equal(invoice.assignmentStatus, 'assigned');

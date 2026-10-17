@@ -1193,3 +1193,18 @@ test('board date picker reloads the chosen day and creates trips on that day', a
   await app.setBoardDate(dispatchState.shiftDate(today, -30));
   assert.equal(app.getBoardDate(), minDate, 'dates outside the window clamp to the edge');
 });
+
+test('new trips appear first across lanes and within each lorry without renumbering', () => {
+  const state = createDispatchState({ trips: [
+    { id: 11, vehicleId: 1, tripDate: '2026-10-17' },
+    { id: 13, vehicleId: 2, tripDate: '2026-10-17' },
+    { id: 12, vehicleId: 1, tripDate: '2026-10-17' },
+  ] });
+  assert.deepEqual(state.trips.map((trip) => trip.id), [13, 12, 11]);
+  const lanes = dispatchState.getLorryLanes(state);
+  assert.deepEqual(lanes.map((lane) => lane.trips.map((trip) => trip.id)), [[13], [12, 11]]);
+  const numbers = dispatchState.getTripNumbers(state.trips);
+  assert.equal(numbers.get('11'), 1);
+  assert.equal(numbers.get('12'), 2);
+  assert.equal(numbers.get('13'), 3);
+});

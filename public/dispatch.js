@@ -257,7 +257,7 @@ export function renderLorryLane(state, lane, { resources = { drivers: [], lorrie
     ? '<span class="lorry-driver-note">Choose a driver on each trip below.</span>'
     : '';
   const effectiveDriverControl = hasTrip && !hasSingleTrip ? multiTripDriverNote : driverSelect;
-  const tripNumbers = getTripNumbers(lane.trips);
+  const tripNumbers = getTripNumbers(state.trips);
   const tripsArea = hasTrip
     ? lane.trips.map((trip) => renderTripCard(state, trip, { writesEnabled, drivers: hasSingleTrip ? null : resources.drivers || [], tripNumber: tripNumbers.get(String(trip.id)) })).join('')
     : `<div class="empty-lane" data-drop-lorry-id="${escapeHtml(String(lorry.id))}" aria-label="Drop an invoice here to start a trip for lorry ${escapeHtml(reg)}"><p class="section-help">No trip planned for this lorry yet.</p><button class="secondary-button" type="button" data-start-trip="${escapeHtml(String(lorry.id))}" ${writesEnabled ? '' : 'disabled'} aria-label="Start a trip for lorry ${escapeHtml(reg)}">Start trip for this lorry</button></div>`;
@@ -552,7 +552,7 @@ function renderResource(resource, type) {
   const detail = type === 'driver' ? (resource.phone || 'No phone recorded') : (resource.description || 'No description recorded');
   const nextActive = !resource.active;
   const actionLabel = `${nextActive ? 'Reactivate' : 'Deactivate'} ${type} ${title}`;
-  return `<article class="resource-card${resource.active ? '' : ' is-inactive'}"><div><strong>${escapeHtml(title)}</strong><span class="resource-identity">${escapeHtml(identity)}</span><span class="resource-detail">${escapeHtml(detail)}</span></div><div class="resource-card-actions"><span class="status-badge">${resourceStatusLabel(resource)}</span><button class="secondary-button resource-toggle-button" type="button" data-resource-type="${type}" data-resource-id="${escapeHtml(resource.id)}" data-resource-active="${String(nextActive)}" aria-label="${escapeHtml(actionLabel)}">${nextActive ? 'Reactivate' : 'Deactivate'}</button></div></article>`;
+  return `<article class="resource-card${resource.active ? '' : ' is-inactive'}"><div><strong>${escapeHtml(title)}</strong><span class="resource-identity">${escapeHtml(identity)}</span><span class="resource-detail">${escapeHtml(detail)}</span></div><div class="resource-card-actions"><span class="status-badge">${resourceStatusLabel(resource)}</span><button class="secondary-button" type="button" data-resource-edit="${type}" data-resource-id="${escapeHtml(resource.id)}" aria-label="Edit ${type} ${escapeHtml(title)}">Edit</button><button class="secondary-button resource-toggle-button" type="button" data-resource-type="${type}" data-resource-id="${escapeHtml(resource.id)}" data-resource-active="${String(nextActive)}" aria-label="${escapeHtml(actionLabel)}">${nextActive ? 'Reactivate' : 'Deactivate'}</button></div></article>`;
 }
 
 export function renderResources(root, resources) {
@@ -694,6 +694,7 @@ export function createDispatchApp({
   const loginForm = $(root, '#dispatchLoginForm'); const loginMessage = $(root, '#loginMessage');
   const loginSubmit = $(root, '#loginSubmit'); const clerkIdInput = $(root, '#clerkId'); const clerkPinInput = $(root, '#clerkPin');
   const resourceForm = $(root, '#resourceForm'); const resourceType = $(root, '#resourceType'); const resourceStatus = $(root, '#resourceStatus');
+  let editingResource = null;
   const resourceSubmit = $(root, '#resourceSubmit'); const showInactiveResources = $(root, '#showInactiveResources');
   const tripDialogBackdrop = $(root, '#tripDialogBackdrop'); const tripForm = $(root, '#tripForm');
   const reportForm = $(root, '#reportForm'); const exportReportButton = $(root, '#exportReportButton');
@@ -705,10 +706,10 @@ export function createDispatchApp({
   function setLoginMessage(message) { if (loginMessage) loginMessage.textContent = message; }
   function setResourceMessage(message) { if (resourceStatus) resourceStatus.textContent = message; }
   function render() { renderDispatchBoard(root, state, { writesEnabled: writesEnabled(), resources }); renderDateBar(); renderTripOverview(root, state); renderReportView(root, reportState); updateWriteControls(); updateOfflineStatus(); }
-  function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; const older = $(root, '#addOlderInvoiceButton'); if (older) older.disabled = !writesEnabled(); root.querySelectorAll?.('[data-resource-active]')?.forEach((button) => { button.disabled = !enabled; }); }
+  function updateWriteControls() { const enabled = resourceWritesEnabled(); if (resourceSubmit) resourceSubmit.disabled = !enabled; const cancelResource = $(root, '#resourceCancel'); if (cancelResource) cancelResource.disabled = !enabled; const older = $(root, '#addOlderInvoiceButton'); if (older) older.disabled = !writesEnabled(); root.querySelectorAll?.('[data-resource-active], [data-resource-edit]')?.forEach((button) => { button.disabled = !enabled; }); }
   function updateOfflineStatus() { const element = $(root, '#offlineStatus'); if (element) { element.hidden = online(); } }
   function setState(nextState) { state = nextState; render(); }
-  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; selectedDate = getDefaultDateRange().startDate; state = createDispatchState({ dateRange: { startDate: selectedDate, endDate: selectedDate }, boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); syncBoardDateControls(root, selectedDate); renderDateBar(); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resourceForm?.reset?.(); updateResourceTypeFields(); }
+  function clearSensitiveState() { boardRequestSequence += 1; resourceRequestSequence += 1; reportRequestSequence += 1; boardAuthoritative = false; selectedDate = getDefaultDateRange().startDate; state = createDispatchState({ dateRange: { startDate: selectedDate, endDate: selectedDate }, boardStatus: 'empty' }); reportState = { status: 'idle', records: [] }; resources = { drivers: [], lorries: [] }; stagedInvoiceKey = null; setAuthenticated(false); syncBoardDateControls(root, selectedDate); renderDateBar(); render(); for (const id of ['driverList', 'lorryList']) { const list = $(root, `#${id}`); if (list) list.innerHTML = ''; } resetResourceForm(); }
   function handleSessionLoss() { clearSensitiveState(); setLoginMessage('Your session has expired. Sign in again.'); setResourceMessage('Your session has expired. Sign in again.'); }
 
   async function runMutation(operation, canWrite = writesEnabled) {
@@ -778,7 +779,21 @@ export function createDispatchApp({
       catch (error) { if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be updated. Try again.'); throw error; }
     }, resourceWritesEnabled);
   }
-  function updateResourceTypeFields() { const driverFields = $(root, '#driverResourceFields'); const lorryFields = $(root, '#lorryResourceFields'); const isDriver = resourceType?.value === 'driver'; if (driverFields) driverFields.hidden = !isDriver; if (lorryFields) lorryFields.hidden = isDriver; if (resourceSubmit) resourceSubmit.textContent = isDriver ? 'Add driver' : 'Add lorry'; }
+  function updateResourceTypeFields() { const driverFields = $(root, '#driverResourceFields'); const lorryFields = $(root, '#lorryResourceFields'); const isDriver = resourceType?.value === 'driver'; if (driverFields) driverFields.hidden = !isDriver; if (lorryFields) lorryFields.hidden = isDriver; if (resourceSubmit) resourceSubmit.textContent = editingResource ? 'Save changes' : isDriver ? 'Add driver' : 'Add lorry'; if (resourceType) resourceType.disabled = Boolean(editingResource); const cancel = $(root, '#resourceCancel'); if (cancel) cancel.hidden = !editingResource; const heading = $(root, '#resourceFormTitle'); if (heading) heading.textContent = editingResource ? `Edit ${editingResource.type}` : 'New driver or lorry'; }
+  function resetResourceForm() { editingResource = null; resourceForm?.reset?.(); updateResourceTypeFields(); }
+  function editResource(type, id) {
+    if (!resourceWritesEnabled()) return;
+    const resource = resources[type === 'driver' ? 'drivers' : 'lorries'].find((row) => String(row.id) === String(id));
+    if (!resource) { setResourceMessage('This resource is no longer in the current list. Reopen Resources to refresh it, then try again.'); return; }
+    editingResource = { type, id: resource.id };
+    resourceType.value = type;
+    for (const [field, key] of [['resourceName', 'name'], ['resourceLicenseNo', 'licenseNo'], ['resourcePhone', 'phone'], ['resourceRegistrationNo', 'registrationNo'], ['resourceDescription', 'description']]) {
+      const input = $(root, `#${field}`); if (input) input.value = resource[key] || '';
+    }
+    updateResourceTypeFields();
+    $(root, type === 'driver' ? '#resourceName' : '#resourceRegistrationNo')?.focus?.();
+    setResourceMessage(`Editing ${type}. Save changes or cancel.`);
+  }
   async function submitResource() {
     if (!resourceType || !resourceWritesEnabled()) return;
     const type = resourceType.value; const body = type === 'driver' ? { type, name: $(root, '#resourceName')?.value?.trim() || '', licenseNo: $(root, '#resourceLicenseNo')?.value?.trim() || '', phone: $(root, '#resourcePhone')?.value?.trim() || null } : { type, registrationNo: $(root, '#resourceRegistrationNo')?.value?.trim() || '', description: $(root, '#resourceDescription')?.value?.trim() || null };
@@ -786,8 +801,8 @@ export function createDispatchApp({
     if (validationMessage) { setResourceMessage(validationMessage); return false; }
     return runMutation(async () => {
       setResourceMessage('Saving resource…');
-      try { await resourcesTransport.createResource(body); resourceForm?.reset?.(); updateResourceTypeFields(); setResourceMessage('Resource added.'); await loadResources(); return true; }
-      catch (error) { if (error.code === 'resource_conflict') setResourceMessage('A resource with that identity already exists.'); else if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be added. Try again.'); throw error; }
+      try { if (editingResource) await resourcesTransport.updateResource({ ...body, id: Number(editingResource.id) }); else await resourcesTransport.createResource(body); resetResourceForm(); await loadResources(); setResourceMessage('Resource saved.'); return true; }
+      catch (error) { if (error.code === 'resource_conflict') setResourceMessage('A resource with that identity already exists.'); else if (error.code === 'unauthorized') handleSessionLoss(); else setResourceMessage('Resource could not be saved. Try again.'); throw error; }
     }, resourceWritesEnabled);
   }
 
@@ -1112,6 +1127,7 @@ export function createDispatchApp({
   tripForm?.addEventListener('submit', (event) => { event.preventDefault(); createTrip().catch(() => {}); });
   reportForm?.addEventListener('submit', (event) => { event.preventDefault(); loadReports().catch(() => {}); });
   exportReportButton?.addEventListener('click', () => exportReport().catch((error) => { if (error.code === 'unauthorized') handleSessionLoss(); else { const status = $(root, '#reportState'); if (status) status.textContent = 'The report could not be exported. Try again.'; } }));
+  $(root, '#resourceCancel')?.addEventListener('click', () => { resetResourceForm(); setResourceMessage('Editing cancelled.'); });
   resourceType?.addEventListener('change', updateResourceTypeFields); showInactiveResources?.addEventListener('change', () => loadResources().catch(() => {}));
 
   root.addEventListener('change', (event) => {
@@ -1122,6 +1138,7 @@ export function createDispatchApp({
   });
 
   root.addEventListener('click', (event) => {
+    const editButton = event.target.closest?.('[data-resource-edit]'); if (editButton) { editResource(editButton.dataset.resourceEdit, editButton.dataset.resourceId); return; }
     const removeTripButton = event.target.closest?.('[data-remove-trip]'); if (removeTripButton) { removeTrip(removeTripButton.dataset.removeTrip).catch(() => {}); return; }
     const remove = event.target.closest?.('[data-remove-assignment]'); if (remove) { removeAssignedInvoice(remove.dataset.removeAssignment).catch(() => {}); return; }
     const assign = event.target.closest?.('[data-assign-invoice]'); if (assign) { const picked = assign.closest('.invoice-card')?.querySelector('[data-assign-trip-select]')?.value; const tripId = picked || state.selectedTripId || state.trips[0]?.id; if (tripId !== undefined) assignInvoice(assign.dataset.assignInvoice, tripId, assign).catch(() => {}); return; }

@@ -123,7 +123,11 @@ async function installFixtureApi(page, {
     if (pathname === '/api/dispatch/resources' && request.method() === 'PATCH') {
       state.resourceWrites += 1;
       if (state.resourceUpdateGate) await state.resourceUpdateGate.promise;
-      return json(route, { success: true, resource: state.drivers[0] });
+      const body = request.postDataJSON();
+      const rows = body.type === 'driver' ? state.drivers : state.lorries;
+      const resource = rows.find((row) => row.id === body.id);
+      Object.assign(resource, body);
+      return json(route, { success: true, resource });
     }
     if (pathname === '/api/dispatch/invoices' && request.method() === 'GET') {
       state.counts.invoiceReads += 1;
@@ -682,6 +686,30 @@ test('older invoice picker numbers trips the same way as the board', async ({ pa
   await page.locator('#refreshBoard').click();
   await page.locator('#addOlderInvoiceButton').click();
   const labels = await page.locator('#olderInvoiceTrip option').allTextContents();
-  expect(labels.map((label) => label.split(' · ')[0])).toEqual(['Trip 2', 'Trip 3']);
-  await expect(page.locator('#olderInvoiceTrip')).toHaveValue('101');
+  expect(labels.map((label) => label.split(' · ')[0])).toEqual(['Trip 3', 'Trip 2']);
+  await expect(page.locator('#olderInvoiceTrip')).toHaveValue('102');
+});
+
+
+test('Resources edits driver and lorry details and cancels without saving', async ({ page }) => {
+  const state = await openBoard(page);
+  await page.locator('#resourcesTab').click();
+  await page.getByRole('button', { name: 'Edit driver Aiman Driver', exact: true }).click();
+  await expect(page.locator('#resourceLicenseNo')).toHaveValue('D-1001');
+  await page.locator('#resourceLicenseNo').fill('D-2002');
+  await page.locator('#resourceName').fill('Updated Driver');
+  await page.locator('#resourcePhone').fill('0123456789');
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(page.locator('#driverList')).toContainText('D-2002');
+  expect(state.drivers[0].name).toBe('Updated Driver');
+  await page.getByRole('button', { name: 'Edit lorry WXY 1001', exact: true }).click();
+  await page.locator('#resourceRegistrationNo').fill('WXY 2002');
+  await page.locator('#resourceDescription').fill('Updated lorry');
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await expect(page.locator('#lorryList')).toContainText('WXY 2002');
+  await page.getByRole('button', { name: 'Edit lorry WXY 2002', exact: true }).click();
+  await page.locator('#resourceRegistrationNo').fill('UNSAVED');
+  await page.getByRole('button', { name: 'Cancel editing' }).click();
+  expect(state.resourceWrites).toBe(2);
+  await expect(page.locator('#lorryList')).toContainText('WXY 2002');
 });
