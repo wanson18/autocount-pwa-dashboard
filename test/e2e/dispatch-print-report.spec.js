@@ -141,3 +141,27 @@ test('loading print stylesheet is A4 portrait, hides controls, and repeats item 
   await expect(page.locator('#printButton')).toBeHidden();
   await expect(page.locator('.items-table thead')).toBeVisible();
 });
+
+test('compact A4 loading sheet fits ordinary loads and paginates long physical loads', async ({ page }) => {
+  await installApi(page);
+  const printSheet = {
+    ...sheet,
+    items: Array.from({ length: 10 }, (_, i) => ({ ...sheet.items[0], itemCode: `ITEM-${i}` })),
+    invoices: Array.from({ length: 8 }, (_, i) => ({ ...sheet.invoices[i % 2], docNo: `INV-${i}` })),
+    counts: { total: 8, enterprise: 4, sdn_bhd: 4 },
+  };
+  await page.route('**/api/dispatch/loading-sheet?*', (route) => json(route, { success: true, sheet: printSheet }));
+  await page.goto('/loading-sheet.html?trip_id=77');
+  await expect(page.locator('#printButton')).toBeEnabled();
+  await page.emulateMedia({ media: 'print' });
+  const pages = async () => {
+    const pdf = await page.pdf({ preferCSSPageSize: true });
+    return (pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) || []).length;
+  };
+  expect(await pages()).toBe(1);
+  expect(await page.locator('[aria-labelledby="checklistTitle"]').evaluate((el) => el.getBoundingClientRect().top)).toBeLessThan(await page.locator('[aria-labelledby="itemsTitle"]').evaluate((el) => el.getBoundingClientRect().top));
+  printSheet.items = Array.from({ length: 80 }, (_, i) => ({ ...sheet.items[0], itemCode: `ITEM-${i}` }));
+  await page.reload();
+  await expect(page.locator('.items-table tbody tr')).toHaveCount(80);
+  expect(await pages()).toBeGreaterThan(1);
+});

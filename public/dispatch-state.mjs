@@ -257,7 +257,8 @@ export function createDispatchState({
     if (key) assignedByKey.set(key, assignment);
   });
   const normalizedTrips = trips.filter((trip) => trip.status !== 'cancelled').map((trip) => normalizeTrip(trip, activeAssignments, resources, isShown))
-    .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }));
+    .map((trip) => ({ ...trip, invoiceKeys: trip.invoiceKeys.filter((key) => !removedAssignmentKeys.has(key)) }))
+    .sort((left, right) => Number(right.id) - Number(left.id));
   const normalizedInvoices = invoices.map((invoice) => normalizeInvoice(invoice, normalizedTrips, assignedByKey));
   const invoiceKeys = new Set(normalizedInvoices.map((invoice) => invoice.key));
   for (const assignment of assignedByKey.values()) {
@@ -422,6 +423,8 @@ export function getLorryLanes(state, resources = {}) {
     if (lane) lane.trips.push(trip);
   }
   return [...lanes.values()].sort((left, right) => {
+    const newest = Number(right.trips[0]?.id || 0) - Number(left.trips[0]?.id || 0);
+    if (newest) return newest;
     const leftReg = left.lorry?.registrationNo || '';
     const rightReg = right.lorry?.registrationNo || '';
     return leftReg.localeCompare(rightReg);

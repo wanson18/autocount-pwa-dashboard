@@ -233,7 +233,7 @@ test('several trips for one lorry share one lane and Select trip / Print Items a
   const state = createDispatchState({ trips: [{ ...tripWithLorry, invoiceKeys: [] }, second] });
   const lanes = getLorryLanes(state, { drivers, lorries });
   assert.equal(lanes.filter((lane) => lane.lorry.id === 2).length, 1);
-  assert.deepEqual(lanes.find((lane) => lane.lorry.id === 2).trips.map((trip) => trip.id), [101, 102]);
+  assert.deepEqual(lanes.find((lane) => lane.lorry.id === 2).trips.map((trip) => trip.id), [102, 101]);
 
   const markup = renderLorryLane(state, lanes.find((lane) => lane.lorry.id === 2), { resources: { drivers, lorries }, writesEnabled: true });
   for (const id of [101, 102]) {
