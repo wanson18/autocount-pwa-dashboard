@@ -1206,4 +1206,5 @@ test('new trips appear first across lanes and within each lorry without renumber
   const numbers = dispatchState.getTripNumbers(state.trips);
   assert.equal(numbers.get('11'), 1);
   assert.equal(numbers.get('12'), 2);
+  assert.equal(numbers.get('13'), 3);
 });

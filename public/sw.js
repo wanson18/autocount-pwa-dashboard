@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sales-dashboard-v31';
+const CACHE_NAME = 'sales-dashboard-v32';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

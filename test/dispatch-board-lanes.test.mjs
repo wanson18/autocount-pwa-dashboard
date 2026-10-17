@@ -214,7 +214,7 @@ test('trips transport updateTrip sends only the approved driver mutation fields'
   assert.equal(body.expected_revision, 2);
 });
 
-test('trip numbers count per lorry per day by trip ID, so a second trip never reuses Trip 1', () => {
+test('trip numbers count across all lorries per day by trip ID, so a second trip never reuses Trip 1', () => {
   const trips = [
     { ...tripWithLorry, id: 205, tripDate: '2026-08-29' },
     { ...tripWithLorry, id: 103, tripDate: '2026-08-28' },
@@ -225,7 +225,14 @@ test('trip numbers count per lorry per day by trip ID, so a second trip never re
   assert.equal(numbers.get('101'), 1);
   assert.equal(numbers.get('103'), 2);
   assert.equal(numbers.get('205'), 1, 'a new day restarts at Trip 1');
-  assert.equal(numbers.get('104'), 1, 'another lorry has its own numbering');
+  assert.equal(numbers.get('104'), 3, 'another lorry continues the same daily sequence');
+  const state = createDispatchState({ trips });
+  for (const lane of getLorryLanes(state, { lorries })) {
+    const markup = renderLorryLane(state, lane, { resources: { drivers, lorries } });
+    for (const trip of lane.trips) {
+      assert.ok(markup.includes(`Trip ${numbers.get(String(trip.id))} · Ref ${trip.id}`));
+    }
+  }
 });
 
 test('several trips for one lorry share one lane and Select trip / Print Items address each by trip ID', () => {

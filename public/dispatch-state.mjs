@@ -431,12 +431,12 @@ export function getLorryLanes(state, resources = {}) {
   });
 }
 
-// Trip 1, Trip 2… counted per lorry per day, oldest trip ID first. The number is
+// Trip 1, Trip 2… counted across all lorries per day, oldest trip ID first. The number is
 // display-only; every action and the loading sheet address the trip by its ID.
 export function getTripNumbers(trips = []) {
   const groups = new Map();
   for (const trip of trips) {
-    const key = `${lorryIdOf(trip) ?? trip.registrationNo ?? `trip:${trip.id}`}|${trip.tripDate ?? ''}`;
+    const key = trip.tripDate ?? trip.trip_date ?? '';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(trip);
   }
